@@ -48,7 +48,6 @@ export function AppShell({
     () => projects.find((p) => p.id === route.projectId) ?? null,
     [projects, route.projectId],
   );
-  const newTaskProject = project ?? projects[0] ?? null;
 
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [showNewTask, setShowNewTask] = useState(false);
@@ -107,8 +106,12 @@ export function AppShell({
         <WorkersStrip />
       </main>
 
-      {showNewTask && newTaskProject && (
-        <NewTaskModal project={newTaskProject} onClose={() => setShowNewTask(false)} />
+      {showNewTask && projects.length > 0 && (
+        <NewTaskModal
+          projects={projects}
+          defaultProjectId={project?.id ?? projects[0]?.id ?? null}
+          onClose={() => setShowNewTask(false)}
+        />
       )}
       {showImport && <ImportModal onClose={() => setShowImport(false)} />}
     </div>

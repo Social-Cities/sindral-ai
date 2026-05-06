@@ -17,15 +17,20 @@ export interface NewTaskPayload {
 }
 
 export function NewTaskModal({
-  project,
+  projects,
+  defaultProjectId,
   onClose,
 }: {
-  project: Project;
+  projects: Project[];
+  defaultProjectId: string | null;
   onClose: () => void;
 }) {
   const router = useRouter();
   const teammates = useTeammates();
   const planners = teammates.filter((a) => a.role === "planner");
+  const [projectId, setProjectId] = useState<string>(
+    defaultProjectId ?? projects[0]?.id ?? "",
+  );
   const [type, setType] = useState<TaskType>("feature");
   const [title, setTitle] = useState("");
   const [desc, setDesc] = useState("");
@@ -34,12 +39,14 @@ export function NewTaskModal({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
+  const project = projects.find((p) => p.id === projectId) ?? null;
+
   const submit = () => {
-    if (!title.trim()) return;
+    if (!title.trim() || !projectId) return;
     setError(null);
     startTransition(async () => {
       const result = await createTaskAction({
-        projectId: project.id,
+        projectId,
         type,
         title,
         desc,
@@ -60,13 +67,12 @@ export function NewTaskModal({
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <span>New task</span>
-          <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
-            <span style={{ fontSize: 13 }}>{project.emoji}</span>
-            <span>{project.name}</span>
-            <span className="faint">·</span>
-            <I.github />
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5 }}>{project.repo}</span>
-          </span>
+          {project && (
+            <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
+              <I.github />
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5 }}>{project.repo}</span>
+            </span>
+          )}
         </div>
         <div className="modal-body">
           <div className="field">
@@ -87,6 +93,27 @@ export function NewTaskModal({
               rows={4}
               style={{ resize: "vertical", fontFamily: "inherit" }}
             />
+          </div>
+
+          <div className="field">
+            <span className="field-label">Project</span>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {projects.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => setProjectId(p.id)}
+                  className="btn sm"
+                  style={
+                    projectId === p.id
+                      ? { borderColor: "var(--accent)", background: "var(--accent-soft)", color: "var(--accent)" }
+                      : {}
+                  }
+                >
+                  <span style={{ fontSize: 13 }}>{p.emoji}</span>
+                  {p.name}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
@@ -156,7 +183,7 @@ export function NewTaskModal({
           <button className="btn ghost" onClick={onClose} disabled={pending}>
             Cancel<span className="kbd">Esc</span>
           </button>
-          <button className="btn primary" onClick={submit} disabled={!title.trim() || pending}>
+          <button className="btn primary" onClick={submit} disabled={!title.trim() || !projectId || pending}>
             {pending ? "Creating…" : autoplan ? "Create & plan" : "Create"}
             <span className="kbd">⌘↵</span>
           </button>
