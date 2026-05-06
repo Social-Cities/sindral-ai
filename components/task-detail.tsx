@@ -1,21 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { Avatar, Markdown, StatusPill, TypePill, renderInline } from "./atoms";
 import { I } from "./icons";
-import {
-  HUMANS,
-  PLAN_AGT142,
-  PLAN_MESSAGES_AGT142,
-  PR_AGT138_FILES,
-  PR_AGT138_MESSAGES,
-  STREAMING_PARTIAL,
-  TASKS,
-  TEAMMATES,
-  type DiffFile,
-  type PlanMessage,
-  type Task,
-} from "@/lib/data";
+import { useTeammate, useTeammates, usePerson } from "./providers/people-context";
+import type { DiffFile, PlanMessage, Task, TaskPlan } from "@/lib/data";
 
 type Mode = "plan" | "pr" | "thread";
 
@@ -23,12 +13,12 @@ function TaskHeader({
   task,
   mode,
   setMode,
-  onBack,
+  backHref,
 }: {
   task: Task;
   mode: Mode;
   setMode: (m: Mode) => void;
-  onBack: () => void;
+  backHref: string;
 }) {
   const tabs: { id: Mode; label: string; show: boolean }[] = [
     { id: "plan", label: "Plan", show: true },
@@ -38,7 +28,7 @@ function TaskHeader({
   return (
     <div style={{ borderBottom: "1px solid var(--line)", padding: "14px 22px 0", flexShrink: 0 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-        <button className="btn ghost sm" onClick={onBack}>← Back</button>
+        <Link className="btn ghost sm" href={backHref}>← Back</Link>
         <span className="task-id" style={{ fontSize: 12 }}>{task.id}</span>
         <TypePill type={task.type} />
         <StatusPill state={task.state} />
@@ -86,6 +76,7 @@ function TaskHeader({
 }
 
 function Msg({ m }: { m: PlanMessage }) {
+  const person = usePerson(m.from);
   if (m.kind === "event") {
     return (
       <div className="msg-event">
@@ -105,16 +96,17 @@ function Msg({ m }: { m: PlanMessage }) {
       </div>
     );
   }
-  const agent = TEAMMATES.find((a) => a.id === m.from);
-  const human = HUMANS.find((h) => h.id === m.from);
-  const name = agent?.name || human?.name;
+  const isAgent = person && "role" in person;
+  const name = person?.name;
   return (
     <div className="msg">
       <Avatar who={m.from} />
       <div className="msg-body">
         <div className="msg-head">
           <span className="msg-name">{name}</span>
-          {agent && <span className="muted" style={{ fontSize: 11, fontFamily: "var(--font-mono)" }}>· {agent.model}</span>}
+          {isAgent && (
+            <span className="muted" style={{ fontSize: 11, fontFamily: "var(--font-mono)" }}>· {person.model}</span>
+          )}
           <span className="msg-time">{m.t}</span>
         </div>
         <div className="msg-text">
@@ -150,7 +142,7 @@ function ChatPanel({
     setText("");
   };
 
-  const teammate = TEAMMATES.find((a) => a.id === agent);
+  const teammate = useTeammate(agent);
 
   return (
     <div className="side">
@@ -200,11 +192,24 @@ function ChatPanel({
   );
 }
 
-function PlanView({ task, sidebarLayout }: { task: Task; sidebarLayout: "default" | "compact" }) {
+function PlanView({
+  task,
+  plan,
+  messages,
+  sidebarLayout,
+}: {
+  task: Task;
+  plan: TaskPlan | null;
+  messages: PlanMessage[];
+  sidebarLayout: "default" | "compact";
+}) {
   const isStreaming = task.state === "planning";
-  const fullText = PLAN_AGT142;
-  const [streamPos, setStreamPos] = useState(isStreaming ? STREAMING_PARTIAL.length : fullText.length);
+  const fullText = plan?.markdown ?? "";
+  const partialLen = plan?.streamingPartial?.length ?? 0;
+  const [streamPos, setStreamPos] = useState(isStreaming ? partialLen : fullText.length);
   const [paused, setPaused] = useState(false);
+  const planAgentId = task.agent;
+  const planAgent = useTeammate(planAgentId);
 
   useEffect(() => {
     if (!isStreaming || paused) return;
@@ -218,6 +223,25 @@ function PlanView({ task, sidebarLayout }: { task: Task; sidebarLayout: "default
   const visibleText = isStreaming ? fullText.slice(0, streamPos) : fullText;
   const done = streamPos >= fullText.length;
 
+  if (!fullText) {
+    return (
+      <div className={`plan-layout ${sidebarLayout === "compact" ? "compact-side" : ""}`}>
+        <div className="plan-doc">
+          <div className="plan-doc-inner" style={{ color: "var(--text-muted)" }}>
+            No plan yet for this task.
+          </div>
+        </div>
+        {planAgentId && (
+          <ChatPanel
+            messages={messages}
+            agent={planAgentId}
+            placeholder="Ask the planner to draft a plan…"
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className={`plan-layout ${sidebarLayout === "compact" ? "compact-side" : ""}`} data-screen-label="Task — Plan">
       <div className="plan-doc">
@@ -227,14 +251,14 @@ function PlanView({ task, sidebarLayout }: { task: Task; sidebarLayout: "default
               {isStreaming && !done ? (
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--accent)" }}>
                   <span style={{ width: 6, height: 6, borderRadius: 50, background: "var(--accent)", animation: "pulse 1s infinite" }} />
-                  Iris is drafting the plan
+                  {planAgent?.name ?? "Planner"} is drafting the plan
                 </span>
-              ) : (
+              ) : planAgentId ? (
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <Avatar who="a1" size="sm" />
-                  <span>Drafted by Iris</span>
+                  <Avatar who={planAgentId} size="sm" />
+                  <span>Drafted by {planAgent?.name}</span>
                 </span>
-              )}
+              ) : null}
               <span className="faint">·</span>
               <span className="muted">{Math.round(visibleText.length / 5)} words</span>
               <span className="faint">·</span>
@@ -256,7 +280,7 @@ function PlanView({ task, sidebarLayout }: { task: Task; sidebarLayout: "default
 
           {isStreaming && !done && streamPos > 200 && streamPos < fullText.length - 200 && (
             <div className="thinking">
-              <div className="thinking-head">Iris is thinking</div>
+              <div className="thinking-head">{planAgent?.name ?? "Planner"} is thinking</div>
               <div>
                 The rate-limit middleware releases tokens on response start, but for streams the token shouldn&apos;t release until the connection actually closes. Need to flag this in the plan…
               </div>
@@ -282,16 +306,18 @@ function PlanView({ task, sidebarLayout }: { task: Task; sidebarLayout: "default
                 <div className="muted" style={{ fontSize: 12.5 }}>Refine in the chat, or assign a worker to start implementing.</div>
               </div>
               <button className="btn sm">Refine</button>
-              <button className="btn primary sm">Assign Atlas<I.arrowR /></button>
+              <button className="btn primary sm">Assign worker<I.arrowR /></button>
             </div>
           )}
         </div>
       </div>
-      <ChatPanel
-        messages={PLAN_MESSAGES_AGT142}
-        agent="a1"
-        placeholder={isStreaming ? "Steer the planning…" : "Ask Iris to refine the plan…"}
-      />
+      {planAgentId && (
+        <ChatPanel
+          messages={messages}
+          agent={planAgentId}
+          placeholder={isStreaming ? "Steer the planning…" : "Ask the planner to refine the plan…"}
+        />
+      )}
     </div>
   );
 }
@@ -339,10 +365,21 @@ function DiffFileView({ file }: { file: DiffFile }) {
   );
 }
 
-function PRView({ task, sidebarLayout }: { task: Task; sidebarLayout: "default" | "compact" }) {
-  const files = PR_AGT138_FILES;
+function PRView({
+  task,
+  files,
+  messages,
+  sidebarLayout,
+}: {
+  task: Task;
+  files: DiffFile[];
+  messages: PlanMessage[];
+  sidebarLayout: "default" | "compact";
+}) {
   const totalAdd = files.reduce((s, f) => s + f.add, 0);
   const totalDel = files.reduce((s, f) => s + f.del, 0);
+  const teammates = useTeammates();
+  const agentName = task.agent ? teammates.find((a) => a.id === task.agent)?.name : null;
 
   return (
     <div className={`pr-layout ${sidebarLayout === "compact" ? "compact-side" : ""}`} data-screen-label="Task — PR">
@@ -361,7 +398,7 @@ function PRView({ task, sidebarLayout }: { task: Task; sidebarLayout: "default" 
           <div className="pr-summary-meta">
             <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
               {task.agent && <Avatar who={task.agent} size="sm" showStatus />}
-              opened by {task.agent ? TEAMMATES.find((a) => a.id === task.agent)?.name : "—"}
+              opened by {agentName ?? "—"}
             </span>
             <span style={{ fontFamily: "var(--font-mono)", display: "inline-flex", alignItems: "center", gap: 4 }}>
               <I.branch />
@@ -391,9 +428,9 @@ function PRView({ task, sidebarLayout }: { task: Task; sidebarLayout: "default" 
         ))}
       </div>
       <ChatPanel
-        messages={PR_AGT138_MESSAGES}
+        messages={messages}
         agent={task.agent || "a2"}
-        placeholder="Comment, or ask Atlas to make changes…"
+        placeholder="Comment, or ask the agent to make changes…"
         sideTabs={["Chat", "Activity", "Checks"]}
       />
     </div>
@@ -401,30 +438,36 @@ function PRView({ task, sidebarLayout }: { task: Task; sidebarLayout: "default" 
 }
 
 export function TaskDetail({
-  taskId,
-  onBack,
-  sidebarLayout,
+  task,
+  plan,
+  planMessages,
+  prFiles,
+  prMessages,
+  backHref,
+  sidebarLayout = "default",
 }: {
-  taskId: string;
-  onBack: () => void;
-  sidebarLayout: "default" | "compact";
+  task: Task;
+  plan: TaskPlan | null;
+  planMessages: PlanMessage[];
+  prFiles: DiffFile[];
+  prMessages: PlanMessage[];
+  backHref: string;
+  sidebarLayout?: "default" | "compact";
 }) {
-  const task = useMemo(() => TASKS.find((t) => t.id === taskId), [taskId]);
-  const initialMode: Mode = task && (task.state === "inProgress" || task.state === "prOpen" || task.state === "merged") ? "pr" : "plan";
+  const initialMode: Mode =
+    task.state === "inProgress" || task.state === "prOpen" || task.state === "merged" ? "pr" : "plan";
   const [mode, setMode] = useState<Mode>(initialMode);
-
-  useEffect(() => {
-    setMode(initialMode);
-  }, [initialMode]);
-
-  if (!task) return null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", flex: 1, minHeight: 0 }}>
-      <TaskHeader task={task} mode={mode} setMode={setMode} onBack={onBack} />
+      <TaskHeader task={task} mode={mode} setMode={setMode} backHref={backHref} />
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        {mode === "plan" && <PlanView task={task} sidebarLayout={sidebarLayout} />}
-        {mode === "pr" && <PRView task={task} sidebarLayout={sidebarLayout} />}
+        {mode === "plan" && (
+          <PlanView task={task} plan={plan} messages={planMessages} sidebarLayout={sidebarLayout} />
+        )}
+        {mode === "pr" && (
+          <PRView task={task} files={prFiles} messages={prMessages} sidebarLayout={sidebarLayout} />
+        )}
         {mode === "thread" && (
           <div style={{ flex: 1, display: "grid", placeItems: "center", color: "var(--text-muted)" }}>
             <div style={{ textAlign: "center", maxWidth: 320 }}>

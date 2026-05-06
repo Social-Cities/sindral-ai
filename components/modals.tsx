@@ -1,9 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Avatar } from "./atoms";
 import { I } from "./icons";
-import { PROJECTS, TASK_TYPES, TEAMMATES, type TaskType } from "@/lib/data";
+import { useTeammates } from "./providers/people-context";
+import { TASK_TYPES, type Project, type TaskType } from "@/lib/data";
+import { createTaskAction } from "@/lib/actions/tasks";
 
 export interface NewTaskPayload {
   type: TaskType;
@@ -13,17 +16,43 @@ export interface NewTaskPayload {
   planner: string;
 }
 
-export function NewTaskModal({ onClose, onCreate }: { onClose: () => void; onCreate: (p: NewTaskPayload) => void }) {
+export function NewTaskModal({
+  project,
+  onClose,
+}: {
+  project: Project;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const teammates = useTeammates();
+  const planners = teammates.filter((a) => a.role === "planner");
   const [type, setType] = useState<TaskType>("feature");
   const [title, setTitle] = useState("");
   const [desc, setDesc] = useState("");
   const [autoplan, setAutoplan] = useState(true);
-  const [planner, setPlanner] = useState("a1");
-  const proj = PROJECTS[0];
+  const [planner, setPlanner] = useState(planners[0]?.id ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
 
   const submit = () => {
     if (!title.trim()) return;
-    onCreate({ type, title, desc, autoplan, planner });
+    setError(null);
+    startTransition(async () => {
+      const result = await createTaskAction({
+        projectId: project.id,
+        type,
+        title,
+        desc,
+        autoplan,
+        planner,
+      });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      router.refresh();
+      onClose();
+    });
   };
 
   return (
@@ -32,11 +61,11 @@ export function NewTaskModal({ onClose, onCreate }: { onClose: () => void; onCre
         <div className="modal-head">
           <span>New task</span>
           <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
-            <span style={{ fontSize: 13 }}>{proj.emoji}</span>
-            <span>{proj.name}</span>
+            <span style={{ fontSize: 13 }}>{project.emoji}</span>
+            <span>{project.name}</span>
             <span className="faint">·</span>
             <I.github />
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5 }}>{proj.repo}</span>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5 }}>{project.repo}</span>
           </span>
         </div>
         <div className="modal-body">
@@ -95,11 +124,11 @@ export function NewTaskModal({ onClose, onCreate }: { onClose: () => void; onCre
                 </div>
               </div>
             </label>
-            {autoplan && (
+            {autoplan && planners.length > 0 && (
               <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px dashed var(--line)", display: "flex", alignItems: "center", gap: 12 }}>
                 <span className="muted" style={{ fontSize: 12.5 }}>Planner:</span>
                 <div style={{ display: "flex", gap: 6 }}>
-                  {TEAMMATES.filter((a) => a.role === "planner").map((a) => (
+                  {planners.map((a) => (
                     <button
                       key={a.id}
                       onClick={() => setPlanner(a.id)}
@@ -119,13 +148,16 @@ export function NewTaskModal({ onClose, onCreate }: { onClose: () => void; onCre
               </div>
             )}
           </div>
+          {error && (
+            <div style={{ color: "var(--type-bug)", fontSize: 12.5, marginTop: 8 }}>{error}</div>
+          )}
         </div>
         <div className="modal-foot">
-          <button className="btn ghost" onClick={onClose}>
+          <button className="btn ghost" onClick={onClose} disabled={pending}>
             Cancel<span className="kbd">Esc</span>
           </button>
-          <button className="btn primary" onClick={submit} disabled={!title.trim()}>
-            {autoplan ? "Create & plan" : "Create"}
+          <button className="btn primary" onClick={submit} disabled={!title.trim() || pending}>
+            {pending ? "Creating…" : autoplan ? "Create & plan" : "Create"}
             <span className="kbd">⌘↵</span>
           </button>
         </div>

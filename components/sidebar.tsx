@@ -1,28 +1,32 @@
 "use client";
 
+import Link from "next/link";
+import { useTransition } from "react";
 import { Avatar } from "./atoms";
 import { I } from "./icons";
-import { TEAMMATES, type Project } from "@/lib/data";
+import { useTeammates } from "./providers/people-context";
+import { signOutAction } from "@/lib/actions/auth";
+import type { ProjectWithCounts } from "@/lib/data";
 
 export type SidebarView = "project" | "inbox" | "myissues" | "activity";
 
 export function Sidebar({
   view,
-  setView,
-  project,
-  setProject,
+  projectId,
   projects,
+  currentUserEmail,
   agentMetaphor = "teammates",
   onImport,
 }: {
   view: SidebarView;
-  setView: (v: SidebarView) => void;
-  project: string;
-  setProject: (p: string) => void;
-  projects: Project[];
+  projectId: string | null;
+  projects: ProjectWithCounts[];
+  currentUserEmail: string | null;
   agentMetaphor?: "teammates" | "workers" | "processes";
   onImport: () => void;
 }) {
+  const teammates = useTeammates();
+  const [signingOut, startSignOut] = useTransition();
   const metaphorLabel =
     { teammates: "Teammates", workers: "Workers", processes: "Processes" }[agentMetaphor] || "Teammates";
 
@@ -35,17 +39,17 @@ export function Sidebar({
       </div>
 
       <div className="sb-section">
-        <div className={`sb-item ${view === "inbox" ? "active" : ""}`} onClick={() => setView("inbox")}>
+        <Link href="/inbox" className={`sb-item ${view === "inbox" ? "active" : ""}`}>
           <span className="sb-ico"><I.inbox /></span>Inbox
           <span className="sb-count">3</span>
-        </div>
-        <div className={`sb-item ${view === "myissues" ? "active" : ""}`} onClick={() => setView("myissues")}>
+        </Link>
+        <Link href="/my-tasks" className={`sb-item ${view === "myissues" ? "active" : ""}`}>
           <span className="sb-ico"><I.myIssues /></span>My tasks
           <span className="sb-count">7</span>
-        </div>
-        <div className={`sb-item ${view === "activity" ? "active" : ""}`} onClick={() => setView("activity")}>
+        </Link>
+        <Link href="/activity" className={`sb-item ${view === "activity" ? "active" : ""}`}>
           <span className="sb-ico"><I.activity /></span>Activity
-        </div>
+        </Link>
       </div>
 
       <div className="sb-section">
@@ -63,13 +67,10 @@ export function Sidebar({
           </span>
         </div>
         {projects.map((p) => (
-          <div
+          <Link
             key={p.id}
-            className={`sb-item sb-project ${project === p.id && view === "project" ? "active" : ""}`}
-            onClick={() => {
-              setProject(p.id);
-              setView("project");
-            }}
+            href={`/projects/${p.id}`}
+            className={`sb-item sb-project ${projectId === p.id && view === "project" ? "active" : ""}`}
             title={`${p.repo} (main)`}
           >
             <span className="sb-ico" style={{ fontSize: 13 }}>{p.emoji}</span>
@@ -85,7 +86,7 @@ export function Sidebar({
                 ● {p.planning + p.inProgress}
               </span>
             )}
-          </div>
+          </Link>
         ))}
       </div>
 
@@ -94,7 +95,7 @@ export function Sidebar({
           <span>{metaphorLabel}</span>
           <span className="sb-add" title="Configure"><I.settings /></span>
         </div>
-        {TEAMMATES.map((a) => (
+        {teammates.map((a) => (
           <div key={a.id} className="sb-teammate">
             <Avatar who={a.id} showStatus />
             <span className="tm-name">{a.name}</span>
@@ -106,9 +107,36 @@ export function Sidebar({
       <div className="sb-spacer" />
 
       <div className="sb-section" style={{ marginTop: 0 }}>
-        <div className="sb-item">
-          <span className="sb-ico"><I.settings /></span>Settings
-        </div>
+        {currentUserEmail && (
+          <div
+            className="sb-item"
+            style={{ cursor: "default", color: "var(--text-muted)", fontSize: 12 }}
+            title={currentUserEmail}
+          >
+            <span className="sb-ico"><I.settings /></span>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {currentUserEmail}
+            </span>
+          </div>
+        )}
+        <button
+          type="button"
+          className="sb-item"
+          onClick={() => startSignOut(() => signOutAction())}
+          disabled={signingOut}
+          style={{
+            background: "none",
+            border: "none",
+            font: "inherit",
+            color: "inherit",
+            textAlign: "left",
+            cursor: signingOut ? "wait" : "pointer",
+            width: "100%",
+          }}
+        >
+          <span className="sb-ico"><I.settings /></span>
+          {signingOut ? "Signing out…" : "Sign out"}
+        </button>
       </div>
     </aside>
   );

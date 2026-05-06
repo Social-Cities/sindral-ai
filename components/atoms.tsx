@@ -2,7 +2,14 @@
 
 import { Fragment, useMemo, type ReactNode } from "react";
 import { I } from "./icons";
-import { TASK_TYPES, TASK_STATES, TEAMMATES, HUMANS, TASKS, type Teammate, type TaskType, type TaskState } from "@/lib/data";
+import {
+  TASK_TYPES,
+  TASK_STATES,
+  type Teammate,
+  type TaskType,
+  type TaskState,
+} from "@/lib/data";
+import { usePerson } from "./providers/people-context";
 
 type AvatarSize = "sm" | "md" | "lg" | "xl";
 
@@ -15,22 +22,23 @@ export function Avatar({
   size?: AvatarSize;
   showStatus?: boolean;
 }) {
-  const agent = TEAMMATES.find((a) => a.id === who);
-  const human = HUMANS.find((h) => h.id === who);
-  const entity = agent || human;
+  const entity = usePerson(who);
   if (!entity) return null;
+  const isAgent = "role" in entity;
   const sizeClass = size === "sm" ? "sm" : size === "lg" ? "lg" : size === "xl" ? "xl" : "";
 
-  const initials = agent ? agent.name[0] : human!.short || human!.name[0];
+  const initials = isAgent
+    ? entity.name[0]
+    : entity.short || entity.name[0];
 
-  const bg = agent
-    ? `radial-gradient(circle at 30% 25%, oklch(0.78 0.16 ${agent.hue}), oklch(0.52 0.18 ${(agent.hue + 30) % 360}))`
-    : `oklch(0.55 0.13 ${human!.hue})`;
+  const bg = isAgent
+    ? `radial-gradient(circle at 30% 25%, oklch(0.78 0.16 ${entity.hue}), oklch(0.52 0.18 ${(entity.hue + 30) % 360}))`
+    : `oklch(0.55 0.13 ${entity.hue})`;
 
   return (
     <div className={`avatar ${sizeClass}`} style={{ background: bg }} title={entity.name}>
       <span>{initials}</span>
-      {showStatus && agent && <span className={`tm-dot ${agent.status}`} />}
+      {showStatus && isAgent && <span className={`tm-dot ${entity.status}`} />}
     </div>
   );
 }
@@ -259,8 +267,6 @@ export function Markdown({ text, streaming = false }: { text: string; streaming?
 }
 
 export function WorkerPill({ agent, progress = 0.4 }: { agent: Teammate; progress?: number }) {
-  const _task = TASKS.find((t) => t.id === agent.task);
-  void _task;
   return (
     <div className="worker-pill">
       <Avatar who={agent.id} size="sm" showStatus />

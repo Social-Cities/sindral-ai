@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { I } from "./icons";
-import { PROJECTS } from "@/lib/data";
+import type { Project } from "@/lib/data";
 import { FS, getFile, type FsDir, type FsNode } from "@/lib/fs";
 
 function fileIcon(name: string): { ico: string; color: string } {
@@ -246,10 +246,9 @@ function CodeViewer({ path }: { path: string }) {
   );
 }
 
-export function CodeView({ project }: { project: string }) {
+export function CodeView({ project }: { project: Project }) {
   const [openMap, setOpenMap] = useState<Record<string, boolean>>({ server: true, "server/src": true });
   const [selected, setSelected] = useState("server/src/queue/mod.rs");
-  const proj = PROJECTS.find((p) => p.id === project) || PROJECTS[0];
   const rootKeys = Object.keys(FS).sort((a, b) => {
     const ad = FS[a].kind === "dir" ? 0 : 1;
     const bd = FS[b].kind === "dir" ? 0 : 1;
@@ -261,7 +260,7 @@ export function CodeView({ project }: { project: string }) {
       <div className="code-tree">
         <div className="code-tree-head">
           <I.github />
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, fontWeight: 500 }}>{proj.repo}</span>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, fontWeight: 500 }}>{project.repo}</span>
           <span
             className="muted"
             style={{ fontSize: 10.5, fontFamily: "var(--font-mono)", marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 4 }}

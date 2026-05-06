@@ -2,15 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { WorkerPill } from "./atoms";
-import { TEAMMATES } from "@/lib/data";
+import { useTeammates } from "./providers/people-context";
 
 export function WorkersStrip() {
+  const teammates = useTeammates();
   const [tick, setTick] = useState(0);
   useEffect(() => {
     const i = setInterval(() => setTick((t) => t + 1), 1500);
     return () => clearInterval(i);
   }, []);
-  const working = TEAMMATES.filter((a) => a.status === "working");
+  const working = teammates.filter((a) => a.status === "working");
   return (
     <div className="workers-strip">
       <span style={{ color: "var(--text-muted)" }}>
