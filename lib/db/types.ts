@@ -4,6 +4,14 @@
 export type AgentStatus = "working" | "online" | "idle";
 export type AgentRole = "planner" | "implementer" | "reviewer";
 
+export type PersonaPresetId =
+  | "golang"
+  | "typescript"
+  | "kotlin"
+  | "python"
+  | "ruby"
+  | "custom";
+
 export interface Teammate {
   id: string;
   name: string;
@@ -11,7 +19,14 @@ export interface Teammate {
   model: string;
   hue: number;
   status: AgentStatus;
+  /** Task currently held by this agent, or null when idle. */
   task: string | null;
+  /** Tasks waiting for this agent to free up, oldest first. */
+  queue: string[];
+  /** Persona preset id; "custom" when the user wrote their own prompt. */
+  personaPreset: PersonaPresetId;
+  /** Resolved system prompt used by the worker for this agent. */
+  personaPrompt: string;
 }
 
 export interface Human {
@@ -24,7 +39,7 @@ export interface Human {
 export interface Project {
   id: string;
   name: string;
-  repo: string;
+  repo: string | null;
   emoji: string;
   description: string | null;
   active: boolean;

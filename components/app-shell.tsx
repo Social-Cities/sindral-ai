@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { Sidebar, type SidebarView } from "./sidebar";
 import { Topbar } from "./topbar";
 import { WorkersStrip } from "./workers-strip";
-import { ImportModal, NewTaskModal } from "./modals";
+import { NewProjectModal, NewTaskModal, TeammatesModal } from "./modals";
 import type { Project, ProjectWithCounts } from "@/lib/data";
 
 const ACCENT = "#4a8a5a";
@@ -51,7 +51,8 @@ export function AppShell({
 
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [showNewTask, setShowNewTask] = useState(false);
-  const [showImport, setShowImport] = useState(false);
+  const [showNewProject, setShowNewProject] = useState(false);
+  const [showTeammates, setShowTeammates] = useState(false);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -63,7 +64,8 @@ export function AppShell({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setShowNewTask(false);
-        setShowImport(false);
+        setShowNewProject(false);
+        setShowTeammates(false);
       }
       const tag = (document.activeElement as HTMLElement | null)?.tagName;
       if (e.key === "c" && !showNewTask && tag !== "INPUT" && tag !== "TEXTAREA") {
@@ -91,7 +93,8 @@ export function AppShell({
         projectId={route.projectId}
         projects={projects}
         currentUserEmail={currentUserEmail}
-        onImport={() => setShowImport(true)}
+        onNewProject={() => setShowNewProject(true)}
+        onManageTeammates={() => setShowTeammates(true)}
       />
       <main className="main">
         <Topbar
@@ -113,7 +116,12 @@ export function AppShell({
           onClose={() => setShowNewTask(false)}
         />
       )}
-      {showImport && <ImportModal onClose={() => setShowImport(false)} />}
+      {showNewProject && (
+        <NewProjectModal onClose={() => setShowNewProject(false)} />
+      )}
+      {showTeammates && (
+        <TeammatesModal onClose={() => setShowTeammates(false)} />
+      )}
     </div>
   );
 }

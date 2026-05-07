@@ -5,6 +5,7 @@ export type {
   AgentRole,
   AgentStatus,
   Teammate,
+  PersonaPresetId,
   Human,
   Project,
   ProjectWithCounts,
