@@ -71,6 +71,8 @@ export type TaskState =
 
 export type TaskPriority = "high" | "med" | "low";
 
+export type RuntimeKind = "codex" | "claude_code";
+
 export interface Task {
   id: string;
   projectId: string;
@@ -82,6 +84,76 @@ export interface Task {
   branch: string | null;
   updated: string;
   priority: TaskPriority;
+  /** Runtime locked at task creation; nullable until assignment. */
+  runtime?: RuntimeKind | null;
+}
+
+export type JobType = "plan" | "implement" | "review";
+export type TaskJobStatus =
+  | "queued"
+  | "dispatching"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled";
+
+export interface TaskJob {
+  id: string;
+  taskId: string;
+  ownerId: string;
+  personaId: string;
+  jobType: JobType;
+  requiredRole: AgentRole;
+  runtime: RuntimeKind;
+  status: TaskJobStatus;
+  workflowId: string | null;
+  workflowRunId: string | null;
+  attempt: number;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaskJobEvent {
+  id: string;
+  jobId: string;
+  taskId: string;
+  ownerId: string;
+  eventType: string;
+  eventPayload: Record<string, unknown>;
+  createdAt: string;
+}
+
+export type ChatChannel = "plan" | "implementation";
+export type ChatFromKind = "human" | "persona" | "system";
+
+export interface TaskConversationMessage {
+  id: string;
+  taskId: string;
+  ownerId: string;
+  fromId: string;
+  fromKind: ChatFromKind;
+  channel: ChatChannel;
+  message: string;
+  metadata: Record<string, unknown>;
+  position: number;
+  createdAt: string;
+}
+
+export interface TaskMemory {
+  taskId: string;
+  ownerId: string;
+  rollupMarkdown: string;
+  rollupTokens: number;
+  lastSummarizedPosition: number;
+  lastSummarizedAt: string | null;
+  unsummarizedCount: number;
+  humanEdited: boolean;
+  humanEditAt: string | null;
+  schemaVersion: number;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface PlanMessage {

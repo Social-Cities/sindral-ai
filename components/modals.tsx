@@ -6,10 +6,12 @@ import { Avatar } from "./atoms";
 import { I } from "./icons";
 import { useTeammates } from "./providers/people-context";
 import {
+  RUNTIME_KINDS,
   TASK_TYPES,
   type AgentRole,
   type PersonaPresetId,
   type Project,
+  type RuntimeKind,
   type TaskType,
   type Teammate,
 } from "@/lib/data";
@@ -27,13 +29,15 @@ import {
   deleteTeammateAction,
   updateTeammateAction,
 } from "@/lib/actions/teammates";
+import { assignWorkerAction } from "@/lib/actions/workflows";
 
 export interface NewTaskPayload {
   type: TaskType;
   title: string;
   desc: string;
   autoplan: boolean;
-  planner: string;
+  planner: string | null;
+  runtime: RuntimeKind;
 }
 
 export function NewTaskModal({
@@ -56,13 +60,23 @@ export function NewTaskModal({
   const [desc, setDesc] = useState("");
   const [autoplan, setAutoplan] = useState(true);
   const [planner, setPlanner] = useState(planners[0]?.id ?? "");
+  const [runtime, setRuntime] = useState<RuntimeKind>("claude_code");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   const project = projects.find((p) => p.id === projectId) ?? null;
+  const canSubmit =
+    !!title.trim() &&
+    !!projectId &&
+    (!autoplan || planners.length === 0 || !!planner) &&
+    !pending;
 
   const submit = () => {
-    if (!title.trim() || !projectId) return;
+    if (!canSubmit) return;
+    if (autoplan && !planner) {
+      setError("Pick a planner or turn off auto-plan.");
+      return;
+    }
     setError(null);
     startTransition(async () => {
       const result = await createTaskAction({
@@ -71,7 +85,8 @@ export function NewTaskModal({
         title,
         desc,
         autoplan,
-        planner,
+        planner: autoplan ? planner : null,
+        runtime,
       });
       if (!result.ok) {
         setError(result.error);
@@ -161,6 +176,31 @@ export function NewTaskModal({
             </div>
           </div>
 
+          <div className="field">
+            <span className="field-label">Runtime</span>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {(Object.keys(RUNTIME_KINDS) as RuntimeKind[]).map((rk) => (
+                <button
+                  key={rk}
+                  type="button"
+                  onClick={() => setRuntime(rk)}
+                  className="btn sm"
+                  style={
+                    runtime === rk
+                      ? { borderColor: "var(--accent)", background: "var(--accent-soft)", color: "var(--accent)" }
+                      : {}
+                  }
+                  title={RUNTIME_KINDS[rk].description}
+                >
+                  {RUNTIME_KINDS[rk].label}
+                </button>
+              ))}
+            </div>
+            <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>
+              {RUNTIME_KINDS[runtime].description}
+            </div>
+          </div>
+
           <div className="card" style={{ padding: 12, marginTop: 8 }}>
             <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
               <input type="checkbox" checked={autoplan} onChange={(e) => setAutoplan(e.target.checked)} />
@@ -174,9 +214,9 @@ export function NewTaskModal({
               </div>
             </label>
             {autoplan && planners.length > 0 && (
-              <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px dashed var(--line)", display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px dashed var(--line)", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                 <span className="muted" style={{ fontSize: 12.5 }}>Planner:</span>
-                <div style={{ display: "flex", gap: 6 }}>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   {planners.map((a) => (
                     <button
                       key={a.id}
@@ -196,6 +236,11 @@ export function NewTaskModal({
                 </div>
               </div>
             )}
+            {autoplan && planners.length === 0 && (
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px dashed var(--line)", fontSize: 12.5, color: "var(--type-bug)" }}>
+                No teammates with the planner role. Create one in Teammates first, or turn off auto-plan.
+              </div>
+            )}
           </div>
           {error && (
             <div style={{ color: "var(--type-bug)", fontSize: 12.5, marginTop: 8 }}>{error}</div>
@@ -205,7 +250,7 @@ export function NewTaskModal({
           <button className="btn ghost" onClick={onClose} disabled={pending}>
             Cancel<span className="kbd">Esc</span>
           </button>
-          <button className="btn primary" onClick={submit} disabled={!title.trim() || !projectId || pending}>
+          <button className="btn primary" onClick={submit} disabled={!canSubmit}>
             {pending ? "Creating…" : autoplan ? "Create & plan" : "Create"}
             <span className="kbd">⌘↵</span>
           </button>
@@ -817,6 +862,134 @@ export function ProjectSettingsModal({
             disabled={!name.trim() || pending}
           >
             {pending ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function AssignWorkerModal({
+  taskId,
+  projectId,
+  initialRuntime,
+  onClose,
+}: {
+  taskId: string;
+  projectId: string;
+  initialRuntime: RuntimeKind | null;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const teammates = useTeammates();
+  const implementers = teammates.filter((t) => t.role === "implementer");
+  const [agentId, setAgentId] = useState<string>(implementers[0]?.id ?? "");
+  const [runtime, setRuntime] = useState<RuntimeKind>(
+    initialRuntime ?? "claude_code",
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  const submit = () => {
+    if (!agentId) {
+      setError("Pick a teammate to assign.");
+      return;
+    }
+    setError(null);
+    startTransition(async () => {
+      const result = await assignWorkerAction({
+        taskId,
+        agentId,
+        runtime,
+        projectId,
+      });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      router.refresh();
+      onClose();
+    });
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: 520 }}>
+        <div className="modal-head">
+          <I.send /> Assign worker
+        </div>
+        <div className="modal-body">
+          <div className="field">
+            <span className="field-label">Implementer</span>
+            {implementers.length === 0 && (
+              <div className="muted" style={{ fontSize: 12.5 }}>
+                No teammates with the implementer role. Create one first.
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {implementers.map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => setAgentId(a.id)}
+                  className="btn sm"
+                  style={
+                    agentId === a.id
+                      ? { borderColor: "var(--accent)", background: "var(--accent-soft)", color: "var(--accent)" }
+                      : {}
+                  }
+                >
+                  <Avatar who={a.id} size="sm" />
+                  {a.name}
+                  <span className="muted" style={{ fontFamily: "var(--font-mono)", fontSize: 10.5 }}>
+                    {a.model}
+                  </span>
+                  {a.status === "working" && (
+                    <span className="muted" style={{ fontSize: 10.5 }}>· busy</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="field">
+            <span className="field-label">Runtime</span>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {(Object.keys(RUNTIME_KINDS) as RuntimeKind[]).map((rk) => (
+                <button
+                  key={rk}
+                  type="button"
+                  onClick={() => setRuntime(rk)}
+                  className="btn sm"
+                  style={
+                    runtime === rk
+                      ? { borderColor: "var(--accent)", background: "var(--accent-soft)", color: "var(--accent)" }
+                      : {}
+                  }
+                >
+                  {RUNTIME_KINDS[rk].label}
+                </button>
+              ))}
+            </div>
+            <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>
+              {initialRuntime && initialRuntime !== runtime
+                ? `Overrides task default (${RUNTIME_KINDS[initialRuntime].label}).`
+                : RUNTIME_KINDS[runtime].description}
+            </div>
+          </div>
+          {error && (
+            <div style={{ color: "var(--type-bug)", fontSize: 12.5, marginTop: 8 }}>{error}</div>
+          )}
+        </div>
+        <div className="modal-foot">
+          <button className="btn ghost" onClick={onClose} disabled={pending}>
+            Cancel
+          </button>
+          <button
+            className="btn primary"
+            onClick={submit}
+            disabled={!agentId || pending}
+          >
+            {pending ? "Assigning…" : "Assign"}
           </button>
         </div>
       </div>
