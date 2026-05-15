@@ -4,9 +4,11 @@ import Link from "next/link";
 import { useTransition } from "react";
 import { Avatar } from "./atoms";
 import { I } from "./icons";
+import { OrgSwitcher } from "./org-switcher";
 import { useTeammates } from "./providers/people-context";
 import { signOutAction } from "@/lib/actions/auth";
 import type { ProjectWithCounts } from "@/lib/data";
+import type { OrgMembership, Organization } from "@/lib/db/types";
 
 export type SidebarView = "project" | "inbox" | "myissues" | "activity";
 
@@ -15,15 +17,21 @@ export function Sidebar({
   projectId,
   projects,
   currentUserEmail,
+  currentOrg,
+  memberships,
   agentMetaphor = "teammates",
-  onImport,
+  onNewProject,
+  onManageTeammates,
 }: {
   view: SidebarView;
   projectId: string | null;
   projects: ProjectWithCounts[];
   currentUserEmail: string | null;
+  currentOrg: Organization;
+  memberships: OrgMembership[];
   agentMetaphor?: "teammates" | "workers" | "processes";
-  onImport: () => void;
+  onNewProject: () => void;
+  onManageTeammates: () => void;
 }) {
   const teammates = useTeammates();
   const [signingOut, startSignOut] = useTransition();
@@ -37,6 +45,8 @@ export function Sidebar({
         <span>Agatha</span>
         <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-faint)", fontFamily: "var(--font-mono)" }}>v0.4</span>
       </div>
+
+      <OrgSwitcher currentOrg={currentOrg} memberships={memberships} />
 
       <div className="sb-section">
         <Link href="/inbox" className={`sb-item ${view === "inbox" ? "active" : ""}`}>
@@ -57,10 +67,10 @@ export function Sidebar({
           <span>Projects</span>
           <span
             className="sb-add"
-            title="Import from GitHub"
+            title="New project"
             onClick={(e) => {
               e.stopPropagation();
-              onImport();
+              onNewProject();
             }}
           >
             <I.plus />
@@ -71,14 +81,14 @@ export function Sidebar({
             key={p.id}
             href={`/projects/${p.id}`}
             className={`sb-item sb-project ${projectId === p.id && view === "project" ? "active" : ""}`}
-            title={`${p.repo} (main)`}
+            title={p.repo ? `${p.repo} (main)` : `${p.name} (no repo)`}
           >
             <span className="sb-ico" style={{ fontSize: 13 }}>{p.emoji}</span>
             <span className="sb-project-name">
               <span className="sb-project-title">{p.name}</span>
               <span className="sb-project-repo">
                 <I.github />
-                {p.repo}
+                {p.repo ?? "No repo"}
               </span>
             </span>
             {p.planning + p.inProgress > 0 && (
@@ -93,13 +103,33 @@ export function Sidebar({
       <div className="sb-section">
         <div className="sb-section-label">
           <span>{metaphorLabel}</span>
-          <span className="sb-add" title="Configure"><I.settings /></span>
+          <span
+            className="sb-add"
+            title="Manage teammates"
+            onClick={(e) => {
+              e.stopPropagation();
+              onManageTeammates();
+            }}
+          >
+            <I.settings />
+          </span>
         </div>
         {teammates.map((a) => (
           <div key={a.id} className="sb-teammate">
             <Avatar who={a.id} showStatus />
             <span className="tm-name">{a.name}</span>
-            <span className="tm-status">{a.status === "working" ? a.task : a.status === "online" ? "idle" : "—"}</span>
+            <span className="tm-status">
+              {a.status === "working" ? a.task : a.status === "online" ? "idle" : "—"}
+              {a.queue.length > 0 && (
+                <span
+                  className="muted"
+                  style={{ fontSize: 10.5, marginLeft: 6 }}
+                  title={`${a.queue.length} queued: ${a.queue.join(", ")}`}
+                >
+                  +{a.queue.length}
+                </span>
+              )}
+            </span>
           </div>
         ))}
       </div>

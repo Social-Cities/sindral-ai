@@ -39,7 +39,7 @@ import { createTaskAction } from "@/lib/actions/tasks";
 beforeEach(() => handle.reset());
 
 describe("createTaskAction", () => {
-  it("forwards the input to /tasks and returns the new id", async () => {
+  it("forwards the input (with runtime) to /tasks and returns the new id", async () => {
     handle.set(async () => ({ success: true, id: "AGT-7-aaaaaaaa" }));
     const r = await createTaskAction({
       projectId: "p1",
@@ -48,6 +48,7 @@ describe("createTaskAction", () => {
       desc: "details",
       autoplan: true,
       planner: "a1",
+      runtime: "claude_code",
     });
     expect(r).toEqual({ ok: true, id: "AGT-7-aaaaaaaa" });
     expect(handle.calls).toEqual([
@@ -62,10 +63,28 @@ describe("createTaskAction", () => {
             desc: "details",
             autoplan: true,
             planner: "a1",
+            runtime: "claude_code",
           },
         },
       ],
     ]);
+  });
+
+  it("supports null planner when autoplan is off", async () => {
+    handle.set(async () => ({ success: true, id: "AGT-8-aaaaaaaa" }));
+    const r = await createTaskAction({
+      projectId: "p1",
+      type: "bug",
+      title: "Fix it",
+      desc: "",
+      autoplan: false,
+      planner: null,
+      runtime: "codex",
+    });
+    expect(r).toEqual({ ok: true, id: "AGT-8-aaaaaaaa" });
+    const body = (handle.calls[0]?.[1] as { body: Record<string, unknown> }).body;
+    expect(body.planner).toBeNull();
+    expect(body.runtime).toBe("codex");
   });
 
   it("forwards backend validation errors", async () => {
@@ -78,7 +97,8 @@ describe("createTaskAction", () => {
       title: "",
       desc: "",
       autoplan: false,
-      planner: "",
+      planner: null,
+      runtime: "claude_code",
     });
     expect(r).toEqual({ ok: false, error: "Title is required." });
   });
@@ -93,7 +113,8 @@ describe("createTaskAction", () => {
       title: "t",
       desc: "",
       autoplan: false,
-      planner: "",
+      planner: null,
+      runtime: "claude_code",
     });
     expect(r).toEqual({ ok: false, error: "Not signed in" });
   });

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { ApiError, callAuthed } from "@/lib/api";
-import type { TaskType } from "@/lib/db/types";
+import type { RuntimeKind, TaskType } from "@/lib/db/types";
 
 export interface CreateTaskInput {
   projectId: string;
@@ -10,7 +10,10 @@ export interface CreateTaskInput {
   title: string;
   desc: string;
   autoplan: boolean;
-  planner: string;
+  /** Required when autoplan is true; ignored otherwise. */
+  planner: string | null;
+  /** Required by the backend — the worker locks plan + implement to this. */
+  runtime: RuntimeKind;
 }
 
 export type CreateTaskResult =

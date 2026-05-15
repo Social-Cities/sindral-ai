@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Fragment, useState } from "react";
 import { Avatar, StatusPill, TypePill } from "./atoms";
 import { I } from "./icons";
+import { ProjectSettingsModal } from "./modals";
 import { useCurrentUserId, usePerson } from "./providers/people-context";
 import {
   TASK_STATES,
@@ -23,6 +24,7 @@ export function ProjectView({
 }) {
   const currentUserId = useCurrentUserId();
   const [tab, setTab] = useState<Tab>("all");
+  const [showSettings, setShowSettings] = useState(false);
   const [filter, setFilter] = useState<{ type: string | null; status: string | null }>({
     type: null,
     status: null,
@@ -57,18 +59,33 @@ export function ProjectView({
             </h1>
             {project.description && <div className="page-sub">{project.description}</div>}
             <div className="repo-bar">
-              <a className="repo-chip" href="#" title="Open on GitHub">
-                <I.github />
-                <span className="repo-chip-name">{project.repo}</span>
-                <span className="repo-chip-sep">·</span>
-                <I.branch />
-                <span className="repo-chip-branch">main</span>
-                <span className="repo-chip-sync">
-                  <span className="repo-sync-dot" />connected
-                </span>
-              </a>
-              <button className="btn ghost sm">Switch branch</button>
-              <button className="btn ghost sm">Settings</button>
+              {project.repo ? (
+                <>
+                  <a className="repo-chip" href="#" title="Open on GitHub">
+                    <I.github />
+                    <span className="repo-chip-name">{project.repo}</span>
+                    <span className="repo-chip-sep">·</span>
+                    <I.branch />
+                    <span className="repo-chip-branch">main</span>
+                    <span className="repo-chip-sync">
+                      <span className="repo-sync-dot" />connected
+                    </span>
+                  </a>
+                  <button className="btn ghost sm">Switch branch</button>
+                </>
+              ) : (
+                <button
+                  className="btn ghost sm"
+                  onClick={() => setShowSettings(true)}
+                  title="Connect a GitHub repo"
+                >
+                  <I.github />
+                  <span style={{ marginLeft: 6 }}>Connect a repo</span>
+                </button>
+              )}
+              <button className="btn ghost sm" onClick={() => setShowSettings(true)}>
+                Settings
+              </button>
             </div>
           </div>
         </div>
@@ -107,6 +124,13 @@ export function ProjectView({
           </span>
         ))}
       </div>
+
+      {showSettings && (
+        <ProjectSettingsModal
+          project={project}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
 
       <div className="task-list">
         {Object.entries(grouped).map(([state, items]) => {

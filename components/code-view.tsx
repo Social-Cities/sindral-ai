@@ -260,7 +260,9 @@ export function CodeView({ project }: { project: Project }) {
       <div className="code-tree">
         <div className="code-tree-head">
           <I.github />
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, fontWeight: 500 }}>{project.repo}</span>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, fontWeight: 500 }}>
+            {project.repo ?? "No repo connected"}
+          </span>
           <span
             className="muted"
             style={{ fontSize: 10.5, fontFamily: "var(--font-mono)", marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 4 }}

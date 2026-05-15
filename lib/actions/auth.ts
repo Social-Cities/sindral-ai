@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { ApiError, callAuthed, callPublic } from "@/lib/api";
+import { ApiError, callAuthed, callPublic, ensureCurrentOrgCookie } from "@/lib/api";
 import { clearSession, writeSession } from "@/lib/session";
 
 export type AuthResult = { ok: true } | { ok: false; error: string };
@@ -36,6 +36,14 @@ async function exchange(
       accessToken: r.accessToken,
       refreshToken: r.refreshToken,
     });
+    // Pick + persist the user's first org so the (app) layout has one to
+    // gate on. Best-effort: if it fails (e.g. migration not yet applied
+    // or zero memberships), the (app) layout will route to /onboarding.
+    try {
+      await ensureCurrentOrgCookie(r.accessToken);
+    } catch {
+      // ignore — sign-in still succeeded.
+    }
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (err) {

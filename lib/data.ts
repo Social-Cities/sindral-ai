@@ -5,6 +5,7 @@ export type {
   AgentRole,
   AgentStatus,
   Teammate,
+  PersonaPresetId,
   Human,
   Project,
   ProjectWithCounts,
@@ -18,7 +19,31 @@ export type {
   DiffFile,
   ActivityItem,
   TaskPlan,
+  RuntimeKind,
+  JobType,
+  TaskJob,
+  TaskJobEvent,
+  TaskJobStatus,
+  TaskConversationMessage,
+  ChatChannel,
+  ChatFromKind,
+  TaskMemory,
 } from "./db/types";
+
+import type { RuntimeKind } from "./db/types";
+
+export const RUNTIME_KINDS: Record<RuntimeKind, { label: string; description: string }> = {
+  claude_code: {
+    label: "Claude Code",
+    description:
+      "Anthropic's coding agent. Best for code edits across many files and long-context reasoning.",
+  },
+  codex: {
+    label: "Codex",
+    description:
+      "OpenAI's CLI coding agent. Best for short, targeted edits and shell-driven work.",
+  },
+};
 
 import type { TaskType, TaskState } from "./db/types";
 
