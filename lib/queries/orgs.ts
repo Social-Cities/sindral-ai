@@ -13,10 +13,17 @@ import type {
 // listing memberships or scoped by the URL parameter directly.
 
 export const getOrganizations = cache(async (): Promise<OrgMembership[]> => {
-  const r = await callAuthed<{
-    organizations: Array<{ role: OrgMembership["role"]; org: Organization }>;
-  }>("/orgs", { skipOrgHeader: true });
-  return r.organizations;
+  try {
+    const r = await callAuthed<{
+      organizations: Array<{ role: OrgMembership["role"]; org: Organization }>;
+    }>("/orgs", { skipOrgHeader: true });
+    return r.organizations;
+  } catch {
+    // Backend may be unreachable or the orgs migration may not be applied
+    // yet. Returning [] sends the user to /onboarding instead of crashing
+    // the whole app layout.
+    return [];
+  }
 });
 
 export const getCurrentOrganization = cache(

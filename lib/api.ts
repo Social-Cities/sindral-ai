@@ -77,10 +77,20 @@ interface OrganizationMembershipResponse {
   }>;
 }
 
-// Returns the user's active org id. If no cookie is set yet (first request
-// after signup, or after an org join), picks the first membership and
-// persists it. Returns null if the user belongs to no org.
-async function resolveCurrentOrgId(accessToken: string): Promise<string | null> {
+// Reads the active org from the cookie. Cookies can't be written from
+// Server Components, so this is strictly read-only — the cookie is
+// persisted by the Server Actions in lib/actions/orgs.ts (and after sign-
+// in, by ensureCurrentOrgCookie below).
+async function readActiveOrgId(): Promise<string | null> {
+  return readCurrentOrgId();
+}
+
+// Picks the user's first membership and persists it in the cookie. Safe to
+// call from Server Actions (sign-in, sign-up, invitation accept) where
+// cookie writes are allowed. No-op when a cookie is already set.
+export async function ensureCurrentOrgCookie(
+  accessToken: string,
+): Promise<string | null> {
   const existing = await readCurrentOrgId();
   if (existing) return existing;
 
@@ -103,7 +113,7 @@ export async function callAuthed<T>(path: string, opts: CallOpts = {}): Promise<
   const session = await readSession();
   if (!session) throw new ApiError(401, "Not signed in");
 
-  const orgId = opts.skipOrgHeader ? null : await resolveCurrentOrgId(session.accessToken);
+  const orgId = opts.skipOrgHeader ? null : await readActiveOrgId();
 
   let res = await rawFetch(path, session.accessToken, orgId, opts);
   if (res.status === 401 && opts.refreshOn401 !== false) {
