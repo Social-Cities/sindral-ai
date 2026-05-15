@@ -7,6 +7,7 @@ import { Topbar } from "./topbar";
 import { WorkersStrip } from "./workers-strip";
 import { NewProjectModal, NewTaskModal, TeammatesModal } from "./modals";
 import type { Project, ProjectWithCounts } from "@/lib/data";
+import type { OrgMembership, Organization } from "@/lib/db/types";
 
 const ACCENT = "#4a8a5a";
 
@@ -36,10 +37,14 @@ function parsePath(path: string): ParsedRoute {
 export function AppShell({
   projects,
   currentUserEmail,
+  currentOrg,
+  memberships,
   children,
 }: {
   projects: ProjectWithCounts[];
   currentUserEmail: string | null;
+  currentOrg: Organization;
+  memberships: OrgMembership[];
   children: ReactNode;
 }) {
   const pathname = usePathname() ?? "/inbox";
@@ -93,6 +98,8 @@ export function AppShell({
         projectId={route.projectId}
         projects={projects}
         currentUserEmail={currentUserEmail}
+        currentOrg={currentOrg}
+        memberships={memberships}
         onNewProject={() => setShowNewProject(true)}
         onManageTeammates={() => setShowTeammates(true)}
       />

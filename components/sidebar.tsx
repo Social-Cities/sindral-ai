@@ -4,9 +4,11 @@ import Link from "next/link";
 import { useTransition } from "react";
 import { Avatar } from "./atoms";
 import { I } from "./icons";
+import { OrgSwitcher } from "./org-switcher";
 import { useTeammates } from "./providers/people-context";
 import { signOutAction } from "@/lib/actions/auth";
 import type { ProjectWithCounts } from "@/lib/data";
+import type { OrgMembership, Organization } from "@/lib/db/types";
 
 export type SidebarView = "project" | "inbox" | "myissues" | "activity";
 
@@ -15,6 +17,8 @@ export function Sidebar({
   projectId,
   projects,
   currentUserEmail,
+  currentOrg,
+  memberships,
   agentMetaphor = "teammates",
   onNewProject,
   onManageTeammates,
@@ -23,6 +27,8 @@ export function Sidebar({
   projectId: string | null;
   projects: ProjectWithCounts[];
   currentUserEmail: string | null;
+  currentOrg: Organization;
+  memberships: OrgMembership[];
   agentMetaphor?: "teammates" | "workers" | "processes";
   onNewProject: () => void;
   onManageTeammates: () => void;
@@ -39,6 +45,8 @@ export function Sidebar({
         <span>Agatha</span>
         <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-faint)", fontFamily: "var(--font-mono)" }}>v0.4</span>
       </div>
+
+      <OrgSwitcher currentOrg={currentOrg} memberships={memberships} />
 
       <div className="sb-section">
         <Link href="/inbox" className={`sb-item ${view === "inbox" ? "active" : ""}`}>

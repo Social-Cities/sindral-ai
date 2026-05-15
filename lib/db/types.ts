@@ -1,6 +1,42 @@
 // Domain types — what views and components consume. Snake_case rows from
 // Supabase are mapped to camelCase here in `lib/queries/*`.
 
+export type OrgRole = "owner" | "admin" | "member";
+
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  createdAt: string;
+}
+
+export interface OrgMembership {
+  org: Organization;
+  role: OrgRole;
+}
+
+export interface OrgMember {
+  orgId: string;
+  userId: string;
+  role: OrgRole;
+  email: string | null;
+  createdAt: string;
+}
+
+export interface OrgInvitation {
+  id: string;
+  orgId: string;
+  token: string;
+  email: string | null;
+  role: Exclude<OrgRole, "owner">;
+  invitedBy: string | null;
+  expiresAt: string | null;
+  acceptedAt: string | null;
+  acceptedBy: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+}
+
 export type AgentStatus = "working" | "online" | "idle";
 export type AgentRole = "planner" | "implementer" | "reviewer";
 
