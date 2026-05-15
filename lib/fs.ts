@@ -27,7 +27,7 @@ A CLI for orchestrating coding agents across many sandboxes.
 \`\`\`
 cargo install kettle
 kettle init
-kettle worker spawn --pool agatha
+kettle worker spawn --pool sindral
 \`\`\`
 
 Read [docs/architecture.md](./docs/architecture.md) for the design.

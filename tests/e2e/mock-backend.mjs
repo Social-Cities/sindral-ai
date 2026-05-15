@@ -1,4 +1,4 @@
-// Tiny HTTP mock of agatha-teams-backend for e2e tests. Returns canned
+// Tiny HTTP mock of sindral-ai-backend for e2e tests. Returns canned
 // responses for the endpoints exercised by the test flows. Records POSTed
 // task creations so tests can assert on them via GET /__test__/tasks.
 
@@ -10,7 +10,7 @@ const projects = [
   {
     id: "proj-alpha",
     name: "Alpha",
-    repo: "agatha/alpha",
+    repo: "sindral/alpha",
     emoji: "\u{1F525}",
     description: "Alpha project",
     active: true,
@@ -22,7 +22,7 @@ const projects = [
   {
     id: "proj-beta",
     name: "Beta",
-    repo: "agatha/beta",
+    repo: "sindral/beta",
     emoji: "\u{1F331}",
     description: "Beta project",
     active: true,

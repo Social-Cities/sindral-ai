@@ -3,7 +3,7 @@
 // teammates.persona_prompt so changing the preset library later doesn't
 // retroactively rewrite every existing agent.
 //
-// Mirrored in agatha-teams-backend/src/personas.ts. Keep them in sync.
+// Mirrored in sindral-ai-backend/src/personas.ts. Keep them in sync.
 
 export type PersonaPresetId =
   | "golang"

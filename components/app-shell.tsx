@@ -81,7 +81,7 @@ export function AppShell({
     return () => window.removeEventListener("keydown", onKey);
   }, [showNewTask]);
 
-  const crumbs: string[] = ["Agatha"];
+  const crumbs: string[] = ["Sindral"];
   if (route.view === "inbox") crumbs.push("Inbox");
   else if (route.view === "myissues") crumbs.push("My tasks");
   else if (route.view === "activity") crumbs.push("Activity");

@@ -1,14 +1,14 @@
-# Agatha Teams
+# Sindral AI
 
 A Next.js App Router UI for managing software projects and a team of AI coding agents — inboxes, project boards, plan documents, PR diffs, and the chat threads that surround them.
 
-The frontend holds **zero Supabase keys**. All data + auth go through [agatha-teams-backend](../agatha-teams-backend/) (Hono + Supabase).
+The frontend holds **zero Supabase keys**. All data + auth go through [sindral-ai-backend](../sindral-ai-backend/) (Hono + Supabase).
 
 ## Stack
 
 - **Next.js 16** (App Router, Turbopack, React 19, Server Components per view)
 - **TypeScript**, no UI framework — handwritten CSS in [app/globals.css](app/globals.css)
-- Talks to `agatha-teams-backend` over HTTP. Tokens live in httpOnly cookies set by Server Actions.
+- Talks to `sindral-ai-backend` over HTTP. Tokens live in httpOnly cookies set by Server Actions.
 
 ## Project layout
 
@@ -45,7 +45,7 @@ supabase/
 ### 1. Start the backend
 
 ```bash
-cd ../agatha-teams-backend
+cd ../sindral-ai-backend
 npm install
 cp .env.example .env  # fill in SUPABASE_URL / SUPABASE_SECRET_KEY / SUPABASE_PUBLISHABLE_KEY
 npm run dev           # serves on :4000
@@ -87,17 +87,17 @@ npm test         # vitest unit tests for actions
 ## How data flows
 
 ```
-[browser]  →  [Next.js (Server Components / Server Actions)]  →  [agatha-teams-backend]  →  [Supabase]
+[browser]  →  [Next.js (Server Components / Server Actions)]  →  [sindral-ai-backend]  →  [Supabase]
 ```
 
-- Sign in: `signInAction` POSTs to `/auth/signin` on the backend → backend returns `{ accessToken, refreshToken }` → server action stores both in httpOnly cookies (`agatha_at`, `agatha_rt`).
+- Sign in: `signInAction` POSTs to `/auth/signin` on the backend → backend returns `{ accessToken, refreshToken }` → server action stores both in httpOnly cookies (`sindral_at`, `sindral_rt`).
 - Reads: every `lib/queries/*` fetcher calls `callAuthed(...)` which forwards `Authorization: Bearer <accessToken>` to the backend. On a 401, it calls `/auth/refresh` once with the refresh token, persists the rotated pair, and retries.
 - Writes: server actions call `callAuthed(...)` and `revalidatePath` so the UI refetches.
 - The browser never sees the access token (httpOnly cookie) and never sees a Supabase URL or key.
 
 ## Adding a new view
 
-1. Add a route in `agatha-teams-backend/src/routes/...` and wire it in `src/index.ts`.
+1. Add a route in `sindral-ai-backend/src/routes/...` and wire it in `src/index.ts`.
 2. Add a `cache()`-wrapped fetcher in `lib/queries/` that calls `callAuthed("/your/route")`.
 3. Create a Server Component page under `app/(app)/...` that awaits the fetcher and passes data into a client view component.
 4. If you need mutations, add a backend `POST` route plus a `"use server"` action in `lib/actions/` that calls it and `revalidatePath`s.
