@@ -23,7 +23,7 @@ const instrumentSerif = Instrument_Serif({
 });
 
 export const metadata: Metadata = {
-  title: "Agatha Teams",
+  title: "Sindral AI",
   description: "Manage software projects and a team of AI agents.",
 };
 

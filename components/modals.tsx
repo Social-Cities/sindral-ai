@@ -341,7 +341,7 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
                 <span className="field-label">GitHub repo (optional)</span>
                 <input
                   className="field-input"
-                  placeholder="github.com/agatha/kettle"
+                  placeholder="github.com/sindral/kettle"
                   value={repo}
                   onChange={(e) => setRepo(e.target.value)}
                 />
@@ -369,7 +369,7 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
           {step === "confirmRepo" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div style={{ fontSize: 13.5 }}>
-                You didn&apos;t link a GitHub repo. Want Agatha to create one for{" "}
+                You didn&apos;t link a GitHub repo. Want Sindral to create one for{" "}
                 <strong>{trimmedName}</strong>?
               </div>
               <div className="muted" style={{ fontSize: 12.5 }}>
@@ -830,7 +830,7 @@ export function ProjectSettingsModal({
             <span className="field-label">GitHub repo</span>
             <input
               className="field-input"
-              placeholder="github.com/agatha/kettle"
+              placeholder="github.com/sindral/kettle"
               value={repo}
               onChange={(e) => setRepo(e.target.value)}
             />

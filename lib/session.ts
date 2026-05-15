@@ -1,9 +1,9 @@
 import "server-only";
 import { cookies } from "next/headers";
 
-const ACCESS_COOKIE = "agatha_at";
-const REFRESH_COOKIE = "agatha_rt";
-const ORG_COOKIE = "agatha_org";
+const ACCESS_COOKIE = "sindral_at";
+const REFRESH_COOKIE = "sindral_rt";
+const ORG_COOKIE = "sindral_org";
 
 const COOKIE_OPTS = {
   httpOnly: true,

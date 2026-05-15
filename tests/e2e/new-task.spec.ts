@@ -4,18 +4,18 @@ const APP_ORIGIN = "http://localhost:3100";
 const MOCK_BACKEND = "http://localhost:4100";
 
 async function signIn(page: Page) {
-  // Frontend only checks for the presence of agatha_at + agatha_rt cookies; the
+  // Frontend only checks for the presence of sindral_at + sindral_rt cookies; the
   // mock backend accepts any token. See lib/session.ts.
   await page.context().addCookies([
     {
-      name: "agatha_at",
+      name: "sindral_at",
       value: "test-access",
       url: APP_ORIGIN,
       httpOnly: true,
       sameSite: "Lax",
     },
     {
-      name: "agatha_rt",
+      name: "sindral_rt",
       value: "test-refresh",
       url: APP_ORIGIN,
       httpOnly: true,

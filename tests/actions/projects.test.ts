@@ -70,14 +70,14 @@ describe("createProjectAction", () => {
   it("forwards a provided repo URL", async () => {
     handle.set(async () => ({
       success: true,
-      project: { ...sampleProject, repo: "github.com/agatha/lattice" },
+      project: { ...sampleProject, repo: "github.com/sindral/lattice" },
     }));
     await createProjectAction({
       name: "Lattice",
-      repo: "github.com/agatha/lattice",
+      repo: "github.com/sindral/lattice",
     });
     expect(handle.calls[0]?.[1]).toMatchObject({
-      body: { repo: "github.com/agatha/lattice" },
+      body: { repo: "github.com/sindral/lattice" },
     });
   });
 
@@ -94,11 +94,11 @@ describe("updateProjectAction", () => {
   it("PATCHes /projects/:id with the patch body", async () => {
     handle.set(async () => ({
       success: true,
-      project: { ...sampleProject, repo: "github.com/agatha/lattice" },
+      project: { ...sampleProject, repo: "github.com/sindral/lattice" },
     }));
     const r = await updateProjectAction({
       id: "lattice-aaaaaaaa-x",
-      repo: "github.com/agatha/lattice",
+      repo: "github.com/sindral/lattice",
     });
     expect(r.ok).toBe(true);
     expect(handle.calls).toEqual([
@@ -106,7 +106,7 @@ describe("updateProjectAction", () => {
         "/projects/lattice-aaaaaaaa-x",
         {
           method: "PATCH",
-          body: { repo: "github.com/agatha/lattice" },
+          body: { repo: "github.com/sindral/lattice" },
         },
       ],
     ]);

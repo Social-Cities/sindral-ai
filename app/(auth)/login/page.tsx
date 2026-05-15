@@ -15,7 +15,7 @@ export default function LoginPage() {
         Sign in
       </div>
       <div className="muted" style={{ fontSize: 13, marginBottom: 18 }}>
-        Welcome back to Agatha Teams.
+        Welcome back to Sindral AI.
       </div>
       <LoginForm />
       <div className="muted" style={{ fontSize: 12.5, marginTop: 14 }}>

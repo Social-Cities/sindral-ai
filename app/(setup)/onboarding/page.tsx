@@ -19,7 +19,7 @@ export default async function OnboardingPage() {
       </div>
       <div className="muted" style={{ fontSize: 13, marginBottom: 18 }}>
         Organizations isolate projects, teammates, and tasks so different
-        teams can use Agatha side by side.
+        teams can use Sindral side by side.
       </div>
 
       <OnboardingForm />

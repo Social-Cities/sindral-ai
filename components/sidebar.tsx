@@ -42,7 +42,7 @@ export function Sidebar({
     <aside className="sidebar">
       <div className="sb-brand">
         <div className="sb-mark">a</div>
-        <span>Agatha</span>
+        <span>Sindral</span>
         <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-faint)", fontFamily: "var(--font-mono)" }}>v0.4</span>
       </div>
 
