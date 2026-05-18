@@ -6,8 +6,10 @@ import { Avatar } from "./atoms";
 import { I } from "./icons";
 import { useTeammates } from "./providers/people-context";
 import {
+  MODELS_BY_RUNTIME,
   RUNTIME_KINDS,
   TASK_TYPES,
+  inferRuntimeFromModel,
   type AgentRole,
   type PersonaPresetId,
   type Project,
@@ -556,7 +558,18 @@ function TeammateEditModal({
   const router = useRouter();
   const [name, setName] = useState(teammate?.name ?? "");
   const [role, setRole] = useState<AgentRole>(teammate?.role ?? "planner");
-  const [model, setModel] = useState(teammate?.model ?? "claude-haiku-5");
+  const initialModel =
+    teammate?.model ?? MODELS_BY_RUNTIME.claude_code[0];
+  const [agent, setAgent] = useState<RuntimeKind>(
+    inferRuntimeFromModel(initialModel),
+  );
+  const [model, setModel] = useState(initialModel);
+
+  const onPickAgent = (next: RuntimeKind) => {
+    setAgent(next);
+    const models = MODELS_BY_RUNTIME[next];
+    if (!models.includes(model)) setModel(models[0]);
+  };
   const [hue, setHue] = useState<number>(teammate?.hue ?? 200);
   const [personaPreset, setPersonaPreset] = useState<PersonaPresetId>(
     teammate?.personaPreset ?? "typescript",
@@ -678,13 +691,36 @@ function TeammateEditModal({
             </div>
           </div>
           <div className="field">
-            <span className="field-label">Model</span>
-            <input
+            <span className="field-label">Agent</span>
+            <select
               className="field-input"
-              placeholder="claude-haiku-5"
-              value={model}
+              value={agent}
+              onChange={(e) => onPickAgent(e.target.value as RuntimeKind)}
+            >
+              {(Object.keys(RUNTIME_KINDS) as RuntimeKind[]).map((k) => (
+                <option key={k} value={k}>
+                  {RUNTIME_KINDS[k].label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <span className="field-label">Model</span>
+            <select
+              className="field-input"
+              value={
+                MODELS_BY_RUNTIME[agent].includes(model)
+                  ? model
+                  : MODELS_BY_RUNTIME[agent][0]
+              }
               onChange={(e) => setModel(e.target.value)}
-            />
+            >
+              {MODELS_BY_RUNTIME[agent].map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="field">
             <span className="field-label">Avatar hue ({hue}°)</span>
