@@ -3,7 +3,7 @@
 -- by a small/cheap model (default claude-haiku-4-5) that compresses the
 -- task's history into a fixed-size context bundle. Recent verbatim turns
 -- are NOT stored here — they're read from task_conversations / *_messages
--- at activity time. See agatha-teams-workers/src/db/memory.ts for the
+-- at activity time. See sindral-ai-workers/src/db/memory.ts for the
 -- read/write helpers and src/runtime/summarize.ts for the summarizer.
 --
 -- human_edited flips to true when the user PATCHes the rollup themselves

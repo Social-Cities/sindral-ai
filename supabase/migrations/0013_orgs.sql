@@ -445,7 +445,7 @@ grant execute on function public.accept_org_invitation(text) to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 8b. Auto-fill org_id on child rows from the parent task. Existing worker
---     code (agatha-teams-workers) inserts task_jobs / task_job_events /
+--     code (sindral-ai-workers) inserts task_jobs / task_job_events /
 --     task_conversations / task_memories with only owner_id + task_id;
 --     these triggers copy the task's org_id forward so the NOT NULL
 --     constraint holds without a worker-side change.

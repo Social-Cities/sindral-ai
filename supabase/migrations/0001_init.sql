@@ -1,4 +1,4 @@
--- Agatha Teams initial schema.
+-- Sindral AI Teams initial schema.
 -- Snake_case columns; the app maps them to camelCase via the query layer.
 
 create table if not exists humans (
