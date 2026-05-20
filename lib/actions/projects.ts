@@ -18,6 +18,9 @@ export interface UpdateProjectInput {
   emoji?: string;
   description?: string | null;
   active?: boolean;
+  /** Pass null to clear, an id to attach. Validated server-side against
+   *  the caller's owned github_installations rows. */
+  githubInstallationId?: string | null;
 }
 
 export type CreateProjectResult =

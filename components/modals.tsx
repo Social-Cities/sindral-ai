@@ -21,6 +21,7 @@ import {
   PERSONA_PRESETS,
   getPersonaPreset,
 } from "@/lib/personas";
+import type { GithubInstallation } from "@/lib/db/types";
 import { createTaskAction } from "@/lib/actions/tasks";
 import {
   createProjectAction,
@@ -804,9 +805,11 @@ function TeammateEditModal({
 
 export function ProjectSettingsModal({
   project,
+  installations,
   onClose,
 }: {
   project: Project;
+  installations: GithubInstallation[];
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -814,6 +817,9 @@ export function ProjectSettingsModal({
   const [emoji, setEmoji] = useState(project.emoji);
   const [repo, setRepo] = useState(project.repo ?? "");
   const [description, setDescription] = useState(project.description ?? "");
+  const [installationId, setInstallationId] = useState<string>(
+    project.githubInstallationId ?? "",
+  );
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -830,6 +836,7 @@ export function ProjectSettingsModal({
         repo: trimmedRepo === "" ? null : trimmedRepo,
         emoji,
         description: trimmedDesc === "" ? null : trimmedDesc,
+        githubInstallationId: installationId === "" ? null : installationId,
       });
       if (!result.ok) {
         setError(result.error);
@@ -872,6 +879,28 @@ export function ProjectSettingsModal({
             />
             <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>
               Leave blank to detach the repo. You can reconnect any time.
+            </div>
+          </div>
+          <div className="field">
+            <span className="field-label">GitHub installation</span>
+            <select
+              className="field-input"
+              value={installationId}
+              onChange={(e) => setInstallationId(e.target.value)}
+            >
+              <option value="">
+                — fallback to GH_TOKEN (dev only) —
+              </option>
+              {installations.map((inst) => (
+                <option key={inst.id} value={inst.id}>
+                  {inst.accountLogin} ({inst.accountType})
+                </option>
+              ))}
+            </select>
+            <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>
+              Workers use this installation&apos;s token to clone, push, and
+              open PRs.{" "}
+              <a href="/settings/github">Manage installations</a>.
             </div>
           </div>
           <div className="field">
