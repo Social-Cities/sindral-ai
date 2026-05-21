@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { ApiError, callAuthed } from "@/lib/api";
+import type { GithubInstallationRepo } from "@/lib/db/types";
 
 function toMessage(err: unknown): string {
   if (err instanceof ApiError) return err.message;
@@ -20,6 +21,26 @@ export async function getGithubInstallStartUrl(): Promise<
       "/api/github/installations/start",
     );
     return { ok: true, url: r.url };
+  } catch (err) {
+    return { ok: false, error: toMessage(err) };
+  }
+}
+
+// Client-callable wrapper around the backend repo list. Returns an empty
+// list (with an error message) instead of throwing so the modal can render
+// "no repos available" without crashing.
+export async function listGithubInstallationReposAction(
+  installationId: string,
+): Promise<
+  | { ok: true; repos: GithubInstallationRepo[] }
+  | { ok: false; error: string }
+> {
+  try {
+    const r = await callAuthed<{ repos: GithubInstallationRepo[] }>(
+      `/api/github/installations/${encodeURIComponent(installationId)}/repos`,
+      { method: "POST" },
+    );
+    return { ok: true, repos: r.repos };
   } catch (err) {
     return { ok: false, error: toMessage(err) };
   }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Avatar } from "./atoms";
 import { I } from "./icons";
@@ -21,10 +21,15 @@ import {
   PERSONA_PRESETS,
   getPersonaPreset,
 } from "@/lib/personas";
-import type { GithubInstallation } from "@/lib/db/types";
+import type {
+  GithubInstallation,
+  GithubInstallationRepo,
+} from "@/lib/db/types";
+import { listGithubInstallationReposAction } from "@/lib/actions/github";
 import { createTaskAction } from "@/lib/actions/tasks";
 import {
   createProjectAction,
+  deleteProjectAction,
   updateProjectAction,
 } from "@/lib/actions/projects";
 import {
@@ -263,15 +268,35 @@ export function NewTaskModal({
   );
 }
 
-export function NewProjectModal({ onClose }: { onClose: () => void }) {
+export function NewProjectModal({
+  installations,
+  onClose,
+}: {
+  installations: GithubInstallation[];
+  onClose: () => void;
+}) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [emoji, setEmoji] = useState("◆");
-  const [repo, setRepo] = useState("");
+  // Auto-pick the first installation when there's only one; otherwise the
+  // user explicitly chooses (or chooses "no repo").
+  const [installationId, setInstallationId] = useState<string>(
+    installations.length === 1 ? installations[0].id : "",
+  );
+  const [repo, setRepo] = useState<string>("");
   const [description, setDescription] = useState("");
   const [step, setStep] = useState<"form" | "confirmRepo">("form");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+
+  const { repos, loading: reposLoading, error: reposError } =
+    useInstallationRepos(installationId);
+
+  // Reset repo selection when the installation changes — the previous repo
+  // belongs to a different installation's accessible list.
+  useEffect(() => {
+    setRepo("");
+  }, [installationId]);
 
   const trimmedName = name.trim();
   const trimmedRepo = repo.trim();
@@ -285,6 +310,7 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
         repo: trimmedRepo === "" ? null : trimmedRepo,
         emoji,
         description: description.trim() ? description.trim() : null,
+        githubInstallationId: installationId === "" ? null : installationId,
       });
       if (!result.ok) {
         setError(result.error);
@@ -340,19 +366,17 @@ export function NewProjectModal({ onClose }: { onClose: () => void }) {
                   style={{ flex: 1 }}
                 />
               </div>
-              <div className="field">
-                <span className="field-label">GitHub repo (optional)</span>
-                <input
-                  className="field-input"
-                  placeholder="github.com/sindral/kettle"
-                  value={repo}
-                  onChange={(e) => setRepo(e.target.value)}
-                />
-                <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>
-                  Leave blank to set up the project without a repo. You can add or
-                  change it later from project settings.
-                </div>
-              </div>
+              <GithubRepoPicker
+                installations={installations}
+                installationId={installationId}
+                onInstallationChange={setInstallationId}
+                repo={repo}
+                onRepoChange={setRepo}
+                repos={repos}
+                reposLoading={reposLoading}
+                reposError={reposError}
+                emptyHelp="Leave blank to set up the project without a repo. You can add or change it later from project settings."
+              />
               <div className="field">
                 <span className="field-label">Description (optional)</span>
                 <textarea
@@ -817,11 +841,40 @@ export function ProjectSettingsModal({
   const [emoji, setEmoji] = useState(project.emoji);
   const [repo, setRepo] = useState(project.repo ?? "");
   const [description, setDescription] = useState(project.description ?? "");
-  const [installationId, setInstallationId] = useState<string>(
-    project.githubInstallationId ?? "",
-  );
+  // If the project doesn't have an installation pinned yet but the user has
+  // exactly one available, default to it so the repo dropdown becomes
+  // interactive immediately. Mirrors NewProjectModal's auto-pick so the
+  // settings modal never lands in a state where the repo box is greyed out
+  // with no visible way to enable it (the installation picker only renders
+  // when there are 2+ installations).
+  const [installationId, setInstallationId] = useState<string>(() => {
+    if (project.githubInstallationId) return project.githubInstallationId;
+    if (installations.length === 1) return installations[0].id;
+    return "";
+  });
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, startDelete] = useTransition();
+
+  const { repos, loading: reposLoading, error: reposError } =
+    useInstallationRepos(installationId);
+
+  // When the user switches installations, the previously selected repo
+  // belongs to a different access list — clear it so they pick again.
+  // Skipped on first render so the existing project.repo stays visible
+  // even when we auto-picked an installation above.
+  const lastInstallationIdRef = useRef(installationId);
+  useEffect(() => {
+    if (lastInstallationIdRef.current !== installationId) {
+      setRepo("");
+      lastInstallationIdRef.current = installationId;
+    }
+  }, [installationId]);
+
+  // Repo is locked once connected — the backend enforces this too, but
+  // we hide the picker so the user doesn't bump into the error.
+  const repoLocked = project.repo !== null;
 
   const submit = () => {
     const trimmedName = name.trim();
@@ -833,7 +886,9 @@ export function ProjectSettingsModal({
       const result = await updateProjectAction({
         id: project.id,
         name: trimmedName,
-        repo: trimmedRepo === "" ? null : trimmedRepo,
+        // Omit repo from the patch when it's locked — never send a value
+        // the server would either reject or no-op on.
+        ...(repoLocked ? {} : { repo: trimmedRepo === "" ? null : trimmedRepo }),
         emoji,
         description: trimmedDesc === "" ? null : trimmedDesc,
         githubInstallationId: installationId === "" ? null : installationId,
@@ -843,6 +898,23 @@ export function ProjectSettingsModal({
         return;
       }
       router.refresh();
+      onClose();
+    });
+  };
+
+  const handleDelete = () => {
+    setError(null);
+    startDelete(async () => {
+      const result = await deleteProjectAction(project.id);
+      if (!result.ok) {
+        setError(result.error);
+        setConfirmDelete(false);
+        return;
+      }
+      // Tasks and child rows cascade — leave the project route and let the
+      // sidebar refresh reflect the missing project.
+      router.refresh();
+      router.push("/inbox");
       onClose();
     });
   };
@@ -869,40 +941,57 @@ export function ProjectSettingsModal({
               style={{ flex: 1 }}
             />
           </div>
-          <div className="field">
-            <span className="field-label">GitHub repo</span>
-            <input
-              className="field-input"
-              placeholder="github.com/sindral/kettle"
-              value={repo}
-              onChange={(e) => setRepo(e.target.value)}
+          {repoLocked ? (
+            <div className="field">
+              <span className="field-label">GitHub repo</span>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "8px 10px",
+                  border: "1px solid var(--line)",
+                  borderRadius: 6,
+                  background: "var(--surface-subtle, transparent)",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 13,
+                  color: "var(--text-muted)",
+                }}
+              >
+                <I.github />
+                <span style={{ color: "var(--text)" }}>{project.repo}</span>
+                <span
+                  style={{
+                    marginLeft: "auto",
+                    fontFamily: "inherit",
+                    fontSize: 11,
+                    padding: "1px 6px",
+                    border: "1px solid var(--line)",
+                    borderRadius: 4,
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  Locked
+                </span>
+              </div>
+              <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>
+                The repo can&apos;t be changed once a project is connected.
+                Delete the project to start over.
+              </div>
+            </div>
+          ) : (
+            <GithubRepoPicker
+              installations={installations}
+              installationId={installationId}
+              onInstallationChange={setInstallationId}
+              repo={repo}
+              onRepoChange={setRepo}
+              repos={repos}
+              reposLoading={reposLoading}
+              reposError={reposError}
+              emptyHelp="Workers use this installation's token to clone, push, and open PRs. Leave repo blank to detach."
             />
-            <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>
-              Leave blank to detach the repo. You can reconnect any time.
-            </div>
-          </div>
-          <div className="field">
-            <span className="field-label">GitHub installation</span>
-            <select
-              className="field-input"
-              value={installationId}
-              onChange={(e) => setInstallationId(e.target.value)}
-            >
-              <option value="">
-                — fallback to GH_TOKEN (dev only) —
-              </option>
-              {installations.map((inst) => (
-                <option key={inst.id} value={inst.id}>
-                  {inst.accountLogin} ({inst.accountType})
-                </option>
-              ))}
-            </select>
-            <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>
-              Workers use this installation&apos;s token to clone, push, and
-              open PRs.{" "}
-              <a href="/settings/github">Manage installations</a>.
-            </div>
-          </div>
+          )}
           <div className="field">
             <span className="field-label">Description</span>
             <textarea
@@ -916,15 +1005,87 @@ export function ProjectSettingsModal({
           {error && (
             <div style={{ color: "var(--type-bug)", fontSize: 12.5, marginTop: 8 }}>{error}</div>
           )}
+          <div
+            className="field"
+            style={{
+              marginTop: 16,
+              paddingTop: 16,
+              borderTop: "1px dashed var(--line)",
+            }}
+          >
+            <span
+              className="field-label"
+              style={{ color: "var(--type-bug)" }}
+            >
+              Danger zone
+            </span>
+            {!confirmDelete ? (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                }}
+              >
+                <div className="muted" style={{ fontSize: 12.5 }}>
+                  Deletes this project and every task, plan, and message
+                  beneath it. This can&apos;t be undone.
+                </div>
+                <button
+                  className="btn sm"
+                  onClick={() => setConfirmDelete(true)}
+                  disabled={pending || deleting}
+                  style={{
+                    color: "var(--type-bug)",
+                    borderColor: "var(--type-bug)",
+                  }}
+                >
+                  Delete project
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ fontSize: 13 }}>
+                  Permanently delete <strong>{project.name}</strong> and all of
+                  its tasks?
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    className="btn sm ghost"
+                    onClick={() => setConfirmDelete(false)}
+                    disabled={deleting}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="btn sm"
+                    onClick={handleDelete}
+                    disabled={deleting}
+                    style={{
+                      color: "var(--type-bug)",
+                      borderColor: "var(--type-bug)",
+                    }}
+                  >
+                    {deleting ? "Deleting…" : "Yes, delete forever"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
         <div className="modal-foot">
-          <button className="btn ghost" onClick={onClose} disabled={pending}>
+          <button
+            className="btn ghost"
+            onClick={onClose}
+            disabled={pending || deleting}
+          >
             Cancel
           </button>
           <button
             className="btn primary"
             onClick={submit}
-            disabled={!name.trim() || pending}
+            disabled={!name.trim() || pending || deleting}
           >
             {pending ? "Saving…" : "Save"}
           </button>
@@ -1058,6 +1219,169 @@ export function AssignWorkerModal({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// GitHub repo picker — shared between New project and Project settings modals.
+// Loads repos lazily per installation so we don't pay 1 GitHub API call per
+// installation on initial render.
+// ---------------------------------------------------------------------------
+
+function useInstallationRepos(installationId: string): {
+  repos: GithubInstallationRepo[];
+  loading: boolean;
+  error: string | null;
+} {
+  const [repos, setRepos] = useState<GithubInstallationRepo[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!installationId) {
+      setRepos([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    listGithubInstallationReposAction(installationId)
+      .then((r) => {
+        if (cancelled) return;
+        if (r.ok) {
+          setRepos(r.repos);
+        } else {
+          setRepos([]);
+          setError(r.error);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [installationId]);
+
+  return { repos, loading, error };
+}
+
+function GithubRepoPicker({
+  installations,
+  installationId,
+  onInstallationChange,
+  repo,
+  onRepoChange,
+  repos,
+  reposLoading,
+  reposError,
+  emptyHelp,
+}: {
+  installations: GithubInstallation[];
+  installationId: string;
+  onInstallationChange: (id: string) => void;
+  repo: string;
+  onRepoChange: (repo: string) => void;
+  repos: GithubInstallationRepo[];
+  reposLoading: boolean;
+  reposError: string | null;
+  emptyHelp: string;
+}) {
+  const noInstallations = installations.length === 0;
+
+  // Sort repos alphabetically so the dropdown order is predictable across
+  // re-renders (GitHub returns by recently-updated by default).
+  const sortedRepos = [...repos].sort((a, b) =>
+    a.fullName.localeCompare(b.fullName),
+  );
+
+  // If the project already has a repo set that isn't in the loaded list yet
+  // (e.g. the installation lost access, or the list hasn't loaded), keep it
+  // selectable so we don't silently drop it.
+  const repoInList = sortedRepos.some((r) => r.fullName === repo);
+  const showOrphanRepo = !!repo && !repoInList && !reposLoading;
+
+  return (
+    <div className="field">
+      <span className="field-label">GitHub repo (optional)</span>
+      {noInstallations ? (
+        <>
+          <select
+            className="field-input"
+            value=""
+            disabled
+            aria-label="No GitHub repos available"
+          >
+            <option value="">— no available repos —</option>
+          </select>
+          <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>
+            Connect a GitHub App installation to pick a repo.{" "}
+            <a href="/settings/github">Connect GitHub</a>.
+          </div>
+        </>
+      ) : (
+        <>
+          {installations.length > 1 && (
+            <select
+              className="field-input"
+              value={installationId}
+              onChange={(e) => onInstallationChange(e.target.value)}
+              style={{ marginBottom: 6 }}
+              aria-label="GitHub installation"
+            >
+              <option value="">— pick an installation —</option>
+              {installations.map((inst) => (
+                <option key={inst.id} value={inst.id}>
+                  {inst.accountLogin} ({inst.accountType})
+                </option>
+              ))}
+            </select>
+          )}
+          <select
+            className="field-input"
+            value={repo}
+            onChange={(e) => onRepoChange(e.target.value)}
+            disabled={!installationId || reposLoading}
+            aria-label="GitHub repo"
+          >
+            <option value="">
+              {!installationId
+                ? "— pick an installation first —"
+                : reposLoading
+                  ? "Loading repos…"
+                  : reposError
+                    ? "— no available repos —"
+                    : sortedRepos.length === 0
+                      ? "— no available repos —"
+                      : "— pick a repo —"}
+            </option>
+            {showOrphanRepo && (
+              <option value={repo}>{repo} (current)</option>
+            )}
+            {sortedRepos.map((r) => (
+              <option key={r.id} value={r.fullName}>
+                {r.fullName}
+                {r.private ? " 🔒" : ""}
+              </option>
+            ))}
+          </select>
+          {reposError ? (
+            <div
+              className="muted"
+              style={{ fontSize: 12.5, marginTop: 6, color: "var(--type-bug)" }}
+            >
+              Couldn&apos;t load repos: {reposError}
+            </div>
+          ) : (
+            <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>
+              {emptyHelp}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
