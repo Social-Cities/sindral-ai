@@ -33,6 +33,7 @@ vi.mock("@/lib/api", () => ({
 
 import {
   createProjectAction,
+  deleteProjectAction,
   updateProjectAction,
 } from "@/lib/actions/projects";
 
@@ -88,6 +89,25 @@ describe("createProjectAction", () => {
     const r = await createProjectAction({ name: "", repo: null });
     expect(r).toEqual({ ok: false, error: "Name is required." });
   });
+
+  it("forwards githubInstallationId in the body", async () => {
+    handle.set(async () => ({
+      success: true,
+      project: { ...sampleProject, githubInstallationId: "gh-inst-aaa" },
+    }));
+    await createProjectAction({
+      name: "Lattice",
+      repo: "sindral/lattice",
+      githubInstallationId: "gh-inst-aaa",
+    });
+    expect(handle.calls[0]?.[1]).toMatchObject({
+      body: {
+        name: "Lattice",
+        repo: "sindral/lattice",
+        githubInstallationId: "gh-inst-aaa",
+      },
+    });
+  });
 });
 
 describe("updateProjectAction", () => {
@@ -118,5 +138,33 @@ describe("updateProjectAction", () => {
     });
     const r = await updateProjectAction({ id: "p1" });
     expect(r).toEqual({ ok: false, error: "No fields to update." });
+  });
+});
+
+describe("deleteProjectAction", () => {
+  it("DELETEs /projects/:id and reports ok on success", async () => {
+    handle.set(async () => ({ success: true }));
+    const r = await deleteProjectAction("lattice-aaaaaaaa-x");
+    expect(r).toEqual({ ok: true });
+    expect(handle.calls).toEqual([
+      [
+        "/projects/lattice-aaaaaaaa-x",
+        { method: "DELETE" },
+      ],
+    ]);
+  });
+
+  it("encodes the id so slashes can't escape the path", async () => {
+    handle.set(async () => ({ success: true }));
+    await deleteProjectAction("with/slash");
+    expect(handle.calls[0]?.[0]).toBe("/projects/with%2Fslash");
+  });
+
+  it("forwards backend errors", async () => {
+    handle.set(async () => {
+      throw new handle.ApiError(400, "FK violation");
+    });
+    const r = await deleteProjectAction("p1");
+    expect(r).toEqual({ ok: false, error: "FK violation" });
   });
 });

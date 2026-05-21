@@ -7,7 +7,11 @@ import { Topbar } from "./topbar";
 import { WorkersStrip } from "./workers-strip";
 import { NewProjectModal, NewTaskModal, TeammatesModal } from "./modals";
 import type { Project, ProjectWithCounts } from "@/lib/data";
-import type { OrgMembership, Organization } from "@/lib/db/types";
+import type {
+  GithubInstallation,
+  OrgMembership,
+  Organization,
+} from "@/lib/db/types";
 
 const ACCENT = "#4a8a5a";
 
@@ -36,12 +40,14 @@ function parsePath(path: string): ParsedRoute {
 
 export function AppShell({
   projects,
+  installations,
   currentUserEmail,
   currentOrg,
   memberships,
   children,
 }: {
   projects: ProjectWithCounts[];
+  installations: GithubInstallation[];
   currentUserEmail: string | null;
   currentOrg: Organization;
   memberships: OrgMembership[];
@@ -124,7 +130,10 @@ export function AppShell({
         />
       )}
       {showNewProject && (
-        <NewProjectModal onClose={() => setShowNewProject(false)} />
+        <NewProjectModal
+          installations={installations}
+          onClose={() => setShowNewProject(false)}
+        />
       )}
       {showTeammates && (
         <TeammatesModal onClose={() => setShowTeammates(false)} />

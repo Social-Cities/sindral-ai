@@ -9,6 +9,8 @@ export interface CreateProjectInput {
   repo: string | null;
   emoji?: string;
   description?: string | null;
+  /** Optional github_installations.id. Validated server-side. */
+  githubInstallationId?: string | null;
 }
 
 export interface UpdateProjectInput {
@@ -18,6 +20,9 @@ export interface UpdateProjectInput {
   emoji?: string;
   description?: string | null;
   active?: boolean;
+  /** Pass null to clear, an id to attach. Validated server-side against
+   *  the caller's owned github_installations rows. */
+  githubInstallationId?: string | null;
 }
 
 export type CreateProjectResult =
@@ -26,6 +31,10 @@ export type CreateProjectResult =
 
 export type UpdateProjectResult =
   | { ok: true; project: Project }
+  | { ok: false; error: string };
+
+export type DeleteProjectResult =
+  | { ok: true }
   | { ok: false; error: string };
 
 function toMessage(err: unknown): string {
@@ -44,6 +53,20 @@ export async function createProjectAction(
     );
     revalidatePath("/", "layout");
     return { ok: true, project: r.project };
+  } catch (err) {
+    return { ok: false, error: toMessage(err) };
+  }
+}
+
+export async function deleteProjectAction(
+  id: string,
+): Promise<DeleteProjectResult> {
+  try {
+    await callAuthed(`/projects/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+    revalidatePath("/", "layout");
+    return { ok: true };
   } catch (err) {
     return { ok: false, error: toMessage(err) };
   }

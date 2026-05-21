@@ -79,6 +79,29 @@ export interface Project {
   emoji: string;
   description: string | null;
   active: boolean;
+  /** Our github_installations row id pinned for repo ops on this project.
+   *  Null means fall back to the GH_TOKEN env var (dev-only). */
+  githubInstallationId: string | null;
+}
+
+export type GithubAccountType = "User" | "Organization";
+
+export interface GithubInstallation {
+  id: string;
+  installationId: number;
+  accountLogin: string;
+  accountType: GithubAccountType;
+  accountId: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GithubInstallationRepo {
+  id: number;
+  name: string;
+  fullName: string;
+  private: boolean;
+  defaultBranch: string | null;
 }
 
 export interface ProjectWithCounts extends Project {

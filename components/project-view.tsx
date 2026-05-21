@@ -12,15 +12,18 @@ import {
   type Project,
   type Task,
 } from "@/lib/data";
+import type { GithubInstallation } from "@/lib/db/types";
 
 type Tab = "all" | "mine" | "agents" | "code" | "archive";
 
 export function ProjectView({
   project,
   tasks,
+  githubInstallations,
 }: {
   project: Project;
   tasks: Task[];
+  githubInstallations: GithubInstallation[];
 }) {
   const currentUserId = useCurrentUserId();
   const [tab, setTab] = useState<Tab>("all");
@@ -128,6 +131,7 @@ export function ProjectView({
       {showSettings && (
         <ProjectSettingsModal
           project={project}
+          installations={githubInstallations}
           onClose={() => setShowSettings(false)}
         />
       )}
