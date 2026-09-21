@@ -1,0 +1,522 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { DEFAULT_TROUBLESHOOT_STEP, TransitionError, type AgentJobPayload, type Task } from '@sindral/shared';
+import { claimNext, completeNext, createTestApp, plan, pr, reload, review, verdict, type TestContext } from '../test/helpers.js';
+import { HttpError } from '../errors.js';
+
+let ctx: TestContext;
+let userId: string;
+
+beforeEach(async () => {
+  ctx = await createTestApp();
+  userId = ctx.userA;
+});
+afterEach(async () => {
+  await ctx.app.close();
+});
+
+const orch = () => ctx.app.ctx.orchestrator;
+
+async function newTask(input: Partial<{ title: string; repos: string[]; key: string; workflowId: string; description: string }> = {}): Promise<Task> {
+  return orch().createTask(userId, { title: input.title ?? 'Build feature', description: input.description ?? 'Do the thing', repos: input.repos ?? ['acme/app'], key: input.key, workflowId: input.workflowId });
+}
+
+async function queuedJobs(taskId: string) {
+  return (await ctx.repo.listJobsForTask(userId, taskId)).filter((j) => j.status === 'queued');
+}
+
+function agentPayload(job: { payload: unknown }): AgentJobPayload {
+  const payload = job.payload as AgentJobPayload;
+  expect(payload.kind).toBe('agent');
+  return payload;
+}
+
+describe('task creation', () => {
+  it('assigns SIN-n keys, default workflow and branch', async () => {
+    const t1 = await newTask();
+    const t2 = await newTask({ repos: [] });
+    expect(t1.key).toBe('SIN-1');
+    expect(t2.key).toBe('SIN-2');
+    expect(t1.branch).toBe('sindral/sin-1');
+    expect(t2.branch).toBeNull();
+    expect(t1.state).toBe('todo');
+    expect(t1.pinnedWorkflow).toBeNull();
+    const workflows = await ctx.app.ctx.workflows.list(userId);
+    expect(workflows).toHaveLength(4);
+    expect(t1.workflowId).toBe(workflows.find((w) => w.isDefault)!.id);
+  });
+
+  it('uses the ticket key when given and rejects duplicates', async () => {
+    const t = await newTask({ key: 'ENG-42' });
+    expect(t.key).toBe('ENG-42');
+    expect(t.branch).toBe('sindral/eng-42');
+    await expect(newTask({ key: 'ENG-42' })).rejects.toThrow(/already exists/);
+  });
+
+  it('rejects an unknown workflow', async () => {
+    await expect(newTask({ workflowId: 'nope' })).rejects.toBeInstanceOf(HttpError);
+  });
+});
+
+describe('full SDLC happy path', () => {
+  it('moves from todo to done through worker completions and pins the workflow on first start', async () => {
+    let task = await newTask();
+    task = await orch().applyUserEvent(userId, task.id, 'start');
+    expect(task.state).toBe('planning');
+    expect(task.currentStepId).toBe('planning');
+    expect(task.pinnedWorkflow?.name).toBe('Full SDLC');
+
+    const [job] = await queuedJobs(task.id);
+    const payload = agentPayload(job!);
+    expect(payload.step.id).toBe('planning');
+    expect(payload.context.task_key).toBe('SIN-1');
+    expect(payload.context.task_description).toBe('Do the thing');
+    expect(payload.branch).toBe('sindral/sin-1');
+
+    await completeNext(ctx, userId, plan('# The plan'));
+    task = await reload(ctx, userId, task);
+    expect(task.state).toBe('plan-review');
+    expect(task.plan).toBe('# The plan');
+    const messages = await ctx.repo.listMessages(userId, task.id);
+    expect(messages.at(-1)).toMatchObject({ role: 'agent', source: 'worker', content: 'planned' });
+
+    task = await orch().applyUserEvent(userId, task.id, 'approve');
+    expect(task.state).toBe('implement');
+    const implJob = (await queuedJobs(task.id))[0]!;
+    expect(agentPayload(implJob).context.plan).toBe('# The plan');
+
+    await completeNext(ctx, userId, pr(7));
+    task = await reload(ctx, userId, task);
+    expect(task.state).toBe('adversarial-review');
+    expect(task.prUrl).toBe('https://github.com/acme/app/pull/7');
+    expect(agentPayload((await queuedJobs(task.id))[0]!).context.pr_url).toBe('https://github.com/acme/app/pull/7');
+
+    await completeNext(ctx, userId, review());
+    task = await reload(ctx, userId, task);
+    expect(task.state).toBe('verify');
+    const artifacts = await ctx.repo.listArtifacts(userId, task.id);
+    expect(artifacts.map((a) => a.name)).toEqual(['adversarial-review.md']);
+    expect(agentPayload((await queuedJobs(task.id))[0]!).context.review).toBe('# Review');
+
+    await completeNext(ctx, userId, verdict(true));
+    task = await reload(ctx, userId, task);
+    expect(task.state).toBe('in-review');
+    expect((await ctx.repo.listArtifacts(userId, task.id)).map((a) => a.name)).toEqual(['adversarial-review.md', 'verify-report.md']);
+
+    task = await orch().applyUserEvent(userId, task.id, 'accept');
+    expect(task.state).toBe('done');
+    expect(task.currentStepId).toBe('done');
+
+    const events = await ctx.repo.listEvents(userId, task.id);
+    const transitions = events.filter((e) => e.type === 'transition').map((e) => `${e.fromState}->${e.toState}`);
+    expect(transitions).toEqual([
+      'todo->planning',
+      'planning->plan-review',
+      'plan-review->implement',
+      'implement->adversarial-review',
+      'adversarial-review->verify',
+      'verify->in-review',
+      'in-review->done',
+    ]);
+    expect(events.find((e) => e.type === 'transition')?.detail).toMatchObject({ event: 'start', actor: 'user' });
+    await expect(orch().applyUserEvent(userId, task.id, 'accept')).rejects.toBeInstanceOf(TransitionError);
+  });
+
+  it('keeps using the pinned snapshot after the live workflow changes', async () => {
+    let task = await newTask();
+    task = await orch().applyUserEvent(userId, task.id, 'start');
+    const live = await ctx.app.ctx.workflows.get(userId, task.workflowId!);
+    await ctx.app.ctx.workflows.update(userId, live!.id, { ...live!, name: 'Renamed', edges: live!.edges.filter((e) => e.event !== 'approve') });
+    await completeNext(ctx, userId, plan());
+    task = await orch().applyUserEvent(userId, task.id, 'approve');
+    expect(task.state).toBe('implement');
+  });
+});
+
+describe('feedback loops', () => {
+  it('chat on plan-review dispatches the revision agent with the feedback in context', async () => {
+    let task = await newTask();
+    await orch().applyUserEvent(userId, task.id, 'start');
+    await completeNext(ctx, userId, plan());
+    const { message, task: after } = await orch().postUserMessage(userId, task.id, 'Please add tests', 'web');
+    expect(message?.role).toBe('user');
+    expect(after.state).toBe('planning-feedback');
+    const job = (await queuedJobs(task.id))[0]!;
+    expect(agentPayload(job).step.id).toBe('planning-feedback');
+    expect(agentPayload(job).context.feedback).toBe('Please add tests');
+    await completeNext(ctx, userId, plan('# v2'));
+    task = await reload(ctx, userId, task);
+    expect(task.state).toBe('plan-review');
+    expect(task.plan).toBe('# v2');
+  });
+
+  it('collects only user messages since the last agent message', async () => {
+    const task = await newTask();
+    await orch().applyUserEvent(userId, task.id, 'start');
+    await completeNext(ctx, userId, plan());
+    await orch().postUserMessage(userId, task.id, 'first', 'web');
+    await completeNext(ctx, userId, plan('# v2'));
+    await orch().postUserMessage(userId, task.id, 'second', 'web');
+    const job = (await queuedJobs(task.id))[0]!;
+    expect(agentPayload(job).context.feedback).toBe('second');
+  });
+
+  it('chat while an agent runs is stored without a transition', async () => {
+    const task = await newTask();
+    await orch().applyUserEvent(userId, task.id, 'start');
+    const { task: after } = await orch().postUserMessage(userId, task.id, 'note', 'web');
+    expect(after.state).toBe('planning');
+    expect(await queuedJobs(task.id)).toHaveLength(1);
+  });
+
+  it('verify NO_GO routes to implement-feedback with the verdict feedback as context', async () => {
+    let task = await newTask();
+    await orch().applyUserEvent(userId, task.id, 'start');
+    await completeNext(ctx, userId, plan());
+    await orch().applyUserEvent(userId, task.id, 'approve');
+    await completeNext(ctx, userId, pr());
+    await completeNext(ctx, userId, review());
+    await completeNext(ctx, userId, verdict(false, 'Fix the null check'));
+    task = await reload(ctx, userId, task);
+    expect(task.state).toBe('implement-feedback');
+    const job = (await queuedJobs(task.id))[0]!;
+    expect(agentPayload(job).context.feedback).toBe('Fix the null check');
+    expect(agentPayload(job).context.verify_report).toBe('# Verify');
+    expect(agentPayload(job).prUrl).toBe('https://github.com/acme/app/pull/1');
+    await completeNext(ctx, userId, pr());
+    task = await reload(ctx, userId, task);
+    expect(task.state).toBe('adversarial-review');
+  });
+
+  it('in-review feedback dispatches address-feedback and returns to review after GO', async () => {
+    let task = await newTask();
+    await orch().applyUserEvent(userId, task.id, 'start');
+    await completeNext(ctx, userId, plan());
+    await orch().applyUserEvent(userId, task.id, 'approve');
+    await completeNext(ctx, userId, pr());
+    await completeNext(ctx, userId, review());
+    await completeNext(ctx, userId, verdict(true));
+    const { task: after } = await orch().postUserMessage(userId, task.id, 'Rename the helper', 'web');
+    expect(after.state).toBe('implement-feedback');
+    await completeNext(ctx, userId, pr());
+    await completeNext(ctx, userId, review());
+    await completeNext(ctx, userId, verdict(true));
+    task = await reload(ctx, userId, task);
+    expect(task.state).toBe('in-review');
+  });
+});
+
+describe('failure handling', () => {
+  async function failedTask(): Promise<Task> {
+    const task = await newTask();
+    await orch().applyUserEvent(userId, task.id, 'start');
+    await completeNext(ctx, userId, plan());
+    await orch().applyUserEvent(userId, task.id, 'approve');
+    const job = await claimNext(ctx, userId);
+    await orch().failJob(userId, job!.id, 'npm install exploded');
+    return reload(ctx, userId, task);
+  }
+
+  it('parks the task in failure with the error and failed step', async () => {
+    const task = await failedTask();
+    expect(task.state).toBe('failure');
+    expect(task.failedStepId).toBe('implement');
+    expect(task.currentStepId).toBe('implement');
+    expect(task.lastError).toBe('npm install exploded');
+    const messages = await ctx.repo.listMessages(userId, task.id);
+    expect(messages.at(-1)?.content).toContain('npm install exploded');
+    const jobs = await ctx.repo.listJobsForTask(userId, task.id);
+    expect(jobs.at(-1)?.status).toBe('failed');
+  });
+
+  it('troubleshoot → resolved → retries the failed step', async () => {
+    let task = await failedTask();
+    await orch().postUserMessage(userId, task.id, 'The registry needs a proxy', 'web');
+    task = await reload(ctx, userId, task);
+    expect(task.state).toBe('failure');
+
+    task = await orch().applyUserEvent(userId, task.id, 'troubleshoot');
+    expect(task.state).toBe('troubleshoot');
+    const job = (await queuedJobs(task.id))[0]!;
+    const payload = agentPayload(job);
+    expect(payload.step.id).toBe(DEFAULT_TROUBLESHOOT_STEP.id);
+    expect(payload.context.error).toBe('npm install exploded');
+    expect(payload.context.feedback).toContain('registry needs a proxy');
+
+    await completeNext(ctx, userId, { kind: 'troubleshoot', summary: 'fixed', diagnosis: 'Set proxy', resolved: true });
+    task = await reload(ctx, userId, task);
+    expect(task.state).toBe('implement');
+    expect(task.failedStepId).toBeNull();
+    expect(agentPayload((await queuedJobs(task.id))[0]!).step.id).toBe('implement');
+  });
+
+  it('troubleshoot unresolved returns to failure', async () => {
+    let task = await failedTask();
+    await orch().applyUserEvent(userId, task.id, 'troubleshoot');
+    await completeNext(ctx, userId, { kind: 'troubleshoot', summary: 'stuck', diagnosis: 'Needs credentials', resolved: false });
+    task = await reload(ctx, userId, task);
+    expect(task.state).toBe('failure');
+    expect(task.failedStepId).toBe('implement');
+  });
+
+  it('retry re-dispatches the failed step directly', async () => {
+    let task = await failedTask();
+    task = await orch().applyUserEvent(userId, task.id, 'retry');
+    expect(task.state).toBe('implement');
+    expect(await queuedJobs(task.id)).toHaveLength(1);
+    await expect(orch().applyUserEvent(userId, task.id, 'approve')).rejects.toBeInstanceOf(TransitionError);
+  });
+
+  it('rejects results whose kind does not match the step output', async () => {
+    const task = await newTask();
+    await orch().applyUserEvent(userId, task.id, 'start');
+    const job = await claimNext(ctx, userId);
+    await expect(orch().completeJob(userId, job!.id, pr())).rejects.toMatchObject({ statusCode: 400 });
+    await expect(orch().completeJob(userId, job!.id, plan())).resolves.toBeUndefined();
+    await expect(orch().completeJob(userId, job!.id, plan())).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it('stores a stale result without transitioning when the task has moved on', async () => {
+    let task = await newTask();
+    await orch().applyUserEvent(userId, task.id, 'start');
+    const job = await claimNext(ctx, userId);
+    task = await orch().applyUserEvent(userId, task.id, 'fail');
+    expect(task.state).toBe('failure');
+    await orch().completeJob(userId, job!.id, plan('# late'));
+    task = await reload(ctx, userId, task);
+    expect(task.state).toBe('failure');
+    expect(task.plan).toBe('# late');
+    expect((await ctx.repo.listEvents(userId, task.id)).some((e) => e.type === 'stale-result')).toBe(true);
+  });
+
+  it('deleting a task cancels queued jobs', async () => {
+    const task = await newTask();
+    await orch().applyUserEvent(userId, task.id, 'start');
+    const [job] = await queuedJobs(task.id);
+    await orch().deleteTask(userId, task.id);
+    expect(await ctx.repo.getTask(userId, task.id)).toBeNull();
+    expect(await ctx.repo.getJob(userId, job!.id)).toBeNull();
+    expect(await claimNext(ctx, userId)).toBeNull();
+  });
+});
+
+describe('subtask stacks', () => {
+  const SUBTASKS = [
+    { title: 'Add schema', goal: 'Create the DB schema' },
+    { title: 'Add API', goal: 'Expose the endpoints' },
+    { title: 'Add UI', goal: 'Wire the screens' },
+  ];
+
+  async function plannedParent(): Promise<{ parent: Task; children: Task[] }> {
+    const parent = await newTask({ title: 'Big feature' });
+    await orch().applyUserEvent(userId, parent.id, 'start');
+    await completeNext(ctx, userId, plan('# Parent plan', SUBTASKS));
+    const children = await ctx.repo.listSubtasks(userId, parent.id);
+    return { parent: await reload(ctx, userId, parent), children };
+  }
+
+  it('creates ordered children with chained base branches and the parent snapshot', async () => {
+    const { parent, children } = await plannedParent();
+    expect(parent.state).toBe('plan-review');
+    expect(children.map((c) => c.sequence)).toEqual([1, 2, 3]);
+    expect(children.map((c) => c.key)).toEqual(['SIN-2', 'SIN-3', 'SIN-4']);
+    expect(children.map((c) => c.baseBranch)).toEqual([null, 'sindral/sin-2', 'sindral/sin-3']);
+    expect(children.every((c) => c.parentTaskId === parent.id && c.state === 'todo')).toBe(true);
+    expect(children[0]!.pinnedWorkflow?.name).toBe('Full SDLC');
+    expect(children[0]!.description).toBe('Create the DB schema');
+    expect(children[0]!.repos).toEqual(['acme/app']);
+    const list = await ctx.repo.listTasks(userId, {});
+    expect(list.map((t) => t.id)).toEqual([parent.id]);
+  });
+
+  it('does not create subtasks for a single subtask or for a subtask plan', async () => {
+    const parent = await newTask();
+    await orch().applyUserEvent(userId, parent.id, 'start');
+    await completeNext(ctx, userId, plan('# p', [{ title: 'only', goal: 'one' }]));
+    expect(await ctx.repo.listSubtasks(userId, parent.id)).toHaveLength(0);
+  });
+
+  it('starts child #1 instead of dispatching the parent implement step, then runs children serially', async () => {
+    const { parent, children } = await plannedParent();
+    let p = await orch().applyUserEvent(userId, parent.id, 'approve');
+    expect(p.state).toBe('implement');
+    expect(await queuedJobs(parent.id)).toHaveLength(0);
+
+    let c1 = await reload(ctx, userId, children[0]!);
+    expect(c1.state).toBe('planning');
+    const c1Job = (await queuedJobs(c1.id))[0]!;
+    expect(agentPayload(c1Job).context.parent_plan).toBe('# Parent plan');
+    expect(agentPayload(c1Job).context.sibling_summaries).toBe('');
+    expect((await reload(ctx, userId, children[1]!)).state).toBe('todo');
+
+    // child 1 through to in-review
+    await completeNext(ctx, userId, plan('# c1 plan'));
+    await orch().applyUserEvent(userId, c1.id, 'approve');
+    expect(agentPayload((await queuedJobs(c1.id))[0]!).step.id).toBe('implement');
+    await completeNext(ctx, userId, pr(10, 'sindral/sin-2'));
+    await completeNext(ctx, userId, review());
+    await completeNext(ctx, userId, verdict(true));
+    c1 = await reload(ctx, userId, c1);
+    expect(c1.state).toBe('in-review');
+
+    // child 2 was started when child 1 hit in-review
+    const c2 = await reload(ctx, userId, children[1]!);
+    expect(c2.state).toBe('planning');
+    const c2Job = (await queuedJobs(c2.id))[0]!;
+    expect(agentPayload(c2Job).context.sibling_summaries).toContain('SIN-2 Add schema');
+    expect(agentPayload(c2Job).context.sibling_summaries).toContain('GO');
+    expect(agentPayload(c2Job).baseBranch).toBe('sindral/sin-2');
+    expect((await reload(ctx, userId, children[2]!)).state).toBe('todo');
+
+    p = await reload(ctx, userId, parent);
+    expect(p.state).toBe('implement');
+  });
+
+  it('enqueues a rebase-stack job when an earlier child pushes while later children have PRs', async () => {
+    const { parent, children } = await plannedParent();
+    await orch().applyUserEvent(userId, parent.id, 'approve');
+    // c1 → in-review
+    await completeNext(ctx, userId, plan());
+    await orch().applyUserEvent(userId, children[0]!.id, 'approve');
+    await completeNext(ctx, userId, pr(10, 'sindral/sin-2'));
+    await completeNext(ctx, userId, review());
+    await completeNext(ctx, userId, verdict(true));
+    // c2 → in-review (has PR now)
+    await completeNext(ctx, userId, plan());
+    await orch().applyUserEvent(userId, children[1]!.id, 'approve');
+    await completeNext(ctx, userId, pr(11, 'sindral/sin-3'));
+    await completeNext(ctx, userId, review());
+    await completeNext(ctx, userId, verdict(true));
+    expect((await reload(ctx, userId, children[2]!)).state).toBe('planning');
+
+    // feedback on c1 → new push → rebase c2 (c3 has no PR yet)
+    await orch().postUserMessage(userId, children[0]!.id, 'tweak', 'web');
+    expect((await reload(ctx, userId, children[0]!)).state).toBe('implement-feedback');
+    const c1Job = (await ctx.repo.listJobsForTask(userId, children[0]!.id)).find((j) => j.status === 'queued')!;
+    await ctx.repo.claimJobs(userId, 'w', 1); // c3 planning job is older; claim + ignore it so c1 is next
+    const claimed = await ctx.repo.claimJobs(userId, 'w', 5);
+    expect(claimed.map((j) => j.id)).toContain(c1Job.id);
+    await orch().completeJob(userId, c1Job.id, pr(10, 'sindral/sin-2'));
+
+    const parentJobs = await ctx.repo.listJobsForTask(userId, parent.id);
+    const rebase = parentJobs.find((j) => j.kind === 'rebase-stack')!;
+    expect(rebase).toBeDefined();
+    expect(rebase.status).toBe('queued');
+    expect(rebase.payload).toEqual({
+      kind: 'rebase-stack',
+      repos: ['acme/app'],
+      stack: [{ taskId: children[1]!.id, branch: 'sindral/sin-3', baseBranch: 'sindral/sin-2' }],
+    });
+
+    // failed rebase parks the sibling in failure
+    await ctx.repo.updateJob(userId, rebase.id, { status: 'claimed', workerId: 'w' });
+    await expect(orch().completeJob(userId, rebase.id, pr())).rejects.toMatchObject({ statusCode: 400 });
+    await orch().completeJob(userId, rebase.id, {
+      kind: 'rebase',
+      summary: 'rebased',
+      rebased: [{ taskId: children[1]!.id, branch: 'sindral/sin-3', ok: false, error: 'conflict in schema.sql' }],
+    });
+    const c2 = await reload(ctx, userId, children[1]!);
+    expect(c2.state).toBe('failure');
+    expect(c2.lastError).toBe('conflict in schema.sql');
+    expect(c2.failedStepId).toBe('in-review');
+    expect((await reload(ctx, userId, parent)).state).toBe('implement');
+  });
+
+  it('completes the parent when every child is done', async () => {
+    const parent = await newTask();
+    await orch().applyUserEvent(userId, parent.id, 'start');
+    await completeNext(ctx, userId, plan('# p', SUBTASKS.slice(0, 2)));
+    await orch().applyUserEvent(userId, parent.id, 'approve');
+    const [c1, c2] = await ctx.repo.listSubtasks(userId, parent.id);
+    for (const child of [c1!, c2!]) {
+      await completeNext(ctx, userId, plan());
+      await orch().applyUserEvent(userId, child.id, 'approve');
+      await completeNext(ctx, userId, pr());
+      await completeNext(ctx, userId, review());
+      await completeNext(ctx, userId, verdict(true));
+    }
+    expect((await reload(ctx, userId, parent)).state).toBe('implement');
+    await orch().applyUserEvent(userId, c1!.id, 'accept');
+    expect((await reload(ctx, userId, parent)).state).toBe('implement');
+    await orch().applyUserEvent(userId, c2!.id, 'accept');
+    const done = await reload(ctx, userId, parent);
+    expect(done.state).toBe('done');
+    expect(done.currentStepId).toBe('done');
+    const events = await ctx.repo.listEvents(userId, parent.id);
+    expect(events.at(-1)).toMatchObject({ type: 'subtasks-complete', toState: 'done' });
+  });
+});
+
+describe('job claiming', () => {
+  it('serialises jobs per task and hands out the oldest first', async () => {
+    const a = await newTask();
+    const b = await newTask();
+    await orch().applyUserEvent(userId, a.id, 'start');
+    await orch().applyUserEvent(userId, b.id, 'start');
+    await ctx.repo.createJob(userId, { taskId: a.id, kind: 'agent', stepId: 'x', payload: { kind: 'agent', step: DEFAULT_TROUBLESHOOT_STEP, context: {} as never, repos: [], branch: null, baseBranch: null, prUrl: null } });
+
+    const first = await ctx.repo.claimJobs(userId, 'w1', 10);
+    expect(first.map((j) => j.taskId)).toEqual([a.id, b.id]);
+    expect(first.every((j) => j.status === 'claimed' && j.workerId === 'w1' && j.claimedAt)).toBe(true);
+    expect(await ctx.repo.claimJobs(userId, 'w2', 10)).toEqual([]);
+
+    await ctx.repo.updateJob(userId, first[0]!.id, { status: 'completed' });
+    const next = await ctx.repo.claimJobs(userId, 'w2', 10);
+    expect(next).toHaveLength(1);
+    expect(next[0]!.taskId).toBe(a.id);
+    expect(await ctx.repo.claimJobs(ctx.userB, 'w3', 10)).toEqual([]);
+  });
+});
+
+describe('stale job sweeper', () => {
+  it('requeues jobs from lost workers and fails them after the last attempt', async () => {
+    const task = await newTask();
+    await orch().applyUserEvent(userId, task.id, 'start');
+    const worker = await ctx.repo.createWorker(userId, { name: 'w', hostname: 'h', version: '1', workerKeyId: null });
+    const [job] = await ctx.repo.claimJobs(userId, worker.id, 1);
+    const old = new Date(Date.now() - 20 * 60_000).toISOString();
+
+    // worker still alive → untouched
+    await ctx.repo.updateJob(userId, job!.id, { claimedAt: old });
+    expect(await orch().sweepStaleJobs()).toEqual({ requeued: 0, failed: 0 });
+
+    await ctx.repo.updateWorker(userId, worker.id, { lastSeenAt: old });
+    expect(await orch().sweepStaleJobs()).toEqual({ requeued: 1, failed: 0 });
+    let fresh = await ctx.repo.getJob(userId, job!.id);
+    expect(fresh).toMatchObject({ status: 'queued', attempt: 2, workerId: null, claimedAt: null });
+
+    await ctx.repo.claimJobs(userId, worker.id, 1);
+    await ctx.repo.updateJob(userId, job!.id, { claimedAt: old, attempt: 3 });
+    expect(await orch().sweepStaleJobs()).toEqual({ requeued: 0, failed: 1 });
+    fresh = await ctx.repo.getJob(userId, job!.id);
+    expect(fresh?.status).toBe('failed');
+    const t = await reload(ctx, userId, task);
+    expect(t.state).toBe('failure');
+    expect(t.lastError).toMatch(/stopped responding/);
+  });
+});
+
+describe('workflows service', () => {
+  it('refuses to delete the last workflow and promotes a new default', async () => {
+    const svc = ctx.app.ctx.workflows;
+    const all = await svc.list(userId);
+    const def = all.find((w) => w.isDefault)!;
+    await svc.remove(userId, def.id);
+    const after = await svc.list(userId);
+    expect(after).toHaveLength(3);
+    expect(after.filter((w) => w.isDefault)).toHaveLength(1);
+    for (const w of after.slice(1)) await svc.remove(userId, w.id);
+    await expect(svc.remove(userId, after[0]!.id)).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it('clones bundled or own workflows', async () => {
+    const svc = ctx.app.ctx.workflows;
+    const created = await svc.create(userId, 'Mine', 'wf-fast-track');
+    expect(created.name).toBe('Mine');
+    expect(created.steps.map((s) => s.id)).toContain('verify');
+    expect(created.id).not.toBe('wf-fast-track');
+    const again = await svc.create(userId, 'Copy', created.id);
+    expect(again.steps).toEqual(created.steps);
+    await expect(svc.create(userId, 'x', 'nope')).rejects.toMatchObject({ statusCode: 404 });
+  });
+});

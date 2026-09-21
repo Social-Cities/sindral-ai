@@ -1,0 +1,160 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --color-background: #07070f;
+  --color-foreground: #dde1ee;
+  --color-card: #0d0d1c;
+  --color-card-foreground: #dde1ee;
+  --color-primary: #7c3aed;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #13132a;
+  --color-secondary-foreground: #8b92a8;
+  --color-muted: #0a0a18;
+  --color-muted-foreground: #52596b;
+  --color-accent: #818cf8;
+  --color-accent-foreground: #ffffff;
+  --color-border: #1c1c30;
+  --color-border-strong: #2a2a44;
+  --color-input: #111126;
+  --color-ring: #7c3aed;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #1c1c30 transparent;
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: #1c1c30;
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #2a2a44;
+}
+
+/* Small utilities used across pages */
+@utility label-caps {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-muted-foreground);
+}
+
+select option {
+  background: var(--color-card);
+  color: var(--color-foreground);
+}
+
+/* Markdown rendering (plan, artifacts, chat) */
+.md {
+  font-size: 0.875rem;
+  line-height: 1.65;
+  color: var(--color-secondary-foreground);
+}
+.md > * + * {
+  margin-top: 0.5rem;
+}
+.md h1 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-foreground);
+  margin-top: 0.75rem;
+}
+.md h2 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-foreground);
+  margin-top: 1rem;
+}
+.md h3,
+.md h4 {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-muted-foreground);
+  margin-top: 0.75rem;
+}
+.md ul,
+.md ol {
+  padding-left: 1.25rem;
+}
+.md ul {
+  list-style: disc;
+}
+.md ol {
+  list-style: decimal;
+}
+.md li + li {
+  margin-top: 0.125rem;
+}
+.md code {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  background: var(--color-input);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 0 0.3em;
+}
+.md pre {
+  background: var(--color-input);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 0.75rem;
+  overflow-x: auto;
+}
+.md pre code {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+.md a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.md blockquote {
+  border-left: 2px solid var(--color-border-strong);
+  padding-left: 0.75rem;
+  color: var(--color-muted-foreground);
+}
+.md table {
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+.md th,
+.md td {
+  border: 1px solid var(--color-border);
+  padding: 0.25rem 0.5rem;
+}
+.md hr {
+  border-color: var(--color-border);
+}
+.md strong {
+  color: var(--color-foreground);
+  font-weight: 600;
+}

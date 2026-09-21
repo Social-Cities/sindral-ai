@@ -1,0 +1,10 @@
+export { ApiClient, ApiRequestError, WorkerAuthError, backoffDelay } from './api.js';
+export { loadConfig, ConfigError, expandHome, workdirPaths, type WorkerConfig } from './config.js';
+export { Runner, taskKeysOf, type RunnerDeps, type RunningJob } from './runner.js';
+export { runJob, type JobDeps, type JobOutcome } from './job.js';
+export { WorkspaceManager, parseRepo, sanitizeTaskKey, deriveBranch, type Workspace } from './workspace.js';
+export { createEngines, describeVersion, type Engine, type EngineRegistry } from './engines/index.js';
+export { runRebaseStack } from './rebase.js';
+export { buildPrompt, workspaceNote } from './prompt.js';
+export { Redactor } from './redact.js';
+export { WORKER_VERSION } from './version.js';

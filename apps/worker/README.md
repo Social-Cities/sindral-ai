@@ -1,0 +1,72 @@
+# @sindral/worker
+
+The Sindral worker is a small Node daemon that runs on a developer's machine. It polls the central Sindral server for agent jobs, runs Claude Code or Codex inside git worktrees, pushes branches, opens or updates pull requests, and reports results back. Nothing in it is reachable from the network; it only makes outbound HTTPS requests to the server and to GitHub.
+
+## Install
+
+Requirements: Node 22+, `git`, and the CLIs you want to use (`claude`, `codex`, `gh`). The worker probes for them on startup and reports which are available to the server; steps that need a missing engine fail with a clear message instead of hanging.
+
+```sh
+pnpm install            # from the monorepo root
+pnpm --filter @sindral/shared build
+pnpm --filter @sindral/worker build
+```
+
+## Configure
+
+Create a worker key in the Sindral UI (Settings → Worker keys) and put it in the environment, a `.env` file (current directory or repository root), or `~/.sindral/config.json`. Environment variables win over both files.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SINDRAL_SERVER_URL` | — | Base URL of the server, e.g. `https://sindral.example.com` |
+| `SINDRAL_WORKER_KEY` | — | `sk_sindral_<40 hex>` key from the UI |
+| `SINDRAL_WORKDIR` | `~/.sindral` | Where clones, worktrees, results and logs live |
+| `SINDRAL_CONCURRENCY` | `2` | Jobs run in parallel (1–8); never two jobs of the same task |
+| `SINDRAL_WORKER_NAME` | hostname | Display name in the UI |
+| `SINDRAL_CLAUDE_BIN` / `SINDRAL_CODEX_BIN` / `SINDRAL_GH_BIN` | `claude` / `codex` / `gh` | Binaries to use |
+| `SINDRAL_JOB_TIMEOUT_MINUTES` | `90` | Hard limit per agent run |
+| `LOG_LEVEL` | `info` | pino level |
+
+## Run
+
+```sh
+pnpm --filter @sindral/worker dev      # tsx, pretty logs
+pnpm --filter @sindral/worker start    # node dist/cli.js start
+sindral-worker clean                   # remove worktrees/tmp dirs of tasks that are not running
+```
+
+`SIGINT`/`SIGTERM` stop claiming, wait up to 60s for running jobs, then kill the agent processes and report those jobs as failed ("worker shutting down").
+
+## What it does on your machine
+
+Everything lives under `SINDRAL_WORKDIR`:
+
+```
+repos/<owner>__<name>/       one clone per repository (fetched before every job)
+worktrees/<task-key>/<name>/ one git worktree per task and repository
+tmp/<task-key>/              working directory for non-code tasks
+results/<jobId>.json         the JSON result the agent writes (SINDRAL_RESULT_FILE)
+outputs/<jobId>/             files the agent produces for document tasks (SINDRAL_OUTPUT_DIR)
+logs/<jobId>.log             full agent output for each job
+worker.json                  the worker id assigned by the server
+running.json                 jobs in flight (used by `clean`)
+```
+
+For each agent job the worker:
+
+1. Fetches the repository, creates or reuses the task worktree on the task branch (`payload.branch`, else `sindral/<task-key>`) starting from `origin/<branch>` when it already exists (feedback passes) or `origin/<base branch>` otherwise.
+2. Builds the prompt: the step prompt with `{{context}}` interpolated, the Sindral result-file protocol, and a workspace note (repos, branch, "commit, do not push").
+3. Runs `claude -p --output-format stream-json ...` or `codex exec --json -` with the prompt on stdin, streaming output to the server as job events.
+4. Parses and validates the result file. For `pr` steps it commits leftover changes as `Sindral AI`, pushes with `--force-with-lease`, then opens a PR (`gh pr create`) or comments on the existing one with the agent's summary so GitHub reviewers see the response. For `document` steps it uploads the declared artifacts plus every text file in the output directory.
+5. Calls `complete`, or `fail` with a message containing the agent's last 40 output lines.
+
+Rebase-stack jobs rebase each subtask branch onto its base in order and stop at the first conflict (later branches depend on it).
+
+## Security notes
+
+- The configured fine-grained GitHub PAT arrives with each matching job. It should be scoped to only the required repositories and permissions. It is never written to `.git/config` or a remote URL: git gets it through a per-invocation `http.extraheader` config, and `gh` gets it through `GH_TOKEN` in its environment only. Production automatic merge remains disabled until GitHub App installation tokens are implemented.
+- Agent subprocesses never see `GH_TOKEN`, `GITHUB_TOKEN` or the worker key; they are stripped from the environment. Agents therefore cannot push or open PRs themselves; the worker does that after validating the result.
+- All commands are spawned with argv arrays (no shell). Repository names, task keys and branch names are validated before they become paths or git refs.
+- Tokens and worker keys are redacted from logs, job events and error messages, both by value and by pattern (`ghp_…`, `github_pat_…`, `sk_sindral_…`, auth headers).
+- Claude runs with `--permission-mode acceptEdits` (write steps) or `plan` (read-only steps) and only the tools the step allows; `Bash` is granted only when the step has the `execute` permission. Codex runs with `--sandbox workspace-write` or `read-only`.
+- A 401 from the server means the key was revoked; the worker logs that and exits with status 2. Transient errors (network, 5xx, 429) are retried with exponential backoff and jitter.

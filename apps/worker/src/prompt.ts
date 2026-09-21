@@ -1,0 +1,40 @@
+import { interpolatePrompt, protocolInstructions, OUTPUT_DIR_ENV, type JobContext, type StepOutputKind, type WorkflowStep } from '@sindral/shared';
+import type { Workspace } from './workspace.js';
+
+export interface PromptInput {
+  step: WorkflowStep;
+  output: StepOutputKind;
+  context: Partial<JobContext>;
+  resultFile: string;
+  outputDir: string;
+  workspace: Workspace;
+}
+
+export function workspaceNote(workspace: Workspace, outputDir: string): string {
+  const lines = ['', '---', '## Workspace'];
+  if (workspace.repos.length === 0) {
+    lines.push(
+      `This task has no repository. Your working directory is \`${workspace.cwd}\`.`,
+      `Write any deliverable files into \`${outputDir}\` (\`$${OUTPUT_DIR_ENV}\`); every file there is uploaded as an artifact.`,
+    );
+    return lines.join('\n');
+  }
+  workspace.repos.forEach((repo, index) => {
+    const role = index === 0 ? ' (your current working directory)' : '';
+    lines.push(`- Repository \`${repo.repo.full}\` is checked out at \`${repo.dir}\`${role} on branch \`${repo.branch}\` (base branch \`${repo.baseBranch}\`).`);
+  });
+  if (workspace.repos.length > 1) {
+    lines.push('This task spans several repositories; use the absolute paths above to work in the others.');
+  }
+  lines.push(
+    'Commit your work on the current branch with clear messages. Do NOT push, do NOT switch branches and do NOT open a pull request; the worker does that after you finish.',
+    `Non-code deliverables (reports, notes) go into \`${outputDir}\` (\`$${OUTPUT_DIR_ENV}\`).`,
+  );
+  return lines.join('\n');
+}
+
+/** Step prompt with context interpolated, followed by the result-file protocol and workspace notes. */
+export function buildPrompt(input: PromptInput): string {
+  const body = interpolatePrompt(input.step.prompt ?? '', input.context).trim();
+  return [body, protocolInstructions(input.output, input.resultFile), workspaceNote(input.workspace, input.outputDir)].join('\n');
+}
