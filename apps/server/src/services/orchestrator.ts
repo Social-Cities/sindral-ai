@@ -375,6 +375,7 @@ export class Orchestrator {
   async completeJob(userId: string, jobId: string, result: AgentResult, expectedAttempt?: number): Promise<void> {
     const job = await this.repo.getJob(userId, jobId);
     if (!job) throw notFound('Job');
+    if (expectedAttempt === undefined && job.attempt > 1) throw conflict('Job attempt number is required after a retry');
     if (expectedAttempt !== undefined && job.attempt !== expectedAttempt) throw conflict(`Job attempt ${expectedAttempt} has been superseded`);
     if (job.status === 'completed' && JSON.stringify(job.result) === JSON.stringify(result)) return;
     if (job.status !== 'claimed' && job.status !== 'running') throw conflict(`Job is ${job.status}`);
@@ -424,6 +425,7 @@ export class Orchestrator {
   async failJob(userId: string, jobId: string, error: string, expectedAttempt?: number): Promise<void> {
     const job = await this.repo.getJob(userId, jobId);
     if (!job) throw notFound('Job');
+    if (expectedAttempt === undefined && job.attempt > 1) throw conflict('Job attempt number is required after a retry');
     if (expectedAttempt !== undefined && job.attempt !== expectedAttempt) throw conflict(`Job attempt ${expectedAttempt} has been superseded`);
     if (job.status === 'failed' && job.error === error) return;
     if (job.status !== 'claimed' && job.status !== 'running') throw conflict(`Job is ${job.status}`);
