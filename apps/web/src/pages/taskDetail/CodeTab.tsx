@@ -13,8 +13,9 @@ interface CodeTabProps {
 }
 
 export function CodeTab({ task }: CodeTabProps) {
-  const hasPr = !!task.prUrl;
-  const diff = useTaskDiff(task.id, { enabled: hasPr });
+  const [repository, setRepository] = useState(task.pullRequests[0]?.repository ?? '');
+  const hasPr = task.pullRequests.length > 0 || !!task.prUrl;
+  const diff = useTaskDiff(task.id, repository || undefined, { enabled: hasPr });
   const [selected, setSelected] = useState<string | null>(null);
 
   const files = useMemo(() => diff.data ?? [], [diff.data]);
@@ -55,8 +56,30 @@ export function CodeTab({ task }: CodeTabProps) {
   const file = files.find((f) => f.filename === selected) ?? files[0];
 
   return (
-    <div className="flex h-full min-h-0">
+    <div className="flex h-full min-h-0 relative">
       <div className="w-56 shrink-0 overflow-y-auto py-3 border-r border-border">
+        {task.pullRequests.length > 1 && (
+          <div className="px-3 mb-3">
+            <label className="label-caps block mb-1" htmlFor="diff-repository">
+              Repository
+            </label>
+            <select
+              id="diff-repository"
+              value={repository}
+              onChange={(event) => {
+                setRepository(event.target.value);
+                setSelected(null);
+              }}
+              className="w-full bg-input border border-border rounded px-2 py-1.5 text-[11px] font-mono text-foreground"
+            >
+              {task.pullRequests.map((pr) => (
+                <option key={pr.id} value={pr.repository}>
+                  {pr.repository}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <p className="label-caps px-3 mb-2">
           {files.length} file{files.length === 1 ? '' : 's'}
         </p>

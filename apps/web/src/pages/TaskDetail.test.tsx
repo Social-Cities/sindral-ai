@@ -80,7 +80,7 @@ describe('TaskDetail', () => {
     expect(screen.getByTestId('pipeline-offpath')).toHaveTextContent('Failed');
   });
 
-  it('offers Accept and a View PR link on in-review', async () => {
+  it('offers Accept & merge and a View PR link on in-review', async () => {
     setup(
       makeTaskWithRelations({
         id: 't5',
@@ -90,7 +90,7 @@ describe('TaskDetail', () => {
         pinnedWorkflow: snapshotWorkflow(FULL_SDLC_WORKFLOW),
       }),
     );
-    expect(await screen.findByRole('button', { name: 'Accept' })).toHaveClass('bg-[#059669]');
+    expect(await screen.findByRole('button', { name: 'Accept & merge' })).toHaveClass('bg-[#059669]');
     const link = screen.getByRole('link', { name: 'View PR ↗' });
     expect(link).toHaveAttribute('href', 'https://github.com/acme/app/pull/7');
     expect(link).toHaveAttribute('rel', 'noreferrer noopener');

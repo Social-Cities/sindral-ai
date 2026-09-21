@@ -17,6 +17,7 @@ describe('loadConfig', () => {
     expect(config.codexBin).toBe('codex');
     expect(config.ghBin).toBe('gh');
     expect(config.jobTimeoutMs).toBe(90 * 60_000);
+    expect(config.allowPatMerge).toBe(false);
     expect(config.logLevel).toBe('info');
   });
 
@@ -36,7 +37,7 @@ describe('loadConfig', () => {
 
   it('parses numeric and named settings', () => {
     const config = loadConfig(
-      { ...base, SINDRAL_CONCURRENCY: '4', SINDRAL_JOB_TIMEOUT_MINUTES: '15', SINDRAL_WORKER_NAME: 'mac', LOG_LEVEL: 'debug', SINDRAL_CLAUDE_BIN: '/opt/claude' },
+      { ...base, SINDRAL_CONCURRENCY: '4', SINDRAL_JOB_TIMEOUT_MINUTES: '15', SINDRAL_WORKER_NAME: 'mac', LOG_LEVEL: 'debug', SINDRAL_CLAUDE_BIN: '/opt/claude', SINDRAL_ALLOW_PAT_MERGE: 'true' },
       opts,
     );
     expect(config.concurrency).toBe(4);
@@ -44,6 +45,7 @@ describe('loadConfig', () => {
     expect(config.workerName).toBe('mac');
     expect(config.logLevel).toBe('debug');
     expect(config.claudeBin).toBe('/opt/claude');
+    expect(config.allowPatMerge).toBe(true);
   });
 
   it('rejects a malformed worker key', () => {

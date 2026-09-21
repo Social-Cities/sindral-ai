@@ -18,6 +18,7 @@ export function testConfig(overrides: Partial<WorkerConfig> = {}): WorkerConfig 
     codexBin: 'codex',
     ghBin: 'gh',
     jobTimeoutMs: 60_000,
+    allowPatMerge: true,
     logLevel: 'silent',
     ...overrides,
   };
@@ -82,7 +83,7 @@ export function job(overrides: Partial<Job> = {}): Job {
 }
 
 export function dispatch(jobOverrides: Partial<Job> = {}, githubToken: string | null = GH_TOKEN): JobDispatch {
-  return { job: job(jobOverrides), credentials: { githubToken } };
+  return { job: job(jobOverrides), credentials: { githubToken, githubCredential: githubToken ? 'pat' : null } };
 }
 
 export function ok(stdout = ''): RunResult {

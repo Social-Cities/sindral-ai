@@ -48,30 +48,31 @@ export function SummaryTab({ task, workflow }: SummaryTabProps) {
           </section>
         )}
 
-        {task.prUrl && (
+        {(task.pullRequests.length > 0 || task.prUrl) && (
           <section>
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Pull Request</p>
-            <ExternalLink
-              href={task.prUrl}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-mono transition-colors bg-input text-accent"
-              style={{ border: '1px solid #818cf830' }}
-              fallback={<span className="text-xs text-muted-foreground font-mono">{task.prUrl}</span>}
-            >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                <circle cx="4" cy="4" r="1.5" stroke="currentColor" strokeWidth="1.2" />
-                <circle cx="4" cy="10" r="1.5" stroke="currentColor" strokeWidth="1.2" />
-                <circle cx="10" cy="4" r="1.5" stroke="currentColor" strokeWidth="1.2" />
-                <path d="M4 5.5V8.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-                <path d="M5.5 4H8.5C8.5 4 8.5 7 5.5 7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-              </svg>
-              {shortPrLabel(task.prUrl)}
-            </ExternalLink>
-            {task.branch && (
-              <p className="text-[10px] font-mono text-muted-foreground mt-1.5">
-                {task.branch}
-                {task.baseBranch ? ` → ${task.baseBranch}` : ''}
-              </p>
-            )}
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Pull Requests</p>
+            <div className="space-y-2">
+              {(task.pullRequests.length > 0
+                ? task.pullRequests
+                : [{ id: 'legacy', repository: task.repos[0] ?? 'Repository', url: task.prUrl!, status: 'open' as const, branch: task.branch ?? '', baseBranch: task.baseBranch ?? '' }]
+              ).map((pr) => (
+                <div key={pr.id} className="flex items-center justify-between gap-3 rounded-lg bg-input border border-border px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-mono text-secondary-foreground truncate">{pr.repository}</p>
+                    <p className="text-[10px] font-mono text-muted-foreground truncate">
+                      {pr.branch}
+                      {pr.baseBranch ? ` → ${pr.baseBranch}` : ''}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[9px] font-mono uppercase text-muted-foreground">{pr.status}</span>
+                    <ExternalLink href={pr.url} className="text-xs font-mono text-accent" fallback={<span className="text-xs font-mono text-muted-foreground">{pr.url}</span>}>
+                      {shortPrLabel(pr.url)} ↗
+                    </ExternalLink>
+                  </div>
+                </div>
+              ))}
+            </div>
           </section>
         )}
 

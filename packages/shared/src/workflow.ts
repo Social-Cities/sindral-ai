@@ -71,10 +71,12 @@ export function validateWorkflow(workflow: Workflow): WorkflowValidationIssue[] 
     if (!step.label?.trim()) issues.push({ path: `${p}.label`, message: 'Step label is required' });
     if (!step.state?.trim()) issues.push({ path: `${p}.state`, message: 'Step state is required' });
     if (step.type === 'agent') {
-      if (!step.prompt?.trim()) issues.push({ path: `${p}.prompt`, message: 'Agent steps need a prompt' });
       if (!step.output) issues.push({ path: `${p}.output`, message: 'Agent steps need an output kind' });
-      if (!step.engine) issues.push({ path: `${p}.engine`, message: 'Agent steps need an engine' });
-      if (!step.model?.trim()) issues.push({ path: `${p}.model`, message: 'Agent steps need a model' });
+      if (step.output !== 'merge') {
+        if (!step.prompt?.trim()) issues.push({ path: `${p}.prompt`, message: 'Agent steps need a prompt' });
+        if (!step.engine) issues.push({ path: `${p}.engine`, message: 'Agent steps need an engine' });
+        if (!step.model?.trim()) issues.push({ path: `${p}.model`, message: 'Agent steps need a model' });
+      }
     }
   });
 

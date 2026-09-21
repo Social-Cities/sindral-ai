@@ -13,6 +13,19 @@ import { requireWorker } from '../auth/worker.js';
 import type { RouteOptions } from '../context.js';
 import { conflict, notFound } from '../errors.js';
 import { idParamsSchema, validate } from '../validate.js';
+import { hasGitHubAppCredentials, mintGitHubInstallationToken } from '../services/githubApp.js';
+
+function repositoriesForJob(job: JobDispatch['job']): string[] {
+  switch (job.payload.kind) {
+    case 'agent':
+    case 'rebase-stack':
+      return job.payload.repos;
+    case 'resolve-rebase-conflict':
+      return [job.payload.repository];
+    case 'merge-pull-requests':
+      return job.payload.pullRequests.map((pullRequest) => pullRequest.repository);
+  }
+}
 
 export const workerRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx }) => {
   app.addHook('onRequest', requireWorker(ctx.repo));
@@ -32,12 +45,14 @@ export const workerRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx 
   app.post('/api/worker/heartbeat', async (request) => {
     const { userId } = request.worker!;
     const input = validate(workerHeartbeatSchema, request.body);
+    const now = new Date().toISOString();
     const worker = await repo.updateWorker(userId, input.workerId, {
       status: 'online',
       runningJobs: input.runningJobIds.length,
-      lastSeenAt: new Date().toISOString(),
+      lastSeenAt: now,
     });
     if (!worker) throw notFound('Worker');
+    await repo.renewJobLeases(userId, worker.id, input.runningJobIds, now);
     hub.publish(userId, { type: 'worker.updated', workerId: worker.id });
     return { ok: true as const };
   });
@@ -62,9 +77,21 @@ export const workerRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx 
     }
     if (jobs.length === 0) return { jobs: [] as JobDispatch[] };
 
-    const github = await ctx.secrets.get(userId, 'github');
-    const credentials = { githubToken: github?.token ?? null };
-    const dispatches: JobDispatch[] = jobs.map((job) => ({ job, credentials }));
+    const useGitHubApp = hasGitHubAppCredentials(ctx.config, userId);
+    const github = useGitHubApp ? null : await ctx.secrets.get(userId, 'github');
+    const dispatches: JobDispatch[] = [];
+    for (const job of jobs) {
+      const appToken = useGitHubApp
+        ? await mintGitHubInstallationToken(ctx.config, userId, repositoriesForJob(job), ctx.fetch)
+        : null;
+      dispatches.push({
+        job,
+        credentials: {
+          githubToken: appToken ?? github?.token ?? null,
+          githubCredential: appToken ? 'github-app' : github?.token ? 'pat' : null,
+        },
+      });
+    }
     for (const job of jobs) hub.publish(userId, { type: 'task.updated', taskId: job.taskId });
     return { jobs: dispatches };
   });
@@ -88,16 +115,16 @@ export const workerRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx 
   app.post('/api/worker/jobs/:id/complete', async (request) => {
     const { userId } = request.worker!;
     const { id } = validate(idParamsSchema, request.params);
-    const { result } = validate(workerJobCompleteSchema, request.body);
-    await orchestrator.completeJob(userId, id, result);
+    const { attempt, result } = validate(workerJobCompleteSchema, request.body);
+    await orchestrator.completeJob(userId, id, result, attempt);
     return { ok: true as const };
   });
 
   app.post('/api/worker/jobs/:id/fail', async (request) => {
     const { userId } = request.worker!;
     const { id } = validate(idParamsSchema, request.params);
-    const { error } = validate(workerJobFailSchema, request.body);
-    await orchestrator.failJob(userId, id, error);
+    const { attempt, error } = validate(workerJobFailSchema, request.body);
+    await orchestrator.failJob(userId, id, error, attempt);
     return { ok: true as const };
   });
 };

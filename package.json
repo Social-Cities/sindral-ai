@@ -17,7 +17,8 @@
     "lint": "pnpm -r run lint",
     "db:start": "supabase start",
     "db:reset": "supabase db reset",
-    "db:migrate": "supabase db push"
+    "db:migrate": "supabase db push",
+    "smoke": "node scripts/smoke.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

@@ -25,6 +25,7 @@ Create a worker key in the Sindral UI (Settings → Worker keys) and put it in t
 | `SINDRAL_WORKER_NAME` | hostname | Display name in the UI |
 | `SINDRAL_CLAUDE_BIN` / `SINDRAL_CODEX_BIN` / `SINDRAL_GH_BIN` | `claude` / `codex` / `gh` | Binaries to use |
 | `SINDRAL_JOB_TIMEOUT_MINUTES` | `90` | Hard limit per agent run |
+| `SINDRAL_ALLOW_PAT_MERGE` | `false` | Allow internal/local workers to merge using the configured PAT; keep disabled in production |
 | `LOG_LEVEL` | `info` | pino level |
 
 ## Run
@@ -64,7 +65,7 @@ Rebase-stack jobs rebase each subtask branch onto its base in order and stop at 
 
 ## Security notes
 
-- The configured fine-grained GitHub PAT arrives with each matching job. It should be scoped to only the required repositories and permissions. It is never written to `.git/config` or a remote URL: git gets it through a per-invocation `http.extraheader` config, and `gh` gets it through `GH_TOKEN` in its environment only. Production automatic merge remains disabled until GitHub App installation tokens are implemented.
+- A short-lived GitHub App installation token (production) or configured fine-grained PAT (internal/local) arrives with each matching job. It is never written to `.git/config` or a remote URL: git gets it through a per-invocation `http.extraheader` config, and `gh` gets it through `GH_TOKEN` in its environment only. PAT-backed automatic merge is disabled by default.
 - Agent subprocesses never see `GH_TOKEN`, `GITHUB_TOKEN` or the worker key; they are stripped from the environment. Agents therefore cannot push or open PRs themselves; the worker does that after validating the result.
 - All commands are spawned with argv arrays (no shell). Repository names, task keys and branch names are validated before they become paths or git refs.
 - Tokens and worker keys are redacted from logs, job events and error messages, both by value and by pattern (`ghp_…`, `github_pat_…`, `sk_sindral_…`, auth headers).

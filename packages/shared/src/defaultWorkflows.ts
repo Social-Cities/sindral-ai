@@ -148,12 +148,13 @@ export const FULL_SDLC_WORKFLOW: Workflow = {
       prompt: VERIFY_PROMPT, tools: [...READ_TOOLS, 'run_command'], permissions: ['read', 'execute'], position: { x: 840, y: 60 },
     },
     { id: 'in-review', type: 'human', label: 'In Review', state: 'in-review', position: { x: 840, y: 150 } },
+    { id: 'merge', type: 'agent', label: 'Merge Pull Requests', state: 'merge', output: 'merge', position: { x: 1000, y: 60 } },
     {
       id: 'implement-feedback', type: 'agent', label: 'Address Feedback', state: 'implement-feedback',
       engine: 'claude', model: 'claude-sonnet-5', mode: 'high', output: 'pr',
       prompt: IMPLEMENT_PROMPT, tools: [...WRITE_TOOLS, 'create_pr'], permissions: ['read', 'write', 'execute'], position: { x: 680, y: 240 },
     },
-    { id: 'done', type: 'end', label: 'Done', state: 'done', position: { x: 1000, y: 150 } },
+    { id: 'done', type: 'end', label: 'Done', state: 'done', position: { x: 1160, y: 150 } },
   ],
   edges: [
     { from: 'todo', to: 'planning', event: 'start', label: 'Start Planning' },
@@ -167,7 +168,8 @@ export const FULL_SDLC_WORKFLOW: Workflow = {
     { from: 'verify', to: 'implement-feedback', event: 'reject', label: 'NO_GO' },
     { from: 'in-review', to: 'implement-feedback', event: 'feedback', label: 'changes' },
     { from: 'implement-feedback', to: 'adversarial-review', event: 'complete', label: 'pushed' },
-    { from: 'in-review', to: 'done', event: 'accept', label: 'Accept' },
+    { from: 'in-review', to: 'merge', event: 'accept', label: 'Accept & merge' },
+    { from: 'merge', to: 'done', event: 'complete', label: 'merged' },
   ],
   troubleshootStep: DEFAULT_TROUBLESHOOT_STEP,
 };
@@ -221,12 +223,13 @@ export const FAST_TRACK_WORKFLOW: Workflow = {
       prompt: VERIFY_PROMPT, tools: [...READ_TOOLS, 'run_command'], permissions: ['read', 'execute'], position: { x: 360, y: 150 },
     },
     { id: 'in-review', type: 'human', label: 'Review', state: 'in-review', position: { x: 520, y: 150 } },
+    { id: 'merge', type: 'agent', label: 'Merge Pull Requests', state: 'merge', output: 'merge', position: { x: 680, y: 60 } },
     {
       id: 'implement-feedback', type: 'agent', label: 'Address Feedback', state: 'implement-feedback',
       engine: 'claude', model: 'claude-sonnet-5', mode: 'high', output: 'pr',
       prompt: IMPLEMENT_PROMPT, tools: [...WRITE_TOOLS, 'create_pr'], permissions: ['read', 'write', 'execute'], position: { x: 360, y: 260 },
     },
-    { id: 'done', type: 'end', label: 'Done', state: 'done', position: { x: 680, y: 150 } },
+    { id: 'done', type: 'end', label: 'Done', state: 'done', position: { x: 840, y: 150 } },
   ],
   edges: [
     { from: 'todo', to: 'implement', event: 'start', label: 'Start' },
@@ -235,7 +238,8 @@ export const FAST_TRACK_WORKFLOW: Workflow = {
     { from: 'verify', to: 'implement-feedback', event: 'reject', label: 'NO_GO' },
     { from: 'in-review', to: 'implement-feedback', event: 'feedback', label: 'changes' },
     { from: 'implement-feedback', to: 'verify', event: 'complete', label: 'pushed' },
-    { from: 'in-review', to: 'done', event: 'accept', label: 'Accept' },
+    { from: 'in-review', to: 'merge', event: 'accept', label: 'Accept & merge' },
+    { from: 'merge', to: 'done', event: 'complete', label: 'merged' },
   ],
   troubleshootStep: DEFAULT_TROUBLESHOOT_STEP,
 };
@@ -280,4 +284,4 @@ export const MODEL_OPTIONS: Record<'claude' | 'codex', string[]> = {
 
 export const ALL_TOOLS = ['read_file', 'write_file', 'run_command', 'search_codebase', 'list_directory', 'create_pr', 'web_search'] as const;
 export const ALL_PERMISSIONS = ['read', 'write', 'execute'] as const;
-export const ALL_OUTPUT_KINDS = ['plan', 'pr', 'review', 'verdict', 'document', 'troubleshoot'] as const;
+export const ALL_OUTPUT_KINDS = ['plan', 'pr', 'review', 'verdict', 'document', 'troubleshoot', 'conflict-resolution', 'merge'] as const;

@@ -58,5 +58,5 @@ export function makeMessage(overrides: Partial<Message> = {}): Message {
 }
 
 export function makeTaskWithRelations(overrides: Partial<TaskWithRelations> = {}): TaskWithRelations {
-  return { ...makeTask(), messages: [], events: [], artifacts: [], subtasks: [], ...overrides };
+  return { ...makeTask(), messages: [], events: [], artifacts: [], subtasks: [], repositories: [], pullRequests: [], ...overrides };
 }

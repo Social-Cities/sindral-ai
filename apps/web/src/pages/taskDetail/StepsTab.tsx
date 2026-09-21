@@ -115,7 +115,12 @@ function JobCard({ job, workflow }: { job: Job; workflow: Workflow | null }) {
   const live = job.status === 'running' || job.status === 'claimed' || job.status === 'queued';
   const logs = useJobLogs(open ? job.id : null, { live: open && live });
   const step = workflow && job.stepId ? getStep(workflow, job.stepId) : null;
-  const label = job.kind === 'rebase-stack' ? 'Rebase stack' : step?.label ?? (job.payload.kind === 'agent' ? job.payload.step.label : 'Agent job');
+  const label =
+    job.kind === 'rebase-stack'
+      ? 'Rebase stack'
+      : job.kind === 'resolve-rebase-conflict'
+        ? 'Resolve rebase conflict'
+        : step?.label ?? (job.payload.kind === 'agent' ? job.payload.step.label : 'Agent job');
 
   return (
     <div className="rounded-lg bg-card border border-border">

@@ -50,6 +50,22 @@ const RESULT_SHAPES: Record<StepOutputKind, string> = {
   "diagnosis": "markdown explanation of the root cause and what you changed",
   "resolved": true | false   // true only if the failed step can now be retried safely
 }`,
+  'conflict-resolution': `{
+  "kind": "conflict-resolution",
+  "summary": "one paragraph describing the resolution",
+  "taskId": "the task id supplied in the prompt",
+  "branch": "the branch supplied in the prompt",
+  "resolved": true | false,
+  "rationale": "markdown explanation for every conflicted file and why both changes' intent is preserved",
+  "resolvedPaths": ["repository/relative/path"],
+  "checks": []
+}`,
+  merge: `{
+  "kind": "merge",
+  "summary": "worker-owned operation; agents never produce this result",
+  "complete": true | false,
+  "pullRequests": []
+}`,
 };
 
 /**

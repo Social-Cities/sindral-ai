@@ -30,6 +30,9 @@ export const UNIVERSAL_EVENTS = {
   RETRY: 'retry',
   RESOLVED: 'resolved',
   UNRESOLVED: 'unresolved',
+  REBASE_CONFLICT: 'rebase-conflict',
+  CONFLICT_RESOLVED: 'conflict-resolved',
+  CONFLICT_ESCALATED: 'conflict-escalated',
 } as const;
 
 function enterStep(step: WorkflowStep): { state: string; effects: TransitionEffect[] } {
@@ -43,6 +46,38 @@ function enterStep(step: WorkflowStep): { state: string; effects: TransitionEffe
  * returns the next state and side effects the orchestrator must perform.
  */
 export function transition(task: TaskLike, workflow: Workflow, event: string): Transition {
+  if (event === UNIVERSAL_EVENTS.REBASE_CONFLICT) {
+    if (!task.currentStepId || task.state === 'done' || task.state === 'failure' || task.state === 'troubleshoot' || task.state === 'conflict-resolution') {
+      throw new TransitionError('Task cannot enter conflict resolution from its current state');
+    }
+    return {
+      nextState: 'conflict-resolution',
+      nextStepId: task.currentStepId,
+      failedStepId: task.currentStepId,
+      effects: [],
+      event,
+    };
+  }
+
+  if (task.state === 'conflict-resolution') {
+    const resumeStepId = task.failedStepId ?? task.currentStepId;
+    if (!resumeStepId) throw new TransitionError('Conflict-resolution task has no step to resume', 'NO_STEP');
+    if (event === UNIVERSAL_EVENTS.CONFLICT_RESOLVED) {
+      const reviewStep = workflow.steps.find((step) => step.type === 'agent' && step.output === 'review');
+      if (reviewStep) {
+        const entered = enterStep(reviewStep);
+        return { nextState: entered.state, nextStepId: reviewStep.id, failedStepId: null, effects: entered.effects, event };
+      }
+      const step = getStep(workflow, resumeStepId);
+      if (!step) throw new TransitionError(`Unknown step ${resumeStepId}`, 'NO_STEP');
+      return { nextState: step.state, nextStepId: step.id, failedStepId: null, effects: [], event };
+    }
+    if (event === UNIVERSAL_EVENTS.CONFLICT_ESCALATED) {
+      return { nextState: 'failure', nextStepId: resumeStepId, failedStepId: resumeStepId, effects: [], event };
+    }
+    throw new TransitionError(`Event "${event}" is not valid during conflict resolution`);
+  }
+
   // --- universal handling for failure/troubleshoot ---
   if (event === UNIVERSAL_EVENTS.FAIL) {
     const failedStepId = task.state === 'troubleshoot' ? task.failedStepId : task.currentStepId;
@@ -128,7 +163,7 @@ export function eventForResult(result: AgentResult): string {
 
 /** Whether an agent is expected to be running for a task in this state. */
 export function isAgentActive(task: TaskLike, workflow: Workflow | null): boolean {
-  if (task.state === 'troubleshoot') return true;
+  if (task.state === 'troubleshoot' || task.state === 'conflict-resolution') return true;
   if (task.state === 'failure' || task.state === 'done' || !workflow) return false;
   const step = getStep(workflow, task.currentStepId);
   return step?.type === 'agent';

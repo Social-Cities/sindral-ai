@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Artifact, Job, Message, SecretProvider, Task, TaskEvent, Worker, WorkerKey, WorkflowRecord } from '@sindral/shared';
+import type { Artifact, Job, Message, PullRequest, SecretProvider, Task, TaskEvent, TaskRepository, Worker, WorkerKey, WorkflowRecord } from '@sindral/shared';
 import {
   ConflictError,
   type ArtifactInsert,
@@ -16,6 +16,8 @@ import {
   type TaskFilter,
   type TaskInsert,
   type TaskPatch,
+  type TaskRepositoryUpsert,
+  type PullRequestUpsert,
   type WorkerInsert,
   type WorkerKeyInsert,
   type WorkerKeyLookup,
@@ -39,6 +41,8 @@ export class MemoryRepository implements Repository {
   private readonly profiles = new Map<string, Profile & { taskCounter: number }>();
   private readonly workflows = new Map<string, WorkflowRecord>();
   private readonly tasks = new Map<string, Task>();
+  private readonly taskRepositories = new Map<string, TaskRepository>();
+  private readonly pullRequests = new Map<string, PullRequest>();
   private readonly messages = new Map<string, Owned<Message>>();
   private readonly events = new Map<string, Owned<TaskEvent>>();
   private readonly artifacts = new Map<string, Owned<Artifact>>();
@@ -181,6 +185,8 @@ export class MemoryRepository implements Repository {
     if (!t || t.userId !== userId) return false;
     for (const child of [...this.tasks.values()].filter((c) => c.parentTaskId === id)) await this.deleteTask(userId, child.id);
     this.tasks.delete(id);
+    for (const [k, record] of this.taskRepositories) if (record.taskId === id) this.taskRepositories.delete(k);
+    for (const [k, record] of this.pullRequests) if (record.taskId === id) this.pullRequests.delete(k);
     for (const [k, m] of this.messages) if (m.taskId === id) this.messages.delete(k);
     for (const [k, e] of this.events) if (e.taskId === id) this.events.delete(k);
     for (const [k, a] of this.artifacts) if (a.taskId === id) this.artifacts.delete(k);
@@ -193,7 +199,93 @@ export class MemoryRepository implements Repository {
   }
 
   async findTaskByPrUrl(prUrl: string): Promise<Task | null> {
+    const pullRequest = await this.findPullRequestByUrl(prUrl);
+    if (pullRequest) return this.getTask(pullRequest.userId, pullRequest.taskId);
     for (const t of this.tasks.values()) if (t.prUrl === prUrl) return clone(t);
+    return null;
+  }
+
+  // ---- task repositories and pull requests ----
+  async listTaskRepositories(userId: string, taskId: string): Promise<TaskRepository[]> {
+    return [...this.taskRepositories.values()].filter((record) => record.userId === userId && record.taskId === taskId).map(clone);
+  }
+
+  async upsertTaskRepository(userId: string, taskId: string, input: TaskRepositoryUpsert): Promise<TaskRepository> {
+    const existing = [...this.taskRepositories.values()].find(
+      (record) => record.userId === userId && record.taskId === taskId && record.repository === input.repository,
+    );
+    const ts = this.now();
+    const record: TaskRepository = existing
+      ? { ...existing, branch: input.branch, baseBranch: input.baseBranch, mergeMethod: input.mergeMethod ?? existing.mergeMethod, updatedAt: ts }
+      : {
+          id: randomUUID(),
+          userId,
+          taskId,
+          repository: input.repository,
+          branch: input.branch,
+          baseBranch: input.baseBranch,
+          mergeMethod: input.mergeMethod ?? 'squash',
+          createdAt: ts,
+          updatedAt: ts,
+        };
+    this.taskRepositories.set(record.id, record);
+    return clone(record);
+  }
+
+  async deleteTaskRepositoriesNotIn(userId: string, taskId: string, repositories: string[]): Promise<void> {
+    const keep = new Set(repositories);
+    for (const [id, record] of this.taskRepositories) {
+      if (record.userId === userId && record.taskId === taskId && !keep.has(record.repository)) {
+        this.taskRepositories.delete(id);
+        for (const [prId, pr] of this.pullRequests) if (pr.taskRepositoryId === id) this.pullRequests.delete(prId);
+      }
+    }
+  }
+
+  async listPullRequests(userId: string, taskId: string): Promise<PullRequest[]> {
+    return [...this.pullRequests.values()].filter((record) => record.userId === userId && record.taskId === taskId).map(clone);
+  }
+
+  async upsertPullRequest(userId: string, taskId: string, input: PullRequestUpsert): Promise<PullRequest> {
+    const existing = [...this.pullRequests.values()].find(
+      (record) => record.userId === userId && record.taskId === taskId && record.repository === input.repository,
+    );
+    const ts = this.now();
+    const record: PullRequest = existing
+      ? {
+          ...existing,
+          taskRepositoryId: input.taskRepositoryId,
+          url: input.url,
+          number: input.number,
+          branch: input.branch,
+          baseBranch: input.baseBranch,
+          headSha: input.headSha,
+          status: input.status ?? existing.status,
+          mergedAt: input.mergedAt === undefined ? existing.mergedAt : input.mergedAt,
+          updatedAt: ts,
+        }
+      : {
+          id: randomUUID(),
+          userId,
+          taskId,
+          taskRepositoryId: input.taskRepositoryId,
+          repository: input.repository,
+          url: input.url,
+          number: input.number,
+          branch: input.branch,
+          baseBranch: input.baseBranch,
+          headSha: input.headSha,
+          status: input.status ?? 'open',
+          mergedAt: input.mergedAt ?? null,
+          createdAt: ts,
+          updatedAt: ts,
+        };
+    this.pullRequests.set(record.id, record);
+    return clone(record);
+  }
+
+  async findPullRequestByUrl(prUrl: string): Promise<PullRequest | null> {
+    for (const record of this.pullRequests.values()) if (record.url === prUrl) return clone(record);
     return null;
   }
 
@@ -320,6 +412,18 @@ export class MemoryRepository implements Repository {
       claimed.push(clone(j));
     }
     return claimed;
+  }
+
+  async renewJobLeases(userId: string, workerId: string, jobIds: string[], renewedAt: string): Promise<number> {
+    const ids = new Set(jobIds);
+    let renewed = 0;
+    for (const job of this.jobs.values()) {
+      if (job.userId === userId && job.workerId === workerId && ids.has(job.id) && (job.status === 'claimed' || job.status === 'running')) {
+        job.claimedAt = renewedAt;
+        renewed += 1;
+      }
+    }
+    return renewed;
   }
 
   async cancelQueuedJobs(userId: string, taskId: string): Promise<number> {

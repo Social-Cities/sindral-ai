@@ -43,7 +43,7 @@ pnpm dev:web                        # http://localhost:5173 (proxies /api to the
 
 Sign up in the UI, then open **Settings**:
 
-1. Save a GitHub token (fine-grained PAT with `contents:write`, `pull_requests:write` on the repos you want agents to work on). It is encrypted at rest and only handed to your worker. PATs are the local/internal deployment credential; production automatic merge requires the planned GitHub App installation-token flow.
+1. For production, configure `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, and `GITHUB_APP_INSTALLATIONS` (a JSON map from Sindral user UUIDs to installation IDs); the server mints repository-scoped installation tokens only for the matching tenant's jobs. A saved fine-grained PAT remains available for local/internal use and is encrypted at rest.
 2. Create a **worker key**. Copy the one-time secret.
 
 Start the worker on the machine that has your repos, `git`, `gh` and the agent CLIs:
@@ -52,11 +52,11 @@ Start the worker on the machine that has your repos, `git`, `gh` and the agent C
 SINDRAL_SERVER_URL=http://localhost:8787 SINDRAL_WORKER_KEY=sk_sindral_... pnpm dev:worker
 ```
 
-Create a task on the Home page (pick repositories and a workflow), click **Start Planning**, review the plan in the task's Chat/Summary tabs, approve it, and watch the implement → adversarial review → verify → in-review pipeline produce a PR. In the current baseline, **Accept** records approval but does not merge the PR; explicit verified merge is implemented in the production plan.
+Create a task on the Home page (pick repositories and a workflow), click **Start Planning**, review the plan in the task's Chat/Summary tabs, approve it, and watch the implement → adversarial review → verify → in-review pipeline produce one PR per repository. **Accept & merge** dispatches an ordered merge job; the task reaches `done` only after GitHub confirms every PR is merged.
 
 ### GitHub comments as feedback
 
-Point a GitHub webhook (`issue_comment`, `pull_request_review_comment`, JSON, secret = `GITHUB_WEBHOOK_SECRET`) at `https://<server>/api/webhooks/github`. Comments on PRs opened by Sindral become chat messages on the task; when the task is waiting for review they trigger an implement-feedback cycle and the worker replies on the PR.
+Point a GitHub webhook (`issue_comment`, `pull_request_review_comment`, `pull_request`, JSON, secret = `GITHUB_WEBHOOK_SECRET`) at `https://<server>/api/webhooks/github`. Comments on PRs opened by Sindral become chat messages on the task; when the task is waiting for review they trigger an implement-feedback cycle. Pull-request events reconcile manual close/merge state.
 
 ## Production
 
@@ -76,6 +76,15 @@ Run the server behind TLS. Use a hosted Supabase project, apply migrations with 
 | `pnpm lint` | eslint (typescript-eslint) |
 | `pnpm build` | production builds |
 | `pnpm db:reset` | recreate the local database from migrations |
+| `pnpm smoke` | live end-to-end check against a running server + Supabase (see `scripts/smoke.mjs`) |
+
+The smoke test drives the real stack: sign-up, task creation, the plan → feedback → approve →
+subtask flow, worker job claiming and fencing, tenant isolation, webhook HMAC, and Postgres
+row-level security. Run it after schema or orchestrator changes:
+
+```bash
+SMOKE_ANON_KEY=<anon key> SMOKE_WEBHOOK_SECRET=<GITHUB_WEBHOOK_SECRET> pnpm smoke
+```
 
 ## Workflows
 

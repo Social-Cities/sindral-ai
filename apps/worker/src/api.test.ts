@@ -66,7 +66,7 @@ describe('ApiClient', () => {
   it('does not retry other 4xx errors', async () => {
     const fetchImpl = vi.fn(async () => response(400, { error: { code: 'bad_request', message: 'nope' } }));
     const { api } = client(fetchImpl);
-    const err = await api.fail('job-1', 'x').catch((e: unknown) => e);
+    const err = await api.fail('job-1', 'x', 1).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ApiRequestError);
     expect((err as ApiRequestError).status).toBe(400);
     expect((err as ApiRequestError).code).toBe('bad_request');

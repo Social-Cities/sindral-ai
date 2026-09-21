@@ -197,7 +197,24 @@ describe('runJob', () => {
     const { deps: jobDeps, api } = deps(engine, workspace, { git: git.factory, gh: ghFactory });
     const outcome = await runJob(d, jobDeps, new AbortController().signal);
 
-    expect(outcome).toEqual({ status: 'completed', result: { kind: 'pr', summary: 'Implemented limiter', prUrl: 'https://github.com/acme/widgets/pull/9', branch: 'sindral/eng-142' } });
+    expect(outcome).toEqual({
+      status: 'completed',
+      result: {
+        kind: 'pr',
+        summary: 'Implemented limiter',
+        prUrl: 'https://github.com/acme/widgets/pull/9',
+        branch: 'sindral/eng-142',
+        pullRequests: [
+          {
+            repository: 'acme/widgets',
+            prUrl: 'https://github.com/acme/widgets/pull/9',
+            number: 9,
+            branch: 'sindral/eng-142',
+            baseBranch: 'main',
+          },
+        ],
+      },
+    });
     expect(ghFactory).toHaveBeenCalledWith(GH_TOKEN);
     expect(git.find('push', '--force-with-lease')).toHaveLength(1);
     expect(git.calls[0]?.auth.configArgs[1]).toContain('extraheader');

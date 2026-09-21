@@ -14,6 +14,7 @@ import {
   type JobContext,
   type Message,
   type MessageSource,
+  type ResolveRebaseConflictJobPayload,
   type RebaseStackJobPayload,
   type Task,
   type TaskWithRelations,
@@ -26,6 +27,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import type { Repository } from '../db/repository.js';
 import { badRequest, conflict, notFound } from '../errors.js';
 import type { Hub } from '../realtime/hub.js';
+import { parsePrUrl } from './github.js';
 import { toWorkflow, type WorkflowService } from './workflows.js';
 
 export type Actor = 'user' | 'worker' | 'system';
@@ -47,10 +49,21 @@ export interface OrchestratorDeps {
 
 export const REVIEW_ARTIFACT = 'adversarial-review.md';
 export const VERIFY_ARTIFACT = 'verify-report.md';
+export const CONFLICT_PROMPT_VERSION = 'rebase-conflict-v1';
 export const STALE_JOB_AFTER_MS = 15 * 60_000;
 export const WORKER_LOST_AFTER_MS = 5 * 60_000;
 export const MAX_JOB_ATTEMPTS = 3;
 const MIN_SUBTASKS = 2;
+const DEFAULT_CONFLICT_PROTECTED_PATHS = [
+  'supabase/migrations/',
+  '.github/workflows/',
+  'package.json',
+  'pnpm-lock.yaml',
+  'package-lock.json',
+  'yarn.lock',
+  'Dockerfile',
+  '.env',
+];
 
 export function branchNameFor(key: string): string {
   return `sindral/${key.toLowerCase()}`;
@@ -103,6 +116,7 @@ export class Orchestrator {
       parentTaskId: null,
       sequence: null,
     });
+    await this.syncTaskRepositories(userId, task);
     await this.repo.createEvent(userId, { taskId: task.id, type: 'created', toState: task.state, detail: { actor: 'user' } });
     this.hub.publish(userId, { type: 'task.created', taskId: task.id });
     return task;
@@ -116,13 +130,15 @@ export class Orchestrator {
 
   async getTaskWithRelations(userId: string, id: string): Promise<TaskWithRelations> {
     const task = await this.getTask(userId, id);
-    const [messages, events, artifacts, subtasks] = await Promise.all([
+    const [messages, events, artifacts, subtasks, repositories, pullRequests] = await Promise.all([
       this.repo.listMessages(userId, id),
       this.repo.listEvents(userId, id),
       this.repo.listArtifacts(userId, id),
       this.repo.listSubtasks(userId, id),
+      this.repo.listTaskRepositories(userId, id),
+      this.repo.listPullRequests(userId, id),
     ]);
-    return { ...task, messages, events, artifacts, subtasks };
+    return { ...task, messages, events, artifacts, subtasks, repositories, pullRequests };
   }
 
   async updateTask(userId: string, id: string, patch: UpdateTaskInput): Promise<Task> {
@@ -147,6 +163,7 @@ export class Orchestrator {
     }
     const updated = await this.repo.updateTask(userId, id, changes);
     if (!updated) throw notFound('Task');
+    if (patch.repos !== undefined) await this.syncTaskRepositories(userId, updated);
     this.hub.publish(userId, { type: 'task.updated', taskId: id });
     return updated;
   }
@@ -248,6 +265,11 @@ export class Orchestrator {
     const step = getStep(workflow, stepId);
     if (!step) throw new TransitionError(`Unknown step ${stepId}`, 'NO_STEP');
 
+    if (step.output === 'merge') {
+      await this.enqueueMergeJob(userId, task);
+      return task;
+    }
+
     // A parent whose plan produced subtasks does not implement anything itself:
     // the first child is started instead and the parent waits on the stack.
     if (step.output === 'pr' && task.parentTaskId === null) {
@@ -273,6 +295,41 @@ export class Orchestrator {
       payload: { kind: 'agent', step, context, repos: task.repos, branch: task.branch, baseBranch: task.baseBranch, prUrl: task.prUrl },
     });
     await this.repo.createEvent(userId, { taskId: task.id, type: 'job-queued', stepId: step.id, detail: { jobId: job.id, kind: 'agent' } });
+    return job;
+  }
+
+  private async enqueueMergeJob(userId: string, task: Task): Promise<Job> {
+    const [repositories, pullRequests] = await Promise.all([
+      this.repo.listTaskRepositories(userId, task.id),
+      this.repo.listPullRequests(userId, task.id),
+    ]);
+    if (pullRequests.length === 0) throw conflict('No pull requests are available to merge');
+    const repositoryById = new Map(repositories.map((repository) => [repository.id, repository]));
+    const items = pullRequests.map((pullRequest) => {
+      const repository = repositoryById.get(pullRequest.taskRepositoryId);
+      if (!repository) throw conflict(`Pull request ${pullRequest.url} has no repository record`);
+      if (!pullRequest.headSha) throw conflict(`Pull request ${pullRequest.url} has no pinned head commit`);
+      return {
+        id: pullRequest.id,
+        repository: pullRequest.repository,
+        url: pullRequest.url,
+        number: pullRequest.number,
+        headSha: pullRequest.headSha,
+        method: repository.mergeMethod,
+      };
+    });
+    const job = await this.repo.createJob(userId, {
+      taskId: task.id,
+      kind: 'merge-pull-requests',
+      stepId: task.currentStepId,
+      payload: { kind: 'merge-pull-requests', pullRequests: items },
+    });
+    await this.repo.createEvent(userId, {
+      taskId: task.id,
+      type: 'job-queued',
+      stepId: task.currentStepId,
+      detail: { jobId: job.id, kind: 'merge-pull-requests', count: items.length },
+    });
     return job;
   }
 
@@ -315,11 +372,22 @@ export class Orchestrator {
 
   // ---------------------------------------------------------------- worker results
 
-  async completeJob(userId: string, jobId: string, result: AgentResult): Promise<void> {
+  async completeJob(userId: string, jobId: string, result: AgentResult, expectedAttempt?: number): Promise<void> {
     const job = await this.repo.getJob(userId, jobId);
     if (!job) throw notFound('Job');
+    if (expectedAttempt !== undefined && job.attempt !== expectedAttempt) throw conflict(`Job attempt ${expectedAttempt} has been superseded`);
+    if (job.status === 'completed' && JSON.stringify(job.result) === JSON.stringify(result)) return;
     if (job.status !== 'claimed' && job.status !== 'running') throw conflict(`Job is ${job.status}`);
-    const expectedKind = job.kind === 'rebase-stack' ? 'rebase' : job.payload.kind === 'agent' ? job.payload.step.output : null;
+    const expectedKind =
+      job.kind === 'rebase-stack'
+        ? 'rebase'
+        : job.kind === 'resolve-rebase-conflict'
+          ? 'conflict-resolution'
+          : job.kind === 'merge-pull-requests'
+            ? 'merge'
+          : job.payload.kind === 'agent'
+            ? job.payload.step.output
+            : null;
     if (expectedKind !== result.kind) throw badRequest(`Job expects a "${expectedKind}" result, received "${result.kind}"`);
 
     const task = await this.repo.getTask(userId, job.taskId);
@@ -328,6 +396,14 @@ export class Orchestrator {
 
     if (result.kind === 'rebase') {
       await this.applyRebaseResult(userId, job, task, result);
+      return;
+    }
+    if (result.kind === 'conflict-resolution') {
+      await this.applyConflictResolutionResult(userId, job, task, result);
+      return;
+    }
+    if (result.kind === 'merge') {
+      await this.applyMergeResult(userId, job, task, result);
       return;
     }
 
@@ -345,9 +421,11 @@ export class Orchestrator {
     this.hub.publish(userId, { type: 'task.updated', taskId: task.id });
   }
 
-  async failJob(userId: string, jobId: string, error: string): Promise<void> {
+  async failJob(userId: string, jobId: string, error: string, expectedAttempt?: number): Promise<void> {
     const job = await this.repo.getJob(userId, jobId);
     if (!job) throw notFound('Job');
+    if (expectedAttempt !== undefined && job.attempt !== expectedAttempt) throw conflict(`Job attempt ${expectedAttempt} has been superseded`);
+    if (job.status === 'failed' && job.error === error) return;
     if (job.status !== 'claimed' && job.status !== 'running') throw conflict(`Job is ${job.status}`);
     await this.repo.updateJob(userId, job.id, { status: 'failed', error, finishedAt: this.now().toISOString() });
     const task = await this.repo.getTask(userId, job.taskId);
@@ -357,9 +435,22 @@ export class Orchestrator {
 
   private async failTask(userId: string, task: Task, job: Job, error: string): Promise<void> {
     await this.repo.updateTask(userId, task.id, { lastError: error });
-    const label = job.payload.kind === 'agent' ? job.payload.step.label : 'Stack rebase';
+    const label =
+      job.payload.kind === 'agent'
+        ? job.payload.step.label
+        : job.payload.kind === 'resolve-rebase-conflict'
+          ? 'Conflict resolution'
+          : job.payload.kind === 'merge-pull-requests'
+            ? 'Pull request merge'
+            : 'Stack rebase';
     await this.repo.createMessage(userId, { taskId: task.id, role: 'agent', content: `${label} failed: ${error}`, source: 'worker' });
-    if (job.kind === 'agent' && task.state !== 'failure' && this.isJobCurrent(task, job)) {
+    if (job.kind === 'resolve-rebase-conflict' && task.state === 'conflict-resolution') {
+      const fresh = (await this.repo.getTask(userId, task.id)) ?? task;
+      await this.applyEvent(userId, fresh, UNIVERSAL_EVENTS.CONFLICT_ESCALATED, { actor: 'worker', detail: { jobId: job.id } });
+    } else if (
+      ((job.kind === 'agent' && this.isJobCurrent(task, job)) || (job.kind === 'merge-pull-requests' && task.state === 'merge')) &&
+      task.state !== 'failure'
+    ) {
       const fresh = (await this.repo.getTask(userId, task.id)) ?? task;
       await this.applyEvent(userId, fresh, UNIVERSAL_EVENTS.FAIL, { actor: 'worker', detail: { jobId: job.id } });
     } else {
@@ -375,7 +466,12 @@ export class Orchestrator {
     return task.currentStepId === step.id && task.state === step.state;
   }
 
-  private async applyResult(userId: string, job: Job, task: Task, result: Exclude<AgentResult, { kind: 'rebase' }>): Promise<Task> {
+  private async applyResult(
+    userId: string,
+    job: Job,
+    task: Task,
+    result: Exclude<AgentResult, { kind: 'rebase' | 'conflict-resolution' | 'merge' }>,
+  ): Promise<Task> {
     switch (result.kind) {
       case 'plan': {
         const updated = await this.repo.updateTask(userId, task.id, { plan: result.plan });
@@ -384,8 +480,43 @@ export class Orchestrator {
         }
         return updated ?? task;
       }
-      case 'pr':
+      case 'pr': {
+        const pullRequests = result.pullRequests ?? [];
+        if (pullRequests.length > 0) {
+          const selected = new Set(task.repos);
+          const returned = new Set(pullRequests.map((item) => item.repository));
+          if (returned.size !== pullRequests.length || returned.size !== selected.size || [...selected].some((repository) => !returned.has(repository))) {
+            throw badRequest('Pull request result must contain exactly one pull request for every selected repository');
+          }
+          for (const item of pullRequests) {
+            const ref = parsePrUrl(item.prUrl);
+            if (!ref || `${ref.owner}/${ref.repo}` !== item.repository || ref.number !== item.number) {
+              throw badRequest(`Pull request URL does not match ${item.repository}#${item.number}`);
+            }
+            if (task.branch && item.branch !== task.branch) throw badRequest(`Pull request branch does not match task branch ${task.branch}`);
+          }
+          if (result.prUrl !== pullRequests[0]!.prUrl || result.branch !== pullRequests[0]!.branch) {
+            throw badRequest('Legacy pull request fields do not match the first repository result');
+          }
+        }
+        for (const item of pullRequests) {
+          const repository = await this.repo.upsertTaskRepository(userId, task.id, {
+            repository: item.repository,
+            branch: item.branch,
+            baseBranch: item.baseBranch,
+          });
+          await this.repo.upsertPullRequest(userId, task.id, {
+            taskRepositoryId: repository.id,
+            repository: item.repository,
+            url: item.prUrl,
+            number: item.number,
+            branch: item.branch,
+            baseBranch: item.baseBranch,
+            headSha: item.headSha ?? null,
+          });
+        }
         return (await this.repo.updateTask(userId, task.id, { prUrl: result.prUrl, branch: result.branch || task.branch })) ?? task;
+      }
       case 'review':
         await this.repo.createArtifact(userId, { taskId: task.id, jobId: job.id, name: REVIEW_ARTIFACT, contentType: 'text/markdown', content: result.report });
         return task;
@@ -427,11 +558,24 @@ export class Orchestrator {
         parentTaskId: parent.id,
         sequence: index + 1,
       });
+      await this.syncTaskRepositories(userId, child);
       await this.repo.createEvent(userId, { taskId: child.id, type: 'created', toState: 'todo', detail: { actor: 'system', parentTaskId: parent.id } });
       this.hub.publish(userId, { type: 'task.created', taskId: child.id });
       previousBranch = branch;
     }
     await this.repo.createEvent(userId, { taskId: parent.id, type: 'subtasks-created', detail: { count: subtasks.length } });
+  }
+
+  private async syncTaskRepositories(userId: string, task: Task): Promise<void> {
+    if (!task.branch && task.repos.length > 0) throw new Error(`Code task ${task.id} has no branch`);
+    for (const repository of task.repos) {
+      await this.repo.upsertTaskRepository(userId, task.id, {
+        repository,
+        branch: task.branch ?? '',
+        baseBranch: task.baseBranch,
+      });
+    }
+    await this.repo.deleteTaskRepositoriesNotIn(userId, task.id, task.repos);
   }
 
   private async startNextSibling(userId: string, child: Task): Promise<void> {
@@ -478,15 +622,23 @@ export class Orchestrator {
       stack.push({ taskId: sibling.id, branch: sibling.branch!, baseBranch: sibling.baseBranch ?? previous });
       previous = sibling.branch!;
     }
-    const job = await this.repo.createJob(userId, {
-      taskId: child.parentTaskId,
-      kind: 'rebase-stack',
-      stepId: null,
-      payload: { kind: 'rebase-stack', repos: child.repos, stack },
-    });
-    await this.repo.createEvent(userId, { taskId: child.parentTaskId, type: 'job-queued', detail: { jobId: job.id, kind: 'rebase-stack', trigger: child.id } });
+    let first: Job | null = null;
+    for (const repository of child.repos) {
+      const job = await this.repo.createJob(userId, {
+        taskId: child.parentTaskId,
+        kind: 'rebase-stack',
+        stepId: null,
+        payload: { kind: 'rebase-stack', repos: [repository], stack },
+      });
+      first ??= job;
+      await this.repo.createEvent(userId, {
+        taskId: child.parentTaskId,
+        type: 'job-queued',
+        detail: { jobId: job.id, kind: 'rebase-stack', repository, trigger: child.id },
+      });
+    }
     this.hub.publish(userId, { type: 'task.updated', taskId: child.parentTaskId });
-    return job;
+    return first;
   }
 
   private async applyRebaseResult(userId: string, job: Job, parent: Task, result: Extract<AgentResult, { kind: 'rebase' }>): Promise<void> {
@@ -498,12 +650,223 @@ export class Orchestrator {
       const error = entry.error ?? `Rebase of ${entry.branch} failed`;
       await this.repo.updateTask(userId, sibling.id, { lastError: error });
       await this.repo.createMessage(userId, { taskId: sibling.id, role: 'agent', content: `Stack rebase failed: ${error}`, source: 'worker' });
+      if (entry.conflict && sibling.state !== 'failure' && sibling.state !== 'done') {
+        const resolving = await this.applyEvent(userId, sibling, UNIVERSAL_EVENTS.REBASE_CONFLICT, {
+          actor: 'system',
+          detail: { jobId: job.id, repository: entry.conflict.repository, conflictedPaths: entry.conflict.conflictedPaths },
+        });
+        const repeated = (await this.repo.listJobsForTask(userId, sibling.id)).some(
+          (candidate) =>
+            candidate.payload.kind === 'resolve-rebase-conflict' &&
+            candidate.payload.sourceSha === entry.conflict!.sourceSha &&
+            candidate.payload.targetSha === entry.conflict!.targetSha,
+        );
+        if (repeated) {
+          const repeatedError = 'Automatic conflict resolution already attempted for this source/target commit pair';
+          await this.repo.updateTask(userId, sibling.id, { lastError: repeatedError });
+          await this.repo.createMessage(userId, { taskId: sibling.id, role: 'agent', content: repeatedError, source: 'worker' });
+          await this.applyEvent(userId, resolving, UNIVERSAL_EVENTS.CONFLICT_ESCALATED, {
+            actor: 'system',
+            detail: { jobId: job.id, reason: 'conflict-resolution-attempt-limit' },
+          });
+          continue;
+        }
+        await this.enqueueConflictResolution(userId, resolving, entry.conflict);
+        continue;
+      }
       if (sibling.state !== 'failure' && sibling.state !== 'done') {
         const fresh = (await this.repo.getTask(userId, sibling.id)) ?? sibling;
         await this.applyEvent(userId, fresh, UNIVERSAL_EVENTS.FAIL, { actor: 'system', detail: { jobId: job.id, reason: 'rebase' } });
       }
     }
     this.hub.publish(userId, { type: 'task.updated', taskId: parent.id });
+  }
+
+  private async enqueueConflictResolution(
+    userId: string,
+    task: Task,
+    conflictInfo: NonNullable<Extract<AgentResult, { kind: 'rebase' }>['rebased'][number]['conflict']>,
+  ): Promise<Job> {
+    const context = await this.buildJobContext(userId, task);
+    const payload: ResolveRebaseConflictJobPayload = {
+      kind: 'resolve-rebase-conflict',
+      repository: conflictInfo.repository,
+      taskId: task.id,
+      taskKey: task.key,
+      branch: task.branch ?? conflictInfo.baseBranch,
+      baseBranch: conflictInfo.baseBranch,
+      sourceSha: conflictInfo.sourceSha,
+      targetSha: conflictInfo.targetSha,
+      conflictedPaths: conflictInfo.conflictedPaths,
+      context,
+      engine: 'claude',
+      model: 'claude-opus-5',
+      mode: 'high',
+      policy: {
+        allowedPaths: conflictInfo.conflictedPaths,
+        protectedPaths: DEFAULT_CONFLICT_PROTECTED_PATHS,
+        validationCommands: [],
+        maxFiles: 20,
+        maxChangedLines: 1_000,
+      },
+    };
+    const job = await this.repo.createJob(userId, { taskId: task.id, kind: 'resolve-rebase-conflict', stepId: null, payload });
+    await this.repo.createEvent(userId, {
+      taskId: task.id,
+      type: 'conflict-resolution-queued',
+      detail: { jobId: job.id, repository: conflictInfo.repository, branch: payload.branch, conflictedPaths: conflictInfo.conflictedPaths },
+    });
+    this.hub.publish(userId, { type: 'task.updated', taskId: task.id });
+    return job;
+  }
+
+  private async applyConflictResolutionResult(
+    userId: string,
+    job: Job,
+    task: Task,
+    result: Extract<AgentResult, { kind: 'conflict-resolution' }>,
+  ): Promise<void> {
+    if (job.payload.kind !== 'resolve-rebase-conflict' || result.taskId !== task.id || result.branch !== job.payload.branch) {
+      throw badRequest('Conflict-resolution result does not match its dispatched task and branch');
+    }
+    await this.repo.createMessage(userId, { taskId: task.id, role: 'agent', content: result.summary, source: 'worker' });
+    await this.repo.createEvent(userId, {
+      taskId: task.id,
+      type: result.resolved ? 'conflict-resolution-succeeded' : 'conflict-resolution-escalated',
+      detail: {
+        jobId: job.id,
+        branch: result.branch,
+        resolvedPaths: result.resolvedPaths,
+        checks: result.checks,
+        resolutionCommit: result.resolutionCommit ?? null,
+        error: result.error ?? null,
+      },
+    });
+    await this.repo.createArtifact(userId, {
+      taskId: task.id,
+      jobId: job.id,
+      name: `conflict-resolution-${job.id}.json`,
+      contentType: 'application/json',
+      content: JSON.stringify(
+        {
+          promptVersion: CONFLICT_PROMPT_VERSION,
+          repository: job.payload.repository,
+          branch: job.payload.branch,
+          baseBranch: job.payload.baseBranch,
+          sourceSha: job.payload.sourceSha,
+          targetSha: job.payload.targetSha,
+          conflictedPaths: job.payload.conflictedPaths,
+          engine: job.payload.engine,
+          model: job.payload.model,
+          outcome: result.resolved ? 'resolved' : 'escalated',
+          rationale: result.rationale,
+          resolvedPaths: result.resolvedPaths,
+          checks: result.checks,
+          resolutionCommit: result.resolutionCommit ?? null,
+          resolutionDiffHash: result.resolutionDiffHash ?? null,
+          error: result.error ?? null,
+        },
+        null,
+        2,
+      ),
+    });
+    if (result.resolved) {
+      const resumed = await this.applyEvent(userId, task, UNIVERSAL_EVENTS.CONFLICT_RESOLVED, { actor: 'worker', detail: { jobId: job.id } });
+      const updated = (await this.repo.updateTask(userId, task.id, { lastError: null })) ?? resumed;
+      if (updated.parentTaskId) await this.enqueueStackRebase(userId, updated);
+    } else if (task.state === 'conflict-resolution') {
+      const error = result.error ?? 'Automatic conflict resolution requires human review';
+      await this.repo.updateTask(userId, task.id, { lastError: error });
+      const fresh = (await this.repo.getTask(userId, task.id)) ?? task;
+      await this.applyEvent(userId, fresh, UNIVERSAL_EVENTS.CONFLICT_ESCALATED, { actor: 'system', detail: { jobId: job.id, reason: 'conflict-resolution' } });
+    }
+    this.hub.publish(userId, { type: 'task.updated', taskId: task.id });
+  }
+
+  private async applyMergeResult(userId: string, job: Job, task: Task, result: Extract<AgentResult, { kind: 'merge' }>): Promise<void> {
+    if (job.payload.kind !== 'merge-pull-requests') throw badRequest('Merge result does not match its dispatched job');
+    const tracked = await this.repo.listPullRequests(userId, task.id);
+    const trackedById = new Map(tracked.map((pullRequest) => [pullRequest.id, pullRequest]));
+    const dispatchedIds = new Set(job.payload.pullRequests.map((pullRequest) => pullRequest.id));
+    const resultIds = new Set(result.pullRequests.map((pullRequest) => pullRequest.id));
+    if (
+      result.pullRequests.length !== job.payload.pullRequests.length ||
+      resultIds.size !== dispatchedIds.size ||
+      [...dispatchedIds].some((id) => !resultIds.has(id)) ||
+      result.pullRequests.some((item) => {
+        const trackedPullRequest = trackedById.get(item.id);
+        return !trackedPullRequest || item.repository !== trackedPullRequest.repository || item.url !== trackedPullRequest.url;
+      })
+    ) {
+      throw badRequest('Merge result does not match its dispatched pull requests');
+    }
+
+    for (const item of result.pullRequests) {
+      if (!item.merged) continue;
+      const pullRequest = trackedById.get(item.id)!;
+      await this.repo.upsertPullRequest(userId, task.id, {
+        taskRepositoryId: pullRequest.taskRepositoryId,
+        repository: pullRequest.repository,
+        url: pullRequest.url,
+        number: pullRequest.number,
+        branch: pullRequest.branch,
+        baseBranch: pullRequest.baseBranch,
+        headSha: pullRequest.headSha,
+        status: 'merged',
+        mergedAt: item.mergedAt ?? this.now().toISOString(),
+      });
+    }
+
+    await this.repo.createMessage(userId, { taskId: task.id, role: 'agent', content: result.summary, source: 'worker' });
+    const persisted = await this.repo.listPullRequests(userId, task.id);
+    const fullyMerged = result.complete && persisted.length === dispatchedIds.size && persisted.every((pullRequest) => pullRequest.status === 'merged');
+    await this.repo.createEvent(userId, {
+      taskId: task.id,
+      type: fullyMerged ? 'merge-complete' : 'merge-partial-failure',
+      stepId: job.stepId,
+      detail: { jobId: job.id, pullRequests: result.pullRequests },
+    });
+    if (fullyMerged && task.state === 'merge') {
+      await this.applyEvent(userId, task, 'complete', { actor: 'worker', detail: { jobId: job.id } });
+    } else if (task.state === 'merge') {
+      const error = result.pullRequests.find((pullRequest) => !pullRequest.merged)?.error ?? 'Not every pull request could be merged';
+      await this.repo.updateTask(userId, task.id, { lastError: error });
+      const fresh = (await this.repo.getTask(userId, task.id)) ?? task;
+      await this.applyEvent(userId, fresh, UNIVERSAL_EVENTS.FAIL, { actor: 'worker', detail: { jobId: job.id, reason: 'merge' } });
+    }
+    this.hub.publish(userId, { type: 'task.updated', taskId: task.id });
+  }
+
+  async reconcilePullRequest(url: string, status: 'open' | 'merged' | 'closed', mergedAt: string | null): Promise<boolean> {
+    const pullRequest = await this.repo.findPullRequestByUrl(url);
+    if (!pullRequest) return false;
+    if (pullRequest.status === status && pullRequest.mergedAt === mergedAt) return true;
+    await this.repo.upsertPullRequest(pullRequest.userId, pullRequest.taskId, {
+      taskRepositoryId: pullRequest.taskRepositoryId,
+      repository: pullRequest.repository,
+      url: pullRequest.url,
+      number: pullRequest.number,
+      branch: pullRequest.branch,
+      baseBranch: pullRequest.baseBranch,
+      headSha: pullRequest.headSha,
+      status,
+      mergedAt,
+    });
+    await this.repo.createEvent(pullRequest.userId, {
+      taskId: pullRequest.taskId,
+      type: 'pull-request-reconciled',
+      detail: { pullRequestId: pullRequest.id, repository: pullRequest.repository, url, status, mergedAt },
+    });
+    const task = await this.repo.getTask(pullRequest.userId, pullRequest.taskId);
+    if (task?.state === 'merge' && status === 'merged') {
+      const all = await this.repo.listPullRequests(pullRequest.userId, pullRequest.taskId);
+      if (all.length > 0 && all.every((item) => item.status === 'merged')) {
+        await this.repo.cancelQueuedJobs(pullRequest.userId, pullRequest.taskId);
+        await this.applyEvent(pullRequest.userId, task, 'complete', { actor: 'system', detail: { reason: 'github-webhook' } });
+      }
+    }
+    this.hub.publish(pullRequest.userId, { type: 'task.updated', taskId: pullRequest.taskId });
+    return true;
   }
 
   // ---------------------------------------------------------------- sweeper

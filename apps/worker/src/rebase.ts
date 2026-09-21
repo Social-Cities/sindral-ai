@@ -46,11 +46,23 @@ export async function runRebaseStack(opts: RebaseStackOptions): Promise<RebaseRe
       const wt = gitFactory(dir, auth);
       await wt(['checkout', branch]);
       await wt(['reset', '--hard', `origin/${branch}`]);
+      const sourceSha = (await wt(['rev-parse', `origin/${branch}`])).stdout.trim();
+      const targetSha = (await wt(['rev-parse', `origin/${baseBranch}`])).stdout.trim();
       const rebase = await wt.try(['-c', 'user.name=Sindral AI', '-c', 'user.email=sindral@users.noreply.github.com', 'rebase', `origin/${baseBranch}`]);
       if (rebase.failed || rebase.exitCode !== 0) {
+        const conflicts = await wt.try(['diff', '--name-only', '--diff-filter=U', '-z']);
+        const conflictedPaths = conflicts.failed ? [] : parseConflictedPaths(conflicts.stdout);
         await wt.try(['rebase', '--abort']);
         const detail = opts.redactor.redact((rebase.stderr || rebase.stdout || rebase.message).trim()).slice(0, 2000);
-        rebased.push({ taskId: entry.taskId, branch, ok: false, error: `rebase onto ${baseBranch} failed: ${detail}` });
+        rebased.push({
+          taskId: entry.taskId,
+          branch,
+          ok: false,
+          error: `rebase onto ${baseBranch} failed: ${detail}`,
+          ...(isSha(sourceSha) && isSha(targetSha) && conflictedPaths.length > 0
+            ? { conflict: { repository: repo.full, baseBranch, sourceSha, targetSha, conflictedPaths } }
+            : {}),
+        });
         break;
       }
       await wt(['push', '--force-with-lease', 'origin', `${branch}:${branch}`]);
@@ -68,6 +80,20 @@ export async function runRebaseStack(opts: RebaseStackOptions): Promise<RebaseRe
     ? `Rebased ${okCount}/${payload.stack.length} branches; stopped at ${failed.branch}: ${failed.error ?? 'error'}${skipped > 0 ? ` (${skipped} later branch${skipped === 1 ? '' : 'es'} skipped)` : ''}`
     : `Rebased ${okCount}/${payload.stack.length} branches successfully`;
   return { kind: 'rebase', summary, rebased };
+}
+
+const SHA_RE = /^[0-9a-f]{40}$/i;
+
+function isSha(value: string): boolean {
+  return SHA_RE.test(value);
+}
+
+export function parseConflictedPaths(output: string): string[] {
+  const paths = output
+    .split('\0')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return [...new Set(paths.filter((value) => !path.isAbsolute(value) && !value.split('/').includes('..')))];
 }
 
 async function ensureBranchWorktree(

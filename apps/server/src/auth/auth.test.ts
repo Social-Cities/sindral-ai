@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createTestApp, mintToken, type TestContext } from '../test/helpers.js';
+import type { CryptoKey } from 'jose';
+import { createTestApp, mintToken, TEST_JWT_SECRET, type TestContext } from '../test/helpers.js';
+import { createUserTokenVerifier } from './user.js';
 
 let ctx: TestContext;
 beforeEach(async () => {
@@ -70,5 +72,47 @@ describe('worker authentication', () => {
     expect(await ctx.repo.getWorker(ctx.userB, workerId)).toBeNull();
     const [record] = await ctx.repo.listWorkerKeys(ctx.userA);
     expect(record?.lastUsedAt).not.toBeNull();
+  });
+});
+
+describe('token algorithm selection', () => {
+  // Supabase projects issue either legacy HS256 tokens or asymmetric ES256/RS256 tokens
+  // verified through the project's JWKS endpoint. Both must work.
+  it('verifies ES256 tokens through the JWKS endpoint and still rejects bad ones', async () => {
+    const { SignJWT, exportJWK, generateKeyPair } = await import('jose');
+    const { publicKey, privateKey } = await generateKeyPair('ES256', { extractable: true });
+    const jwk = await exportJWK(publicKey);
+    jwk.kid = 'test-key';
+    jwk.alg = 'ES256';
+
+    const other = await generateKeyPair('ES256', { extractable: true });
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(JSON.stringify({ keys: [jwk] }), { status: 200, headers: { 'content-type': 'application/json' } })) as typeof fetch;
+
+    try {
+      // No HS256 secret configured: the asymmetric path must be selected from the token header.
+      const verifier = createUserTokenVerifier({ supabaseUrl: 'http://127.0.0.1:54321' });
+      const sign = (key: CryptoKey) =>
+        new SignJWT({ email: 'es@example.com', role: 'authenticated' })
+          .setProtectedHeader({ alg: 'ES256', kid: 'test-key' })
+          .setSubject('11111111-1111-4111-8111-111111111111')
+          .setAudience('authenticated')
+          .setExpirationTime('1h')
+          .sign(key);
+
+      await expect(verifier.verify(await sign(privateKey))).resolves.toEqual({ id: '11111111-1111-4111-8111-111111111111', email: 'es@example.com' });
+      await expect(verifier.verify(await sign(other.privateKey))).rejects.toThrow(/Invalid or expired token/);
+      // An HS256 token cannot be smuggled in when no shared secret is configured.
+      await expect(verifier.verify(await mintToken('22222222-2222-4222-8222-222222222222'))).rejects.toThrow(/Invalid or expired token/);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  it('rejects unsigned (alg=none) tokens', async () => {
+    const verifier = createUserTokenVerifier({ supabaseUrl: 'http://127.0.0.1:54321', jwtSecret: TEST_JWT_SECRET });
+    const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url');
+    const body = Buffer.from(JSON.stringify({ sub: 'x', aud: 'authenticated', exp: Math.floor(Date.now() / 1000) + 600 })).toString('base64url');
+    await expect(verifier.verify(`${header}.${body}.`)).rejects.toThrow(/Invalid or expired token/);
   });
 });

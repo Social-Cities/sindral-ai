@@ -9,9 +9,13 @@ import type {
   Message,
   MessageRole,
   MessageSource,
+  MergeMethod,
+  PullRequest,
+  PullRequestStatus,
   SecretProvider,
   Task,
   TaskEvent,
+  TaskRepository,
   Worker,
   WorkerKey,
   WorkerStatus,
@@ -36,6 +40,8 @@ import {
   type TaskFilter,
   type TaskInsert,
   type TaskPatch,
+  type TaskRepositoryUpsert,
+  type PullRequestUpsert,
   type WorkerInsert,
   type WorkerKeyInsert,
   type WorkerKeyLookup,
@@ -85,6 +91,33 @@ interface TaskRow {
   sequence: number | null;
   failed_step_id: string | null;
   last_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+interface TaskRepositoryRow {
+  id: string;
+  user_id: string;
+  task_id: string;
+  repository: string;
+  branch: string;
+  base_branch: string | null;
+  merge_method: MergeMethod;
+  created_at: string;
+  updated_at: string;
+}
+interface PullRequestRow {
+  id: string;
+  user_id: string;
+  task_id: string;
+  task_repository_id: string;
+  repository: string;
+  url: string;
+  number: number;
+  branch: string;
+  base_branch: string;
+  head_sha: string | null;
+  status: PullRequestStatus;
+  merged_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -218,6 +251,35 @@ const mapTask = (r: TaskRow): Task => ({
   sequence: r.sequence,
   failedStepId: r.failed_step_id,
   lastError: r.last_error,
+  createdAt: r.created_at,
+  updatedAt: r.updated_at,
+});
+
+const mapTaskRepository = (r: TaskRepositoryRow): TaskRepository => ({
+  id: r.id,
+  userId: r.user_id,
+  taskId: r.task_id,
+  repository: r.repository,
+  branch: r.branch,
+  baseBranch: r.base_branch,
+  mergeMethod: r.merge_method,
+  createdAt: r.created_at,
+  updatedAt: r.updated_at,
+});
+
+const mapPullRequest = (r: PullRequestRow): PullRequest => ({
+  id: r.id,
+  userId: r.user_id,
+  taskId: r.task_id,
+  taskRepositoryId: r.task_repository_id,
+  repository: r.repository,
+  url: r.url,
+  number: r.number,
+  branch: r.branch,
+  baseBranch: r.base_branch,
+  headSha: r.head_sha,
+  status: r.status,
+  mergedAt: r.merged_at,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
@@ -473,8 +535,84 @@ export class SupabaseRepository implements Repository {
   }
 
   async findTaskByPrUrl(prUrl: string): Promise<Task | null> {
+    const pullRequest = await this.findPullRequestByUrl(prUrl);
+    if (pullRequest) return this.getTask(pullRequest.userId, pullRequest.taskId);
     const row = await run<TaskRow | null>(this.client.from('tasks').select('*').eq('pr_url', prUrl).limit(1).maybeSingle());
     return row ? mapTask(row) : null;
+  }
+
+  // ---- task repositories and pull requests ----
+  async listTaskRepositories(userId: string, taskId: string): Promise<TaskRepository[]> {
+    const rows = await run<TaskRepositoryRow[]>(
+      this.client.from('task_repositories').select('*').eq('user_id', userId).eq('task_id', taskId).order('created_at', { ascending: true }),
+    );
+    return rows.map(mapTaskRepository);
+  }
+
+  async upsertTaskRepository(userId: string, taskId: string, input: TaskRepositoryUpsert): Promise<TaskRepository> {
+    const row = await run<TaskRepositoryRow>(
+      this.client
+        .from('task_repositories')
+        .upsert(
+          {
+            user_id: userId,
+            task_id: taskId,
+            repository: input.repository,
+            branch: input.branch,
+            base_branch: input.baseBranch,
+            merge_method: input.mergeMethod ?? 'squash',
+          },
+          { onConflict: 'task_id,repository' },
+        )
+        .select('*')
+        .single(),
+    );
+    return mapTaskRepository(row);
+  }
+
+  async deleteTaskRepositoriesNotIn(userId: string, taskId: string, repositories: string[]): Promise<void> {
+    const keep = new Set(repositories);
+    const existing = await this.listTaskRepositories(userId, taskId);
+    const ids = existing.filter((record) => !keep.has(record.repository)).map((record) => record.id);
+    if (ids.length > 0) await run(this.client.from('task_repositories').delete().eq('user_id', userId).eq('task_id', taskId).in('id', ids));
+  }
+
+  async listPullRequests(userId: string, taskId: string): Promise<PullRequest[]> {
+    const rows = await run<PullRequestRow[]>(
+      this.client.from('pull_requests').select('*').eq('user_id', userId).eq('task_id', taskId).order('created_at', { ascending: true }),
+    );
+    return rows.map(mapPullRequest);
+  }
+
+  async upsertPullRequest(userId: string, taskId: string, input: PullRequestUpsert): Promise<PullRequest> {
+    const row = await run<PullRequestRow>(
+      this.client
+        .from('pull_requests')
+        .upsert(
+          {
+            user_id: userId,
+            task_id: taskId,
+            task_repository_id: input.taskRepositoryId,
+            repository: input.repository,
+            url: input.url,
+            number: input.number,
+            branch: input.branch,
+            base_branch: input.baseBranch,
+            head_sha: input.headSha,
+            status: input.status ?? 'open',
+            merged_at: input.mergedAt ?? null,
+          },
+          { onConflict: 'task_id,repository' },
+        )
+        .select('*')
+        .single(),
+    );
+    return mapPullRequest(row);
+  }
+
+  async findPullRequestByUrl(prUrl: string): Promise<PullRequest | null> {
+    const row = await run<PullRequestRow | null>(this.client.from('pull_requests').select('*').eq('url', prUrl).limit(1).maybeSingle());
+    return row ? mapPullRequest(row) : null;
   }
 
   // ---- messages ----
@@ -579,6 +717,21 @@ export class SupabaseRepository implements Repository {
   async claimJobs(userId: string, workerId: string, max: number): Promise<Job[]> {
     const rows = await run<JobRow[]>(this.client.rpc('claim_jobs', { p_user_id: userId, p_worker_id: workerId, p_max: max }));
     return rows.map(mapJob);
+  }
+
+  async renewJobLeases(userId: string, workerId: string, jobIds: string[], renewedAt: string): Promise<number> {
+    if (jobIds.length === 0) return 0;
+    const rows = await run<{ id: string }[]>(
+      this.client
+        .from('jobs')
+        .update({ claimed_at: renewedAt })
+        .eq('user_id', userId)
+        .eq('worker_id', workerId)
+        .in('id', jobIds)
+        .in('status', ['claimed', 'running'])
+        .select('id'),
+    );
+    return rows.length;
   }
 
   async cancelQueuedJobs(userId: string, taskId: string): Promise<number> {

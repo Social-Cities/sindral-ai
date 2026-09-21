@@ -5,6 +5,8 @@ export { runJob, type JobDeps, type JobOutcome } from './job.js';
 export { WorkspaceManager, parseRepo, sanitizeTaskKey, deriveBranch, type Workspace } from './workspace.js';
 export { createEngines, describeVersion, type Engine, type EngineRegistry } from './engines/index.js';
 export { runRebaseStack } from './rebase.js';
+export { runConflictResolution, isProtectedPath } from './conflict.js';
+export { runMergePullRequests } from './merge.js';
 export { buildPrompt, workspaceNote } from './prompt.js';
 export { Redactor } from './redact.js';
 export { WORKER_VERSION } from './version.js';

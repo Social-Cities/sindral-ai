@@ -30,5 +30,6 @@ describe('config', () => {
       expect((err as Error).message).toContain('SECRETS_ENCRYPTION_KEY');
       expect((err as Error).message).toContain('openssl rand -hex 32');
     }
+    expect(() => parseConfig({ ...valid, GITHUB_APP_ID: '1' })).toThrow(/configured together/);
   });
 });

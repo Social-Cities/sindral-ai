@@ -150,8 +150,9 @@ export interface DiffFile {
   patch?: string;
 }
 
-export function getTaskDiff(id: string) {
-  return apiFetch<{ files: DiffFile[] }>(`/api/tasks/${encodeURIComponent(id)}/diff`);
+export function getTaskDiff(id: string, repository?: string) {
+  const query = repository ? `?repository=${encodeURIComponent(repository)}` : '';
+  return apiFetch<{ files: DiffFile[] }>(`/api/tasks/${encodeURIComponent(id)}/diff${query}`);
 }
 
 // ---- workflows -------------------------------------------------------------

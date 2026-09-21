@@ -26,6 +26,9 @@ const envSchema = z.object({
     .string()
     .regex(/^[0-9a-fA-F]{64}$/, 'must be 32 bytes hex encoded (openssl rand -hex 32)'),
   GITHUB_WEBHOOK_SECRET: optionalString,
+  GITHUB_APP_ID: optionalString,
+  GITHUB_APP_PRIVATE_KEY: optionalString,
+  GITHUB_APP_INSTALLATIONS: optionalString,
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   WEB_DIST_DIR: optionalString,
 });
@@ -42,6 +45,9 @@ export interface AppConfig {
   webOrigins: string[];
   secretsEncryptionKey: Buffer;
   githubWebhookSecret: string | undefined;
+  githubAppId: string | undefined;
+  githubAppPrivateKey: string | undefined;
+  githubAppInstallations: Record<string, number>;
   logLevel: LogLevel;
   webDistDir: string;
 }
@@ -60,6 +66,18 @@ export function parseConfig(env: NodeJS.ProcessEnv): AppConfig {
     throw new ConfigError(`Invalid environment configuration:\n${lines.join('\n')}\nSee .env.example at the repository root.`);
   }
   const e = result.data;
+  const githubAppValues = [e.GITHUB_APP_ID, e.GITHUB_APP_PRIVATE_KEY, e.GITHUB_APP_INSTALLATIONS];
+  if (githubAppValues.some((value) => value !== undefined) && githubAppValues.some((value) => value === undefined)) {
+    throw new ConfigError('GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, and GITHUB_APP_INSTALLATIONS must be configured together');
+  }
+  let githubAppInstallations: Record<string, number> = {};
+  if (e.GITHUB_APP_INSTALLATIONS) {
+    try {
+      githubAppInstallations = z.record(z.string().uuid(), z.number().int().positive()).parse(JSON.parse(e.GITHUB_APP_INSTALLATIONS));
+    } catch {
+      throw new ConfigError('GITHUB_APP_INSTALLATIONS must be a JSON object mapping Sindral user UUIDs to positive GitHub installation IDs');
+    }
+  }
   return {
     supabaseUrl: e.SUPABASE_URL,
     supabaseAnonKey: e.SUPABASE_ANON_KEY,
@@ -72,6 +90,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): AppConfig {
       .filter(Boolean),
     secretsEncryptionKey: Buffer.from(e.SECRETS_ENCRYPTION_KEY, 'hex'),
     githubWebhookSecret: e.GITHUB_WEBHOOK_SECRET,
+    githubAppId: e.GITHUB_APP_ID,
+    githubAppPrivateKey: e.GITHUB_APP_PRIVATE_KEY?.replaceAll('\\n', '\n'),
+    githubAppInstallations,
     logLevel: e.LOG_LEVEL,
     webDistDir: e.WEB_DIST_DIR ?? path.resolve(SERVER_PACKAGE_DIR, '..', 'web', 'dist'),
   };

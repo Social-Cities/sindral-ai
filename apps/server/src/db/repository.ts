@@ -6,9 +6,13 @@ import type {
   Message,
   MessageRole,
   MessageSource,
+  MergeMethod,
+  PullRequest,
+  PullRequestStatus,
   SecretProvider,
   Task,
   TaskEvent,
+  TaskRepository,
   Worker,
   WorkerKey,
   Workflow,
@@ -92,6 +96,25 @@ export interface TaskFilter {
   search?: string;
   parentTaskId?: string;
   includeSubtasks?: boolean;
+}
+
+export interface TaskRepositoryUpsert {
+  repository: string;
+  branch: string;
+  baseBranch: string | null;
+  mergeMethod?: MergeMethod;
+}
+
+export interface PullRequestUpsert {
+  taskRepositoryId: string;
+  repository: string;
+  url: string;
+  number: number;
+  branch: string;
+  baseBranch: string;
+  headSha: string | null;
+  status?: PullRequestStatus;
+  mergedAt?: string | null;
 }
 
 export interface MessageInsert {
@@ -209,6 +232,14 @@ export interface Repository {
   /** Cross-user: used by the GitHub webhook which carries no user context. */
   findTaskByPrUrl(prUrl: string): Promise<Task | null>;
 
+  // task repositories and pull requests
+  listTaskRepositories(userId: string, taskId: string): Promise<TaskRepository[]>;
+  upsertTaskRepository(userId: string, taskId: string, input: TaskRepositoryUpsert): Promise<TaskRepository>;
+  deleteTaskRepositoriesNotIn(userId: string, taskId: string, repositories: string[]): Promise<void>;
+  listPullRequests(userId: string, taskId: string): Promise<PullRequest[]>;
+  upsertPullRequest(userId: string, taskId: string, input: PullRequestUpsert): Promise<PullRequest>;
+  findPullRequestByUrl(prUrl: string): Promise<PullRequest | null>;
+
   // messages
   listMessages(userId: string, taskId: string): Promise<Message[]>;
   /** Returns null when `externalId` already exists for the task (idempotent ingestion). */
@@ -229,6 +260,7 @@ export interface Repository {
   updateJob(userId: string, id: string, patch: JobPatch): Promise<Job | null>;
   /** Atomically claim queued jobs, serialised per task (see `claim_jobs` in the migration). */
   claimJobs(userId: string, workerId: string, max: number): Promise<Job[]>;
+  renewJobLeases(userId: string, workerId: string, jobIds: string[], renewedAt: string): Promise<number>;
   cancelQueuedJobs(userId: string, taskId: string): Promise<number>;
   /** Cross-user: claimed/running jobs, used by the stale-job sweeper. */
   listActiveJobs(): Promise<Job[]>;

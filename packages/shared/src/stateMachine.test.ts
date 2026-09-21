@@ -13,13 +13,13 @@ describe('bundled workflows', () => {
 
   it('full sdlc happy path matches the engineering plan', () => {
     expect(happyPath(wf).map((s) => s.state)).toEqual([
-      'todo', 'planning', 'plan-review', 'implement', 'adversarial-review', 'verify', 'in-review', 'done',
+      'todo', 'planning', 'plan-review', 'implement', 'adversarial-review', 'verify', 'in-review', 'merge', 'done',
     ]);
   });
 
   it('other workflows have sensible happy paths', () => {
     expect(happyPath(PLANNING_ONLY_WORKFLOW).map((s) => s.state)).toEqual(['todo', 'planning', 'plan-review', 'done']);
-    expect(happyPath(FAST_TRACK_WORKFLOW).map((s) => s.state)).toEqual(['todo', 'implement', 'verify', 'in-review', 'done']);
+    expect(happyPath(FAST_TRACK_WORKFLOW).map((s) => s.state)).toEqual(['todo', 'implement', 'verify', 'in-review', 'merge', 'done']);
     expect(happyPath(DOCUMENT_WORKFLOW).map((s) => s.state)).toEqual(['todo', 'implement', 'in-review', 'done']);
   });
 });
@@ -49,7 +49,7 @@ describe('transition', () => {
     expect(back.nextState).toBe('plan-review');
   });
 
-  it('approve moves to implement, then review, verify, in-review, done', () => {
+  it('approve moves to implement, then review, verify, in-review, merge, done', () => {
     let t = transition(at('plan-review', 'plan-review'), wf, 'approve');
     expect(t.nextState).toBe('implement');
     t = transition(at('implement', 'implement'), wf, 'complete');
@@ -59,6 +59,8 @@ describe('transition', () => {
     t = transition(at('verify', 'verify'), wf, 'complete');
     expect(t.nextState).toBe('in-review');
     t = transition(at('in-review', 'in-review'), wf, 'accept');
+    expect(t).toMatchObject({ nextState: 'merge', nextStepId: 'merge', effects: [{ type: 'dispatch' }] });
+    t = transition(at('merge', 'merge'), wf, 'complete');
     expect(t).toMatchObject({ nextState: 'done', nextStepId: 'done', effects: [{ type: 'complete-task' }] });
   });
 
@@ -99,6 +101,15 @@ describe('transition', () => {
     expect(t).toMatchObject({ nextState: 'failure', failedStepId: 'implement' });
   });
 
+  it('parks a task during conflict resolution and re-runs review before merge', () => {
+    const conflict = transition(at('in-review', 'in-review'), wf, 'rebase-conflict');
+    expect(conflict).toMatchObject({ nextState: 'conflict-resolution', nextStepId: 'in-review', failedStepId: 'in-review', effects: [] });
+    const resolved = transition(at('conflict-resolution', 'in-review', 'in-review'), wf, 'conflict-resolved');
+    expect(resolved).toMatchObject({ nextState: 'adversarial-review', nextStepId: 'adversarial-review', failedStepId: null, effects: [{ type: 'dispatch', stepId: 'adversarial-review' }] });
+    const escalated = transition(at('conflict-resolution', 'in-review', 'in-review'), wf, 'conflict-escalated');
+    expect(escalated).toMatchObject({ nextState: 'failure', failedStepId: 'in-review' });
+  });
+
   it('retry from failure re-dispatches the failed step', () => {
     const t = transition(at('failure', 'planning', 'planning'), wf, 'retry');
     expect(t).toMatchObject({ nextState: 'planning', effects: [{ type: 'dispatch', stepId: 'planning' }] });
@@ -110,7 +121,7 @@ describe('ui helpers', () => {
   it('offers human actions on human steps only', () => {
     expect(availableActions(at('todo', 'todo'), wf)).toEqual([{ event: 'start', label: 'Start Planning' }]);
     expect(availableActions(at('plan-review', 'plan-review'), wf)).toEqual([{ event: 'approve', label: 'Approve Plan' }]);
-    expect(availableActions(at('in-review', 'in-review'), wf)).toEqual([{ event: 'accept', label: 'Accept' }]);
+    expect(availableActions(at('in-review', 'in-review'), wf)).toEqual([{ event: 'accept', label: 'Accept & merge' }]);
     expect(availableActions(at('implement', 'implement'), wf)).toEqual([]);
     expect(availableActions(at('failure', 'implement', 'implement'), wf).map((a) => a.event)).toEqual(['troubleshoot', 'retry']);
     expect(availableActions(at('todo', null), null)).toEqual([]);
@@ -136,6 +147,7 @@ describe('ui helpers', () => {
     expect(isAgentActive(at('planning', 'planning'), wf)).toBe(true);
     expect(isAgentActive(at('plan-review', 'plan-review'), wf)).toBe(false);
     expect(isAgentActive(at('troubleshoot', 'implement', 'implement'), wf)).toBe(true);
+    expect(isAgentActive(at('conflict-resolution', 'in-review', 'in-review'), wf)).toBe(true);
     expect(isAgentActive(at('failure', 'implement', 'implement'), wf)).toBe(false);
   });
 });

@@ -18,6 +18,8 @@ export const STATE_CONFIG: Record<string, StateStyle> = {
   verify: { label: 'Verifying', color: '#2dd4bf', bg: 'rgba(45,212,191,0.08)', pulsing: true },
   'in-review': { label: 'In Review', color: '#22d3ee', bg: 'rgba(34,211,238,0.08)', pulsing: false },
   'implement-feedback': { label: 'Impl. Feedback', color: '#c084fc', bg: 'rgba(192,132,252,0.08)', pulsing: true },
+  'conflict-resolution': { label: 'Resolving Conflict', color: '#fb923c', bg: 'rgba(251,146,60,0.08)', pulsing: true },
+  merge: { label: 'Merging', color: '#34d399', bg: 'rgba(52,211,153,0.08)', pulsing: true },
   done: { label: 'Done', color: '#34d399', bg: 'rgba(52,211,153,0.08)', pulsing: false },
   failure: { label: 'Failed', color: '#f87171', bg: 'rgba(248,113,113,0.08)', pulsing: false },
   troubleshoot: { label: 'Troubleshoot', color: '#fb923c', bg: 'rgba(251,146,60,0.08)', pulsing: true },
@@ -46,7 +48,7 @@ export function getStateStyle(state: TaskState, step?: Pick<WorkflowStep, 'type'
 export const TERMINAL_STATES: ReadonlySet<string> = new Set(['done']);
 
 /** States where no workflow step drives the task and the user must intervene. */
-export const OFF_PATH_STATES: ReadonlySet<string> = new Set(['failure', 'troubleshoot']);
+export const OFF_PATH_STATES: ReadonlySet<string> = new Set(['failure', 'troubleshoot', 'conflict-resolution']);
 
 export function isOffPath(state: TaskState): boolean {
   return OFF_PATH_STATES.has(state);

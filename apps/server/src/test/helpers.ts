@@ -20,6 +20,9 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     webOrigins: ['http://localhost:5173'],
     secretsEncryptionKey: Buffer.from('ab'.repeat(32), 'hex'),
     githubWebhookSecret: 'webhook-secret',
+    githubAppId: undefined,
+    githubAppPrivateKey: undefined,
+    githubAppInstallations: {},
     logLevel: 'silent',
     webDistDir: '/nonexistent',
     ...overrides,
@@ -94,6 +97,25 @@ export async function completeNext(ctx: TestContext, userId: string, result: Age
   return job;
 }
 
+export async function completeMerge(ctx: TestContext, userId: string): Promise<Job> {
+  const job = await claimNext(ctx, userId);
+  if (!job) throw new Error('no merge job to claim');
+  if (job.payload.kind !== 'merge-pull-requests') throw new Error(`expected merge job, received ${job.payload.kind}`);
+  await ctx.app.ctx.orchestrator.completeJob(userId, job.id, {
+    kind: 'merge',
+    summary: `Merged ${job.payload.pullRequests.length} pull request(s).`,
+    complete: true,
+    pullRequests: job.payload.pullRequests.map((pullRequest) => ({
+      id: pullRequest.id,
+      repository: pullRequest.repository,
+      url: pullRequest.url,
+      merged: true,
+      mergedAt: '2026-09-21T12:00:00.000Z',
+    })),
+  });
+  return job;
+}
+
 export async function reload(ctx: TestContext, userId: string, task: Task): Promise<Task> {
   const fresh = await ctx.repo.getTask(userId, task.id);
   if (!fresh) throw new Error('task vanished');
@@ -102,7 +124,22 @@ export async function reload(ctx: TestContext, userId: string, task: Task): Prom
 
 export const plan = (text = '# Plan', subtasks?: { title: string; goal: string }[]): AgentResult =>
   subtasks ? { kind: 'plan', summary: 'planned', plan: text, subtasks } : { kind: 'plan', summary: 'planned', plan: text };
-export const pr = (n = 1, branch = 'sindral/sin-1'): AgentResult => ({ kind: 'pr', summary: `opened PR ${n}`, prUrl: `https://github.com/acme/app/pull/${n}`, branch });
+export const pr = (n = 1, branch = 'sindral/sin-1'): AgentResult => ({
+  kind: 'pr',
+  summary: `opened PR ${n}`,
+  prUrl: `https://github.com/acme/app/pull/${n}`,
+  branch,
+  pullRequests: [
+    {
+      repository: 'acme/app',
+      prUrl: `https://github.com/acme/app/pull/${n}`,
+      number: n,
+      branch,
+      baseBranch: 'main',
+      headSha: 'a'.repeat(40),
+    },
+  ],
+});
 export const review = (): AgentResult => ({ kind: 'review', summary: 'reviewed', report: '# Review', verdict: 'NO_MATERIAL_FINDINGS' });
 export const verdict = (go: boolean, feedback?: string): AgentResult =>
   go ? { kind: 'verdict', summary: 'GO', report: '# Verify', verdict: 'GO' } : { kind: 'verdict', summary: 'NO_GO', report: '# Verify', verdict: 'NO_GO', feedback };

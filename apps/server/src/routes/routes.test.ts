@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Task, WorkflowRecord } from '@sindral/shared';
-import { completeNext, createTestApp, plan, pr, review, testConfig, verdict, type TestContext } from '../test/helpers.js';
+import { completeMerge, completeNext, createTestApp, plan, pr, review, testConfig, verdict, type TestContext } from '../test/helpers.js';
 
 const fetchMock = vi.fn<typeof fetch>();
 let ctx: TestContext;
@@ -205,7 +205,7 @@ describe('worker API', () => {
     expect((await ctx.repo.listMessages(ctx.userA, task.id)).map((m) => m.content)).toEqual(['Working on it']);
 
     expect((await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/complete`, headers, payload: { result: { kind: 'plan' } } })).statusCode).toBe(400);
-    const done = await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/complete`, headers, payload: { result: plan('# P') } });
+    const done = await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/complete`, headers, payload: { attempt: 1, result: plan('# P') } });
     expect(done.statusCode).toBe(200);
     expect((await ctx.repo.getTask(ctx.userA, task.id))?.state).toBe('plan-review');
     expect((await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/events`, headers, payload: { type: 'log', message: 'late' } })).statusCode).toBe(409);
@@ -236,10 +236,10 @@ describe('worker API', () => {
     const jobId = claim.json<{ jobs: { job: { id: string } }[] }>().jobs[0]!.job.id;
 
     const otherKey = await ctx.workerKeyFor(ctx.userB);
-    expect((await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/fail`, headers: { authorization: `Bearer ${otherKey}` }, payload: { error: 'x' } })).statusCode).toBe(404);
+    expect((await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/fail`, headers: { authorization: `Bearer ${otherKey}` }, payload: { attempt: 1, error: 'x' } })).statusCode).toBe(404);
     expect((await ctx.app.inject({ method: 'POST', url: '/api/worker/jobs/claim', headers: { authorization: `Bearer ${otherKey}` }, payload: { workerId } })).statusCode).toBe(404);
 
-    const failed = await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/fail`, headers, payload: { error: 'agent crashed' } });
+    const failed = await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/fail`, headers, payload: { attempt: 1, error: 'agent crashed' } });
     expect(failed.statusCode).toBe(200);
     const fresh = await ctx.repo.getTask(ctx.userA, task.id);
     expect(fresh).toMatchObject({ state: 'failure', lastError: 'agent crashed', failedStepId: 'planning' });
@@ -366,7 +366,9 @@ describe('end to end through HTTP', () => {
     expect((await ctx.repo.getTask(ctx.userA, task.id))?.state).toBe('in-review');
     expect((await ctx.app.inject({ method: 'GET', url: `/api/tasks/${task.id}/artifacts`, headers: asA() })).json<{ artifacts: { name: string }[] }>().artifacts.map((a) => a.name)).toEqual(['verify-report.md']);
     const accepted = await ctx.app.inject({ method: 'POST', url: `/api/tasks/${task.id}/actions`, headers: asA(), payload: { event: 'accept' } });
-    expect(accepted.json<{ task: Task }>().task.state).toBe('done');
+    expect(accepted.json<{ task: Task }>().task.state).toBe('merge');
+    await completeMerge(ctx, ctx.userA);
+    expect((await ctx.repo.getTask(ctx.userA, task.id))?.state).toBe('done');
     void review;
   });
 });

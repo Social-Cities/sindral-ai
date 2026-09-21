@@ -178,7 +178,7 @@ create table public.jobs (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
   task_id uuid not null references public.tasks(id) on delete cascade,
-  kind text not null check (kind in ('agent', 'rebase-stack')),
+  kind text not null check (kind in ('agent', 'rebase-stack', 'resolve-rebase-conflict', 'merge-pull-requests')),
   step_id text,
   status text not null default 'queued' check (status in ('queued', 'claimed', 'running', 'completed', 'failed', 'cancelled')),
   worker_id uuid references public.workers(id) on delete set null,
@@ -199,9 +199,11 @@ create or replace function public.claim_jobs(p_user_id uuid, p_worker_id uuid, p
 returns setof public.jobs language plpgsql security definer set search_path = public as $$
 begin
   return query
-  with candidates as (
-    -- one job per task per claim, oldest first, skipping rows locked by concurrent claims
-    select distinct on (j.task_id) j.id, j.task_id, j.created_at
+  -- Jobs for one task must never run concurrently: skip tasks that already have a
+  -- claimed/running job, and take at most the oldest queued job per remaining task.
+  with eligible as (
+    select j.id, j.task_id, j.created_at,
+           row_number() over (partition by j.task_id order by j.created_at, j.id) as rn
     from public.jobs j
     where j.user_id = p_user_id
       and j.status = 'queued'
@@ -209,16 +211,24 @@ begin
         select 1 from public.jobs o
         where o.task_id = j.task_id and o.status in ('claimed', 'running')
       )
-    order by j.task_id, j.created_at
-    for update skip locked
   ),
   picked as (
-    select id from candidates order by created_at limit greatest(1, least(p_max, 10))
+    select e.id from eligible e
+    where e.rn = 1
+    order by e.created_at, e.id
+    limit greatest(1, least(coalesce(p_max, 1), 10))
+  ),
+  -- Re-check the status under a row lock so two concurrent claims cannot take the same job.
+  locked as (
+    select j.id from public.jobs j
+    where j.id in (select id from picked) and j.status = 'queued'
+    order by j.id
+    for update skip locked
   )
   update public.jobs j
   set status = 'claimed', worker_id = p_worker_id, claimed_at = now()
-  from picked c
-  where j.id = c.id
+  from locked l
+  where j.id = l.id
   returning j.*;
 end $$;
 revoke all on function public.claim_jobs(uuid, uuid, integer) from public, anon, authenticated;
@@ -267,3 +277,15 @@ create policy job_logs_select on public.job_logs for select to authenticated usi
 -- Lock down the public schema defaults.
 revoke all on all tables in schema public from anon;
 revoke all on all sequences in schema public from anon;
+
+-- Tables the server alone may touch. RLS already denies these (no policies exist),
+-- but revoking the table grants means a future policy mistake still cannot expose
+-- credentials through PostgREST. The service role bypasses both and is unaffected.
+revoke all on public.user_secrets from anon, authenticated;
+revoke all on public.worker_keys from anon, authenticated;
+
+-- The UI reads operational tables through the API; direct client writes are never allowed.
+revoke insert, update, delete on
+  public.tasks, public.workflows, public.workers, public.task_messages,
+  public.task_events, public.task_artifacts, public.jobs, public.job_logs
+  from anon, authenticated;

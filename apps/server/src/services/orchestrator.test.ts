@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_TROUBLESHOOT_STEP, TransitionError, type AgentJobPayload, type Task } from '@sindral/shared';
-import { claimNext, completeNext, createTestApp, plan, pr, reload, review, verdict, type TestContext } from '../test/helpers.js';
+import { claimNext, completeMerge, completeNext, createTestApp, plan, pr, reload, review, verdict, type TestContext } from '../test/helpers.js';
 import { HttpError } from '../errors.js';
 
 let ctx: TestContext;
@@ -103,6 +103,9 @@ describe('full SDLC happy path', () => {
     expect((await ctx.repo.listArtifacts(userId, task.id)).map((a) => a.name)).toEqual(['adversarial-review.md', 'verify-report.md']);
 
     task = await orch().applyUserEvent(userId, task.id, 'accept');
+    expect(task.state).toBe('merge');
+    await completeMerge(ctx, userId);
+    task = await reload(ctx, userId, task);
     expect(task.state).toBe('done');
     expect(task.currentStepId).toBe('done');
 
@@ -115,10 +118,51 @@ describe('full SDLC happy path', () => {
       'implement->adversarial-review',
       'adversarial-review->verify',
       'verify->in-review',
-      'in-review->done',
+      'in-review->merge',
+      'merge->done',
     ]);
     expect(events.find((e) => e.type === 'transition')?.detail).toMatchObject({ event: 'start', actor: 'user' });
     await expect(orch().applyUserEvent(userId, task.id, 'accept')).rejects.toBeInstanceOf(TransitionError);
+  });
+
+  it('records a partial multi-repository merge and fails without claiming completion', async () => {
+    let task = await newTask({ repos: ['acme/app', 'acme/api'] });
+    await orch().applyUserEvent(userId, task.id, 'start');
+    await completeNext(ctx, userId, plan());
+    await orch().applyUserEvent(userId, task.id, 'approve');
+    await completeNext(ctx, userId, {
+      kind: 'pr',
+      summary: 'Opened both pull requests',
+      prUrl: 'https://github.com/acme/app/pull/1',
+      branch: task.branch!,
+      pullRequests: [
+        { repository: 'acme/app', prUrl: 'https://github.com/acme/app/pull/1', number: 1, branch: task.branch!, baseBranch: 'main', headSha: 'a'.repeat(40) },
+        { repository: 'acme/api', prUrl: 'https://github.com/acme/api/pull/2', number: 2, branch: task.branch!, baseBranch: 'main', headSha: 'b'.repeat(40) },
+      ],
+    });
+    await completeNext(ctx, userId, review());
+    await completeNext(ctx, userId, verdict(true));
+    task = await orch().applyUserEvent(userId, task.id, 'accept');
+    expect(task.state).toBe('merge');
+
+    const job = await claimNext(ctx, userId);
+    expect(job?.payload.kind).toBe('merge-pull-requests');
+    if (!job || job.payload.kind !== 'merge-pull-requests') throw new Error('expected merge job');
+    await orch().completeJob(userId, job.id, {
+      kind: 'merge',
+      summary: 'One merge succeeded and one was blocked by branch protection.',
+      complete: false,
+      pullRequests: job.payload.pullRequests.map((pullRequest, index) =>
+        index === 0
+          ? { id: pullRequest.id, repository: pullRequest.repository, url: pullRequest.url, merged: true }
+          : { id: pullRequest.id, repository: pullRequest.repository, url: pullRequest.url, merged: false, error: 'Branch protection rejected the merge' },
+      ),
+    });
+
+    const failed = await reload(ctx, userId, task);
+    expect(failed.state).toBe('failure');
+    expect(failed.lastError).toBe('Branch protection rejected the merge');
+    expect((await ctx.repo.listPullRequests(userId, task.id)).map((pullRequest) => pullRequest.status)).toEqual(['merged', 'open']);
   });
 
   it('keeps using the pinned snapshot after the live workflow changes', async () => {
@@ -272,7 +316,20 @@ describe('failure handling', () => {
     const job = await claimNext(ctx, userId);
     await expect(orch().completeJob(userId, job!.id, pr())).rejects.toMatchObject({ statusCode: 400 });
     await expect(orch().completeJob(userId, job!.id, plan())).resolves.toBeUndefined();
-    await expect(orch().completeJob(userId, job!.id, plan())).rejects.toMatchObject({ statusCode: 409 });
+    await expect(orch().completeJob(userId, job!.id, plan('# Different result'))).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it('treats an identical retried worker completion as idempotent', async () => {
+    const task = await newTask();
+    await orch().applyUserEvent(userId, task.id, 'start');
+    const job = await claimNext(ctx, userId);
+    const result = plan('# Once');
+    await orch().completeJob(userId, job!.id, result);
+    const eventCount = (await ctx.repo.listEvents(userId, task.id)).length;
+    const messageCount = (await ctx.repo.listMessages(userId, task.id)).length;
+    await orch().completeJob(userId, job!.id, result);
+    expect((await ctx.repo.listEvents(userId, task.id)).length).toBe(eventCount);
+    expect((await ctx.repo.listMessages(userId, task.id)).length).toBe(messageCount);
   });
 
   it('stores a stale result without transitioning when the task has moved on', async () => {
@@ -407,7 +464,7 @@ describe('subtask stacks', () => {
       stack: [{ taskId: children[1]!.id, branch: 'sindral/sin-3', baseBranch: 'sindral/sin-2' }],
     });
 
-    // failed rebase parks the sibling in failure
+    // A plain failure still parks the sibling in failure.
     await ctx.repo.updateJob(userId, rebase.id, { status: 'claimed', workerId: 'w' });
     await expect(orch().completeJob(userId, rebase.id, pr())).rejects.toMatchObject({ statusCode: 400 });
     await orch().completeJob(userId, rebase.id, {
@@ -422,23 +479,98 @@ describe('subtask stacks', () => {
     expect((await reload(ctx, userId, parent)).state).toBe('implement');
   });
 
+  it('queues a bounded resolver for a pinned rebase conflict and escalates an unsafe result', async () => {
+    const { parent, children } = await plannedParent();
+    const sibling = children[1]!;
+    await ctx.repo.updateTask(userId, sibling.id, {
+      prUrl: 'https://github.com/acme/app/pull/11',
+      state: 'in-review',
+      currentStepId: 'in-review',
+      pinnedWorkflow: parent.pinnedWorkflow,
+    });
+    const rebase = await ctx.repo.createJob(userId, {
+      taskId: parent.id,
+      kind: 'rebase-stack',
+      stepId: null,
+      payload: {
+        kind: 'rebase-stack',
+        repos: ['acme/app'],
+        stack: [{ taskId: sibling.id, branch: sibling.branch!, baseBranch: sibling.baseBranch! }],
+      },
+    });
+    await ctx.repo.updateJob(userId, rebase.id, { status: 'claimed', workerId: 'w' });
+    await orch().completeJob(userId, rebase.id, {
+      kind: 'rebase',
+      summary: 'conflict',
+      rebased: [
+        {
+          taskId: sibling.id,
+          branch: sibling.branch!,
+          ok: false,
+          error: 'conflict in src/schema.ts',
+          conflict: {
+            repository: 'acme/app',
+            baseBranch: sibling.baseBranch!,
+            sourceSha: 'a'.repeat(40),
+            targetSha: 'b'.repeat(40),
+            conflictedPaths: ['src/schema.ts'],
+          },
+        },
+      ],
+    });
+
+    const resolver = (await ctx.repo.listJobsForTask(userId, sibling.id)).find((job) => job.kind === 'resolve-rebase-conflict');
+    expect(resolver?.payload).toMatchObject({
+      kind: 'resolve-rebase-conflict',
+      taskId: sibling.id,
+      repository: 'acme/app',
+      branch: sibling.branch,
+      conflictedPaths: ['src/schema.ts'],
+      policy: { allowedPaths: ['src/schema.ts'], maxFiles: 20, maxChangedLines: 1000 },
+    });
+    expect((await reload(ctx, userId, sibling)).state).toBe('conflict-resolution');
+
+    await ctx.repo.updateJob(userId, resolver!.id, { status: 'claimed', workerId: 'w' });
+    await orch().completeJob(userId, resolver!.id, {
+      kind: 'conflict-resolution',
+      summary: 'Needs a human',
+      taskId: sibling.id,
+      branch: sibling.branch!,
+      resolved: false,
+      rationale: 'The two changes specify different schemas.',
+      resolvedPaths: [],
+      checks: [],
+      error: 'Ambiguous intent',
+    });
+    const failedSibling = await reload(ctx, userId, sibling);
+    expect(failedSibling.state).toBe('failure');
+    expect(failedSibling.lastError).toBe('Ambiguous intent');
+    expect((await ctx.repo.listEvents(userId, sibling.id)).some((event) => event.type === 'conflict-resolution-escalated')).toBe(true);
+    const evidence = (await ctx.repo.listArtifacts(userId, sibling.id)).find((artifact) => artifact.name.startsWith('conflict-resolution-'));
+    expect(evidence).toBeDefined();
+    expect(JSON.parse(evidence!.content)).toMatchObject({ promptVersion: 'rebase-conflict-v1', outcome: 'escalated', error: 'Ambiguous intent' });
+  });
+
   it('completes the parent when every child is done', async () => {
     const parent = await newTask();
     await orch().applyUserEvent(userId, parent.id, 'start');
     await completeNext(ctx, userId, plan('# p', SUBTASKS.slice(0, 2)));
     await orch().applyUserEvent(userId, parent.id, 'approve');
     const [c1, c2] = await ctx.repo.listSubtasks(userId, parent.id);
-    for (const child of [c1!, c2!]) {
+    for (const [index, child] of [c1!, c2!].entries()) {
       await completeNext(ctx, userId, plan());
       await orch().applyUserEvent(userId, child.id, 'approve');
-      await completeNext(ctx, userId, pr());
+      // Each subtask has its own branch; the worker must report the branch it was given.
+      await completeNext(ctx, userId, pr(10 + index, child.branch!));
       await completeNext(ctx, userId, review());
       await completeNext(ctx, userId, verdict(true));
     }
     expect((await reload(ctx, userId, parent)).state).toBe('implement');
     await orch().applyUserEvent(userId, c1!.id, 'accept');
+    await completeMerge(ctx, userId);
     expect((await reload(ctx, userId, parent)).state).toBe('implement');
     await orch().applyUserEvent(userId, c2!.id, 'accept');
+    await completeMerge(ctx, userId);
     const done = await reload(ctx, userId, parent);
     expect(done.state).toBe('done');
     expect(done.currentStepId).toBe('done');

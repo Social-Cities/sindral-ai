@@ -1,9 +1,10 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { OUTPUT_DIR_ENV, RESULT_FILE_ENV, type AgentJobPayload, type AgentResult, type JobDispatch } from '@sindral/shared';
+import { OUTPUT_DIR_ENV, RESULT_FILE_ENV, type AgentJobPayload, type AgentResult, type JobDispatch, type PrResult } from '@sindral/shared';
 import type { ApiClient } from './api.js';
 import { collectOutputArtifacts, mergeArtifacts } from './artifacts.js';
+import { runConflictResolution } from './conflict.js';
 import { workdirPaths, type WorkerConfig } from './config.js';
 import { buildAgentEnv, type EngineRegistry } from './engines/index.js';
 import { JobEventStream } from './events.js';
@@ -12,6 +13,8 @@ import { commitAndPush, ensurePr, ghRunner, type GhRunner } from './github.js';
 import type { Logger } from './logger.js';
 import { buildPrompt } from './prompt.js';
 import { runRebaseStack } from './rebase.js';
+import { runMergePullRequests } from './merge.js';
+import type { run } from './proc.js';
 import { Redactor } from './redact.js';
 import { describeFailure, extractJsonCandidate, parseRawResult, readResultFile, summaryOf, validateResult } from './result.js';
 import type { GitFactory, WorkspaceManager } from './workspace.js';
@@ -29,6 +32,7 @@ export interface JobDeps {
   /** Overridable for tests. */
   gh?: (token: string | null) => GhRunner;
   git?: GitFactory;
+  command?: typeof run;
   env?: NodeJS.ProcessEnv;
   progressIntervalMs?: number;
 }
@@ -64,8 +68,43 @@ export async function runJob(dispatch: JobDispatch, deps: JobDeps, signal: Abort
               write(m);
             },
           })
-        : await runAgentJob(dispatch, job.payload, { ...deps, redactor, events, write, signal });
-    await deps.api.complete(job.id, result);
+        : job.payload.kind === 'resolve-rebase-conflict'
+          ? await runConflictResolution({
+              dispatch,
+              payload: job.payload,
+              config: deps.config,
+              workspaces: deps.workspaces,
+              engines: deps.engines,
+              redactor,
+              githubToken: credentials.githubToken,
+              signal,
+              git: deps.git,
+              command: deps.command,
+              env: deps.env,
+              onOutput: (line) => {
+                events.line(line);
+                write(line);
+              },
+              onProgress: (message) => {
+                events.progress(message);
+                write(message);
+              },
+            })
+          : job.payload.kind === 'merge-pull-requests'
+            ? await runMergePullRequests({
+                payload: job.payload,
+                githubToken: credentials.githubToken,
+                ghBin: deps.config.ghBin,
+                allowPatMerge: credentials.githubCredential === 'github-app' || deps.config.allowPatMerge,
+                gh: deps.gh?.(credentials.githubToken),
+                signal,
+                onProgress: (message) => {
+                  events.progress(message);
+                  write(message);
+                },
+              })
+            : await runAgentJob(dispatch, job.payload, { ...deps, redactor, events, write, signal });
+    await deps.api.complete(job.id, result, job.attempt);
     write('job completed');
     outcome = { status: 'completed', result };
   } catch (err) {
@@ -73,7 +112,7 @@ export async function runJob(dispatch: JobDispatch, deps: JobDeps, signal: Abort
     log.error({ err: message }, 'job failed');
     write(`job failed: ${message}`);
     try {
-      await deps.api.fail(job.id, message.slice(0, 20_000));
+      await deps.api.fail(job.id, message.slice(0, 20_000), job.attempt);
     } catch (failErr) {
       log.error({ err: redactor.redactError(failErr) }, 'could not report job failure');
     }
@@ -202,6 +241,7 @@ async function publishPr(opts: PublishOptions): Promise<Record<string, unknown>>
   const gh = (opts.gh ?? ((token) => ghRunner(opts.config.ghBin, token)))(opts.token);
   let prUrl: string | null = null;
   let branch = '';
+  const pullRequests: NonNullable<PrResult['pullRequests']> = [];
   for (const repo of opts.workspace.repos) {
     if (opts.signal.aborted) throw new Error(String(opts.signal.reason ?? SHUTDOWN_REASON));
     opts.events.progress(`Pushing ${repo.branch} to ${repo.repo.full}`);
@@ -220,11 +260,22 @@ async function publishPr(opts: PublishOptions): Promise<Record<string, unknown>>
     });
     opts.write(`${repo.repo.full}: ${pr.created ? 'opened' : 'commented on'} ${pr.url}`);
     opts.events.message(`${pr.created ? 'Opened' : 'Updated'} pull request ${pr.url}`);
+    const number = Number(/\/pull\/(\d+)(?:$|[?#])/.exec(pr.url)?.[1]);
+    if (!Number.isInteger(number) || number <= 0) throw new Error(`Pull request URL has no valid number: ${pr.url}`);
+    const headSha = (await git(['rev-parse', 'HEAD'])).stdout.trim();
+    pullRequests.push({
+      repository: repo.repo.full,
+      prUrl: pr.url,
+      number,
+      branch: repo.branch,
+      baseBranch: repo.baseBranch,
+      ...(/^[0-9a-f]{40}$/i.test(headSha) ? { headSha } : {}),
+    });
     prUrl ??= pr.url;
     branch ||= repo.branch;
   }
   if (!prUrl) throw new Error('no pull request was created');
-  return { kind: 'pr', summary: opts.summary, prUrl, branch };
+  return { kind: 'pr', summary: opts.summary, prUrl, branch, pullRequests };
 }
 
 function assertJobId(id: string): string {

@@ -88,12 +88,12 @@ export class ApiClient {
     return this.post<{ ok: true }>(`/api/worker/jobs/${encodeURIComponent(jobId)}/events`, event);
   }
 
-  complete(jobId: string, result: AgentResult): Promise<{ ok: true }> {
-    return this.post<{ ok: true }>(`/api/worker/jobs/${encodeURIComponent(jobId)}/complete`, { result });
+  complete(jobId: string, result: AgentResult, attempt: number): Promise<{ ok: true }> {
+    return this.post<{ ok: true }>(`/api/worker/jobs/${encodeURIComponent(jobId)}/complete`, { attempt, result });
   }
 
-  fail(jobId: string, error: string): Promise<{ ok: true }> {
-    return this.post<{ ok: true }>(`/api/worker/jobs/${encodeURIComponent(jobId)}/fail`, { error });
+  fail(jobId: string, error: string, attempt: number): Promise<{ ok: true }> {
+    return this.post<{ ok: true }>(`/api/worker/jobs/${encodeURIComponent(jobId)}/fail`, { attempt, error });
   }
 
   private async post<T>(route: string, body: unknown, opts: RequestOptions = {}): Promise<T> {

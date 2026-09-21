@@ -126,7 +126,25 @@ export const agentResultSchema = z.discriminatedUnion('kind', [
     plan: z.string().max(200_000),
     subtasks: z.array(z.object({ title: shortText, goal: z.string().max(5000) })).max(20).optional(),
   }),
-  z.object({ kind: z.literal('pr'), summary: z.string().max(20_000), prUrl: z.string().url().max(2000), branch: z.string().max(200) }),
+  z.object({
+    kind: z.literal('pr'),
+    summary: z.string().max(20_000),
+    prUrl: z.string().url().max(2000),
+    branch: z.string().max(200),
+    pullRequests: z
+      .array(
+        z.object({
+          repository: repo,
+          prUrl: z.string().url().max(2000),
+          number: z.number().int().positive(),
+          branch: z.string().min(1).max(200),
+          baseBranch: z.string().min(1).max(200),
+          headSha: z.string().regex(/^[0-9a-f]{40}$/i).optional(),
+        }),
+      )
+      .max(10)
+      .optional(),
+  }),
   z.object({
     kind: z.literal('review'),
     summary: z.string().max(20_000),
@@ -145,12 +163,56 @@ export const agentResultSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('rebase'),
     summary: z.string().max(20_000),
-    rebased: z.array(z.object({ taskId: z.string(), branch: z.string(), ok: z.boolean(), error: z.string().optional() })),
+    rebased: z.array(
+      z.object({
+        taskId: z.string(),
+        branch: z.string(),
+        ok: z.boolean(),
+        error: z.string().optional(),
+        conflict: z
+          .object({
+            repository: repo,
+            baseBranch: z.string().min(1).max(200),
+            sourceSha: z.string().regex(/^[0-9a-f]{40}$/i),
+            targetSha: z.string().regex(/^[0-9a-f]{40}$/i),
+            conflictedPaths: z.array(z.string().min(1).max(1000)).min(1).max(200),
+          })
+          .optional(),
+      }),
+    ),
+  }),
+  z.object({
+    kind: z.literal('conflict-resolution'),
+    summary: z.string().max(20_000),
+    taskId: z.string().uuid(),
+    branch: z.string().min(1).max(200),
+    resolved: z.boolean(),
+    rationale: z.string().max(100_000),
+    resolvedPaths: z.array(z.string().min(1).max(1000)).max(200),
+    checks: z.array(z.object({ command: z.array(z.string()).min(1).max(50), ok: z.boolean(), output: z.string().max(20_000) })).max(20),
+    resolutionCommit: z.string().regex(/^[0-9a-f]{40}$/i).optional(),
+    resolutionDiffHash: z.string().regex(/^[0-9a-f]{64}$/i).optional(),
+    error: z.string().max(20_000).optional(),
+  }),
+  z.object({
+    kind: z.literal('merge'),
+    summary: z.string().max(20_000),
+    complete: z.boolean(),
+    pullRequests: z.array(
+      z.object({
+        id: z.string().uuid(),
+        repository: repo,
+        url: z.string().url().max(2000),
+        merged: z.boolean(),
+        mergedAt: z.string().datetime().optional(),
+        error: z.string().max(20_000).optional(),
+      }),
+    ).max(10),
   }),
 ]);
 
-export const workerJobCompleteSchema = z.object({ result: agentResultSchema });
-export const workerJobFailSchema = z.object({ error: z.string().trim().min(1).max(20_000) });
+export const workerJobCompleteSchema = z.object({ attempt: z.number().int().positive(), result: agentResultSchema });
+export const workerJobFailSchema = z.object({ attempt: z.number().int().positive(), error: z.string().trim().min(1).max(20_000) });
 
 /** Loose schema for what the agent writes to the result file (kind may be missing; the worker fills it). */
 export const rawAgentResultFileSchema = z.object({ kind: z.string().optional() }).passthrough();

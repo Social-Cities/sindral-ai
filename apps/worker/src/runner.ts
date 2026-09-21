@@ -44,6 +44,8 @@ const noopPersistence: RunnerPersistence = {
 export function taskKeysOf(dispatch: JobDispatch): string[] {
   const { job } = dispatch;
   if (job.payload.kind === 'agent') return [job.payload.context.task_key || job.taskId];
+  if (job.payload.kind === 'resolve-rebase-conflict') return [job.payload.taskKey];
+  if (job.payload.kind === 'merge-pull-requests') return [job.taskId];
   return job.payload.stack.map((s) => `rebase__${s.taskId}`);
 }
 
@@ -222,7 +224,7 @@ export class Runner {
     this.pending = [];
     await Promise.all(
       unstarted.map((d) =>
-        this.deps.api.fail(d.job.id, reason).catch((err) => this.deps.logger.warn({ jobId: d.job.id, err: errorMessage(err) }, 'could not fail unstarted job')),
+        this.deps.api.fail(d.job.id, reason, d.job.attempt).catch((err) => this.deps.logger.warn({ jobId: d.job.id, err: errorMessage(err) }, 'could not fail unstarted job')),
       ),
     );
 

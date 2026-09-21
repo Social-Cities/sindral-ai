@@ -181,10 +181,10 @@ export function useJobLogs(jobId: string | null, options: { live?: boolean } = {
   });
 }
 
-export function useTaskDiff(taskId: string, options: { enabled?: boolean } = {}) {
+export function useTaskDiff(taskId: string, repository?: string, options: { enabled?: boolean } = {}) {
   return useQuery({
-    queryKey: queryKeys.taskDiff(taskId),
-    queryFn: async () => (await getTaskDiff(taskId)).files,
+    queryKey: queryKeys.taskDiff(taskId, repository),
+    queryFn: async () => (await getTaskDiff(taskId, repository)).files,
     enabled: options.enabled ?? true,
     retry: false,
     staleTime: 30_000,

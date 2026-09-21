@@ -14,6 +14,8 @@ export const KNOWN_TASK_STATES = [
   'verify',
   'in-review',
   'implement-feedback',
+  'conflict-resolution',
+  'merge',
   'done',
   'failure',
   'troubleshoot',
@@ -46,7 +48,9 @@ export type StepOutputKind =
   | 'review' // adversarial review report
   | 'verdict' // production readiness GO / NO_GO
   | 'document' // non-code deliverable(s) uploaded as artifacts
-  | 'troubleshoot'; // diagnosis + resolved flag
+  | 'troubleshoot' // diagnosis + resolved flag
+  | 'conflict-resolution' // rationale produced while resolving a stacked rebase
+  | 'merge'; // worker-owned pull-request merge result
 
 export interface WorkflowStep {
   id: string;
@@ -136,6 +140,38 @@ export interface Artifact {
   createdAt: string;
 }
 
+export type PullRequestStatus = 'open' | 'merged' | 'closed';
+export type MergeMethod = 'squash' | 'merge' | 'rebase';
+
+export interface TaskRepository {
+  id: string;
+  userId: string;
+  taskId: string;
+  repository: string;
+  branch: string;
+  baseBranch: string | null;
+  mergeMethod: MergeMethod;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PullRequest {
+  id: string;
+  userId: string;
+  taskId: string;
+  taskRepositoryId: string;
+  repository: string;
+  url: string;
+  number: number;
+  branch: string;
+  baseBranch: string;
+  headSha: string | null;
+  status: PullRequestStatus;
+  mergedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Task {
   id: string;
   userId: string;
@@ -168,10 +204,12 @@ export interface TaskWithRelations extends Task {
   events: TaskEvent[];
   artifacts: Artifact[];
   subtasks: Task[];
+  repositories: TaskRepository[];
+  pullRequests: PullRequest[];
 }
 
 export type JobStatus = 'queued' | 'claimed' | 'running' | 'completed' | 'failed' | 'cancelled';
-export type JobKind = 'agent' | 'rebase-stack';
+export type JobKind = 'agent' | 'rebase-stack' | 'resolve-rebase-conflict' | 'merge-pull-requests';
 
 export interface JobContext {
   task_key: string;
@@ -222,12 +260,52 @@ export interface RebaseStackJobPayload {
   stack: { taskId: string; branch: string; baseBranch: string }[];
 }
 
-export type JobPayload = AgentJobPayload | RebaseStackJobPayload;
+export interface ConflictResolutionPolicy {
+  /** Repository-relative paths that may be edited. The conflicted paths are always required too. */
+  allowedPaths: string[];
+  /** Repository-relative glob-like prefixes/suffixes which always require human review. */
+  protectedPaths: string[];
+  /** Executable + argv commands run without a shell after the rebase completes. */
+  validationCommands: string[][];
+  maxFiles: number;
+  maxChangedLines: number;
+}
+
+export interface ResolveRebaseConflictJobPayload {
+  kind: 'resolve-rebase-conflict';
+  repository: string;
+  taskId: string;
+  taskKey: string;
+  branch: string;
+  baseBranch: string;
+  sourceSha: string;
+  targetSha: string;
+  conflictedPaths: string[];
+  context: JobContext;
+  engine: AgentEngine;
+  model: string;
+  mode: AgentMode;
+  policy: ConflictResolutionPolicy;
+}
+
+export interface MergePullRequestsJobPayload {
+  kind: 'merge-pull-requests';
+  pullRequests: {
+    id: string;
+    repository: string;
+    url: string;
+    number: number;
+    headSha: string;
+    method: MergeMethod;
+  }[];
+}
+
+export type JobPayload = AgentJobPayload | RebaseStackJobPayload | ResolveRebaseConflictJobPayload | MergePullRequestsJobPayload;
 
 /** What the worker hands to the job runner: the job plus scoped credentials. */
 export interface JobDispatch {
   job: Job;
-  credentials: { githubToken: string | null };
+  credentials: { githubToken: string | null; githubCredential: 'github-app' | 'pat' | null };
 }
 
 /** Results the agent must write to the result file; validated by the worker and the server. */
@@ -242,6 +320,14 @@ export interface PrResult {
   summary: string;
   prUrl: string;
   branch: string;
+  pullRequests?: {
+    repository: string;
+    prUrl: string;
+    number: number;
+    branch: string;
+    baseBranch: string;
+    headSha?: string;
+  }[];
 }
 export interface ReviewResult {
   kind: 'review';
@@ -270,7 +356,45 @@ export interface TroubleshootResult {
 export interface RebaseResult {
   kind: 'rebase';
   summary: string;
-  rebased: { taskId: string; branch: string; ok: boolean; error?: string }[];
+  rebased: {
+    taskId: string;
+    branch: string;
+    ok: boolean;
+    error?: string;
+    conflict?: {
+      repository: string;
+      baseBranch: string;
+      sourceSha: string;
+      targetSha: string;
+      conflictedPaths: string[];
+    };
+  }[];
+}
+export interface ConflictResolutionResult {
+  kind: 'conflict-resolution';
+  summary: string;
+  taskId: string;
+  branch: string;
+  resolved: boolean;
+  rationale: string;
+  resolvedPaths: string[];
+  checks: { command: string[]; ok: boolean; output: string }[];
+  resolutionCommit?: string;
+  resolutionDiffHash?: string;
+  error?: string;
+}
+export interface MergeResult {
+  kind: 'merge';
+  summary: string;
+  complete: boolean;
+  pullRequests: {
+    id: string;
+    repository: string;
+    url: string;
+    merged: boolean;
+    mergedAt?: string;
+    error?: string;
+  }[];
 }
 
 export type AgentResult =
@@ -280,7 +404,9 @@ export type AgentResult =
   | VerdictResult
   | DocumentResult
   | TroubleshootResult
-  | RebaseResult;
+  | RebaseResult
+  | ConflictResolutionResult
+  | MergeResult;
 
 export type WorkerStatus = 'online' | 'offline';
 

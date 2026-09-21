@@ -1,5 +1,6 @@
 import { createTaskSchema, listTasksQuerySchema, sendMessageSchema, taskActionSchema, updateTaskSchema } from '@sindral/shared';
 import type { FastifyPluginAsync } from 'fastify';
+import { z } from 'zod';
 import { requireUser } from '../auth/user.js';
 import type { RouteOptions } from '../context.js';
 import { badRequest, notFound } from '../errors.js';
@@ -82,8 +83,12 @@ export const taskRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx })
   app.get('/api/tasks/:id/diff', async (request) => {
     const { id } = validate(idParamsSchema, request.params);
     const task = await orchestrator.getTask(request.user!.id, id);
-    if (!task.prUrl) return { files: [] };
-    const ref = parsePrUrl(task.prUrl);
+    const { repository } = validate(z.object({ repository: z.string().max(300).optional() }), request.query);
+    const pullRequests = await repo.listPullRequests(request.user!.id, id);
+    const selected = repository ? pullRequests.find((pr) => pr.repository === repository) : pullRequests[0];
+    const prUrl = selected?.url ?? task.prUrl;
+    if (!prUrl) return { files: [] };
+    const ref = parsePrUrl(prUrl);
     if (!ref) return { files: [] };
     const secret = await ctx.secrets.get(request.user!.id, 'github');
     if (!secret) throw badRequest('GitHub token is not configured');

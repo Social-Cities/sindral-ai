@@ -27,9 +27,14 @@ describe('runRebaseStack', () => {
   };
 
   it('rebases in order, stops at the first conflict, aborts it and skips the rest', async () => {
+    const sourceSha = 'a'.repeat(40);
+    const targetSha = 'b'.repeat(40);
     const git = fakeGit((args) => {
       if (args[0] === 'worktree' && args[1] === 'list') return ok('');
+      if (args[0] === 'rev-parse' && args[1] === 'origin/sindral/eng-2') return ok(sourceSha);
+      if (args[0] === 'rev-parse' && args[1] === 'origin/sindral/eng-1') return ok(targetSha);
       if (args.includes('rebase') && args.includes('origin/sindral/eng-1')) return failed('CONFLICT (content): Merge conflict in a.ts', 1);
+      if (args[0] === 'diff' && args.includes('--diff-filter=U')) return ok('a.ts\0');
       return undefined;
     });
     const workspaces = new WorkspaceManager(workdir, { git: git.factory });
@@ -40,7 +45,13 @@ describe('runRebaseStack', () => {
     expect(result.kind).toBe('rebase');
     expect(result.rebased).toEqual([
       { taskId: 't1', branch: 'sindral/eng-1', ok: true },
-      { taskId: 't2', branch: 'sindral/eng-2', ok: false, error: expect.stringContaining('CONFLICT') },
+      {
+        taskId: 't2',
+        branch: 'sindral/eng-2',
+        ok: false,
+        error: expect.stringContaining('CONFLICT'),
+        conflict: { repository: 'acme/widgets', baseBranch: 'sindral/eng-1', sourceSha, targetSha, conflictedPaths: ['a.ts'] },
+      },
     ]);
     expect(result.summary).toMatch(/Rebased 1\/3.*stopped at sindral\/eng-2.*1 later branch skipped/);
     expect(git.find('rebase', '--abort')).toHaveLength(1);

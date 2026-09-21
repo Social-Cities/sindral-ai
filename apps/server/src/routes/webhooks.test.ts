@@ -100,6 +100,30 @@ describe('GitHub webhook', () => {
     expect(github.map((m) => m.externalId)).toEqual(['777']);
   });
 
+  it('reconciles a manually merged pull request and completes a task waiting on merge', async () => {
+    const task = await taskInReview();
+    await ctx.app.ctx.orchestrator.applyUserEvent(ctx.userA, task.id, 'accept');
+    const payload = {
+      action: 'closed',
+      pull_request: {
+        html_url: 'https://github.com/acme/app/pull/1',
+        state: 'closed',
+        merged: true,
+        merged_at: '2026-09-21T12:00:00Z',
+      },
+    };
+    const response = await post(payload, { event: 'pull_request' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true, reconciled: true });
+    expect((await ctx.repo.getTask(ctx.userA, task.id))?.state).toBe('done');
+    expect((await ctx.repo.listPullRequests(ctx.userA, task.id))[0]).toMatchObject({ status: 'merged', mergedAt: '2026-09-21T12:00:00Z' });
+    expect((await ctx.repo.listJobsForTask(ctx.userA, task.id)).at(-1)?.status).toBe('cancelled');
+
+    const eventCount = (await ctx.repo.listEvents(ctx.userA, task.id)).length;
+    await post(payload, { event: 'pull_request' });
+    expect((await ctx.repo.listEvents(ctx.userA, task.id)).length).toBe(eventCount);
+  });
+
   it('rejects malformed json with 400', async () => {
     const body = '{not json';
     const res = await ctx.app.inject({ method: 'POST', url: '/api/webhooks/github', headers: { 'content-type': 'application/json', 'x-hub-signature-256': sign(body) }, payload: body });

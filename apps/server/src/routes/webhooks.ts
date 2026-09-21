@@ -27,7 +27,23 @@ interface GitHubWebhookPayload {
   action?: string;
   comment?: GitHubComment;
   issue?: { pull_request?: { html_url?: string } | null; html_url?: string };
-  pull_request?: { html_url?: string };
+  pull_request?: { html_url?: string; state?: string; merged?: boolean; merged_at?: string | null };
+}
+
+export function extractPrState(
+  eventName: string | undefined,
+  payload: GitHubWebhookPayload,
+): { prUrl: string; status: 'open' | 'merged' | 'closed'; mergedAt: string | null } | null {
+  if (eventName !== 'pull_request' || !payload.pull_request?.html_url) return null;
+  if (payload.action === 'reopened' || payload.pull_request.state === 'open') {
+    return { prUrl: payload.pull_request.html_url, status: 'open', mergedAt: null };
+  }
+  if (payload.action !== 'closed' && payload.pull_request.state !== 'closed') return null;
+  return {
+    prUrl: payload.pull_request.html_url,
+    status: payload.pull_request.merged ? 'merged' : 'closed',
+    mergedAt: payload.pull_request.merged ? (payload.pull_request.merged_at ?? null) : null,
+  };
 }
 
 /** Extract the PR URL and comment from supported events; null means "ignore". */
@@ -72,6 +88,11 @@ export const webhookRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx
 
     const eventName = headerValue(request, 'x-github-event');
     const payload = (request.body ?? {}) as GitHubWebhookPayload;
+    const prState = extractPrState(eventName, payload);
+    if (prState) {
+      const matched = await ctx.orchestrator.reconcilePullRequest(prState.prUrl, prState.status, prState.mergedAt);
+      return reply.code(matched ? 200 : 202).send({ ok: true, ...(matched ? { reconciled: true } : { ignored: 'no task for pull request' }) });
+    }
     const extracted = extractPrComment(eventName, payload);
     if (!extracted) return reply.code(202).send({ ok: true, ignored: 'unsupported event' });
     const { prUrl, comment } = extracted;

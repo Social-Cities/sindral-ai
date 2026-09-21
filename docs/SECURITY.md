@@ -15,7 +15,7 @@ Every repository call is scoped by the authenticated user id. Supabase RLS is en
 
 - Provider tokens (GitHub, Linear, Jira) are encrypted with AES-256-GCM under `SECRETS_ENCRYPTION_KEY`; only a 4-character hint is ever returned to the UI.
 - Worker keys are shown once at creation and stored hashed. Revocation is immediate.
-- The current internal-deployment credential is an encrypted, repository-scoped fine-grained GitHub PAT handed to the worker inside a matching job dispatch over TLS. It is used for `git`/`gh` via an HTTP extra header / `GH_TOKEN`, never written to `.git/config`, never passed to the agent subprocess, and redacted from logs. Production automatic merge requires short-lived GitHub App installation tokens.
+- Production uses short-lived GitHub App installation tokens minted per job, restricted to that job's repositories, and selected from a Sindral-user-to-installation mapping. Internal deployments may use an encrypted, repository-scoped fine-grained PAT; PAT-backed merge is disabled unless the worker explicitly sets `SINDRAL_ALLOW_PAT_MERGE=true`. Tokens are used for `git`/`gh` via an HTTP extra header / `GH_TOKEN`, never written to `.git/config`, never passed to the agent subprocess, and redacted from logs.
 - Logs redact `authorization` headers and token fields.
 
 ## OWASP Top 10 mapping
