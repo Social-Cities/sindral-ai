@@ -1,5 +1,9 @@
 project_id = "sindral-ai"
 
+# Ports are deliberately offset from the Supabase CLI defaults (54321-54323) so a
+# Sindral stack can run alongside another local Supabase project without clashing.
+# Keep these in sync with .env.example and the README.
+
 [api]
 enabled = true
 port = 55321
@@ -25,9 +29,12 @@ enable_anonymous_sign_ins = false
 
 [auth.email]
 enable_signup = true
+# Local only: skip the confirmation email so `pnpm smoke` and manual testing can
+# sign up without a mail round trip. Hosted projects keep confirmations enabled.
 enable_confirmations = false
 
-[inbucket]
+# Services Sindral does not use. Disabled so `supabase start` is fast and lean.
+[local_smtp]
 enabled = false
 
 [analytics]

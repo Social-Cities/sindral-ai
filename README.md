@@ -28,6 +28,7 @@ pnpm --filter @sindral/shared build
 
 # 1. Database
 supabase start                      # prints API URL, anon key, service role key, JWT secret
+#   local API runs on http://127.0.0.1:55321 and Studio on 55323 (see supabase/config.toml)
 # migrations in supabase/migrations are applied automatically on start; later use `supabase db reset`
 
 # 2. Environment

@@ -19,7 +19,16 @@ describe('config', () => {
     expect(config.supabaseJwtSecret).toBeUndefined();
     expect(config.secretsEncryptionKey).toHaveLength(32);
     expect(config.webDistDir.endsWith('/apps/web/dist')).toBe(true);
+    expect(config.githubAppInstallations).toEqual({});
     expect(parseConfig({ ...valid, WEB_DIST_DIR: '/srv/web' }).webDistDir).toBe('/srv/web');
+    expect(
+      parseConfig({
+        ...valid,
+        GITHUB_APP_ID: '123',
+        GITHUB_APP_PRIVATE_KEY: 'key',
+        GITHUB_APP_INSTALLATIONS: '{"11111111-1111-4111-8111-111111111111":456}',
+      }).githubAppInstallations,
+    ).toEqual({ '11111111-1111-4111-8111-111111111111': 456 });
   });
 
   it('fails fast with a readable message', () => {
@@ -31,5 +40,6 @@ describe('config', () => {
       expect((err as Error).message).toContain('openssl rand -hex 32');
     }
     expect(() => parseConfig({ ...valid, GITHUB_APP_ID: '1' })).toThrow(/configured together/);
+    expect(() => parseConfig({ ...valid, GITHUB_APP_ID: '1', GITHUB_APP_PRIVATE_KEY: 'key', GITHUB_APP_INSTALLATIONS: '[]' })).toThrow(/JSON object/);
   });
 });

@@ -60,6 +60,19 @@ describe('runMergePullRequests', () => {
     expect(calls.some((args) => args[1] === 'merge')).toBe(false);
   });
 
+  it('does not accept an already-merged pull request with a different head', async () => {
+    const result = await runMergePullRequests({
+      payload: { ...payload, pullRequests: payload.pullRequests.slice(0, 1) },
+      githubToken: GH_TOKEN,
+      ghBin: 'gh',
+      allowPatMerge: true,
+      signal: new AbortController().signal,
+      gh: async () => ok(JSON.stringify({ state: 'MERGED', headRefOid: 'c'.repeat(40), mergedAt: '2026-09-21T12:00:00Z' })),
+    });
+    expect(result.complete).toBe(false);
+    expect(result.pullRequests[0]?.error).toMatch(/does not match expected/);
+  });
+
   it('records partial completion and skips repositories after the first failure', async () => {
     let firstMerged = false;
     const result = await runMergePullRequests({
