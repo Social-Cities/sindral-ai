@@ -78,6 +78,7 @@ Production merge is deliberately opt-in: set `SINDRAL_AUTO_MERGE_ENABLED=true` o
 | `pnpm test` | vitest in every package |
 | `pnpm lint` | eslint (typescript-eslint) |
 | `pnpm build` | production builds |
+| `pnpm bundle:check` | enforce compressed route, vendor, CSS, and total web bundle budgets |
 | `pnpm db:reset` | recreate the local database from migrations |
 | `pnpm db:test` | run pgTAP transaction, idempotency, and RLS tests against local Supabase |
 | `pnpm db:lint` | lint the local Postgres schema |

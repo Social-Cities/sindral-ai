@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "pnpm -r run build",
+    "bundle:check": "node scripts/check-bundle.mjs",
     "dev": "pnpm -r --parallel --filter ./apps/server --filter ./apps/web run dev",
     "dev:server": "pnpm --filter @sindral/server dev",
     "dev:web": "pnpm --filter @sindral/web dev",

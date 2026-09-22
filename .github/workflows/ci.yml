@@ -19,6 +19,7 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm build
+      - run: pnpm bundle:check
       - run: pnpm audit --audit-level high
       - name: Verify generated files are not tracked
         run: git diff --exit-code -- . ':(exclude)pnpm-lock.yaml'
