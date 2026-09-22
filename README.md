@@ -66,7 +66,7 @@ pnpm build            # builds shared, server, web (dist served by the server) a
 cd apps/server && node dist/index.js
 ```
 
-Run the server behind TLS. Use a hosted Supabase project, apply migrations with `supabase db push`, and set `WEB_ORIGIN` to the public origin of the UI. Configure Supabase Auth providers (email/password or GitHub OAuth) in the Supabase dashboard.
+Run the server behind TLS. Use a hosted Supabase project, apply migrations with `supabase db push`, set `SINDRAL_ENV=production`, and set `WEB_ORIGIN` to the exact HTTPS origin of the UI. Configure Supabase Auth providers (email/password or GitHub OAuth) in the Supabase dashboard. The server refuses to listen when it cannot reach Supabase, the schema version is incompatible, production origins are not HTTPS, or the production webhook secret is missing/weak.
 
 Production merge is deliberately opt-in: set `SINDRAL_AUTO_MERGE_ENABLED=true` only after validating the GitHub App and repository allow-list. `SINDRAL_JOB_DISPATCH_ENABLED=false` is the emergency stop for new worker leases; queued jobs and read/review access remain intact until it is re-enabled. Disabling automatic merge also prevents already-queued merge jobs from being leased.
 

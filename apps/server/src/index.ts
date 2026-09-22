@@ -15,6 +15,7 @@ async function main(): Promise<void> {
   }
 
   const repo = new SupabaseRepository(createSupabaseClient(config.supabaseUrl, config.supabaseServiceRoleKey));
+  await repo.assertCompatibleSchema();
   const app = await buildApp({ config, repo });
 
   const shutdown = (signal: string): void => {

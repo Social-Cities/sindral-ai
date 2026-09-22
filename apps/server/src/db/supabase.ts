@@ -66,6 +66,8 @@ export function createSupabaseClient(url: string, serviceRoleKey: string): Supab
   });
 }
 
+export const EXPECTED_SCHEMA_VERSION = '20260922174000';
+
 // ---- row shapes (snake_case, as stored) ----
 interface ProfileRow {
   id: string;
@@ -457,6 +459,14 @@ export class SupabaseRepository implements Repository {
   private artifactBucketReady: Promise<void> | null = null;
 
   constructor(private readonly client: SupabaseClient) {}
+
+  /** Fail startup before listening when Postgres is unreachable or migrations lag the server. */
+  async assertCompatibleSchema(): Promise<void> {
+    const version = await run<string>(this.client.rpc('sindral_schema_version'));
+    if (version !== EXPECTED_SCHEMA_VERSION) {
+      throw new RepositoryError(`Database schema ${version || 'unknown'} is incompatible; expected ${EXPECTED_SCHEMA_VERSION}. Apply all Supabase migrations before starting the server.`);
+    }
+  }
 
   private ensureArtifactBucket(): Promise<void> {
     if (this.artifactBucketReady) return this.artifactBucketReady;

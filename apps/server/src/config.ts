@@ -16,6 +16,7 @@ const optionalString = z.preprocess(
 const booleanString = (defaultValue: 'true' | 'false') => z.enum(['true', 'false']).default(defaultValue).transform((value) => value === 'true');
 
 const envSchema = z.object({
+  SINDRAL_ENV: z.enum(['development', 'production']).default('development'),
   SUPABASE_URL: z.string().url(),
   SUPABASE_ANON_KEY: z.string().min(1),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
@@ -39,6 +40,7 @@ const envSchema = z.object({
 export type LogLevel = z.infer<typeof envSchema>['LOG_LEVEL'];
 
 export interface AppConfig {
+  environment: 'development' | 'production';
   supabaseUrl: string;
   supabaseAnonKey: string;
   supabaseServiceRoleKey: string;
@@ -71,6 +73,14 @@ export function parseConfig(env: NodeJS.ProcessEnv): AppConfig {
     throw new ConfigError(`Invalid environment configuration:\n${lines.join('\n')}\nSee .env.example at the repository root.`);
   }
   const e = result.data;
+  const webOrigins = parseWebOrigins(e.WEB_ORIGIN);
+  if (e.SINDRAL_ENV === 'production') {
+    if (new URL(e.SUPABASE_URL).protocol !== 'https:') throw new ConfigError('SUPABASE_URL must use HTTPS in production');
+    if (webOrigins.some((origin) => new URL(origin).protocol !== 'https:')) throw new ConfigError('WEB_ORIGIN must use HTTPS in production');
+    if (!e.GITHUB_WEBHOOK_SECRET || e.GITHUB_WEBHOOK_SECRET.length < 32) {
+      throw new ConfigError('GITHUB_WEBHOOK_SECRET must contain at least 32 characters in production');
+    }
+  }
   const githubAppValues = [e.GITHUB_APP_ID, e.GITHUB_APP_PRIVATE_KEY, e.GITHUB_APP_INSTALLATIONS];
   if (githubAppValues.some((value) => value !== undefined) && githubAppValues.some((value) => value === undefined)) {
     throw new ConfigError('GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, and GITHUB_APP_INSTALLATIONS must be configured together');
@@ -84,15 +94,14 @@ export function parseConfig(env: NodeJS.ProcessEnv): AppConfig {
     }
   }
   return {
+    environment: e.SINDRAL_ENV,
     supabaseUrl: e.SUPABASE_URL,
     supabaseAnonKey: e.SUPABASE_ANON_KEY,
     supabaseServiceRoleKey: e.SUPABASE_SERVICE_ROLE_KEY,
     supabaseJwtSecret: e.SUPABASE_JWT_SECRET,
     port: e.PORT,
     host: e.HOST,
-    webOrigins: e.WEB_ORIGIN.split(',')
-      .map((o) => o.trim())
-      .filter(Boolean),
+    webOrigins,
     secretsEncryptionKey: Buffer.from(e.SECRETS_ENCRYPTION_KEY, 'hex'),
     githubWebhookSecret: e.GITHUB_WEBHOOK_SECRET,
     githubAppId: e.GITHUB_APP_ID,
@@ -103,6 +112,23 @@ export function parseConfig(env: NodeJS.ProcessEnv): AppConfig {
     logLevel: e.LOG_LEVEL,
     webDistDir: e.WEB_DIST_DIR ?? path.resolve(SERVER_PACKAGE_DIR, '..', 'web', 'dist'),
   };
+}
+
+function parseWebOrigins(raw: string): string[] {
+  const origins = raw.split(',').map((origin) => origin.trim()).filter(Boolean);
+  if (origins.length === 0) throw new ConfigError('WEB_ORIGIN must contain at least one origin');
+  return origins.map((origin) => {
+    let parsed: URL;
+    try {
+      parsed = new URL(origin);
+    } catch {
+      throw new ConfigError(`WEB_ORIGIN contains an invalid URL: ${origin}`);
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) {
+      throw new ConfigError(`WEB_ORIGIN must contain exact HTTP(S) origins without paths, credentials, queries, or fragments: ${origin}`);
+    }
+    return parsed.origin;
+  });
 }
 
 /** Load `.env` from the repo root and the cwd (existing process env wins), then validate. */

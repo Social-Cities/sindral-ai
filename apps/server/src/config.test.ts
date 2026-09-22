@@ -13,6 +13,7 @@ const valid = {
 describe('config', () => {
   it('parses and applies defaults', () => {
     const config = parseConfig(valid);
+    expect(config.environment).toBe('development');
     expect(config.port).toBe(8787);
     expect(config.host).toBe('0.0.0.0');
     expect(config.webOrigins).toEqual(['http://localhost:5173', 'https://app.example.com']);
@@ -48,5 +49,16 @@ describe('config', () => {
     expect(() => parseConfig({ ...valid, GITHUB_APP_ID: '1' })).toThrow(/configured together/);
     expect(() => parseConfig({ ...valid, GITHUB_APP_ID: '1', GITHUB_APP_PRIVATE_KEY: 'key', GITHUB_APP_INSTALLATIONS: '[]' })).toThrow(/JSON object/);
     expect(() => parseConfig({ ...valid, SINDRAL_JOB_DISPATCH_ENABLED: 'yes' })).toThrow(ConfigError);
+    expect(() => parseConfig({ ...valid, WEB_ORIGIN: 'https://app.example.com/path' })).toThrow(/exact HTTP\(S\) origins/);
+    expect(() => parseConfig({
+      ...valid,
+      SINDRAL_ENV: 'production',
+      SUPABASE_URL: 'https://project.supabase.co',
+      WEB_ORIGIN: 'https://app.example.com',
+      GITHUB_WEBHOOK_SECRET: 'x'.repeat(32),
+    })).not.toThrow();
+    expect(() => parseConfig({ ...valid, SINDRAL_ENV: 'production' })).toThrow(/SUPABASE_URL must use HTTPS/);
+    expect(() => parseConfig({ ...valid, SINDRAL_ENV: 'production', SUPABASE_URL: 'https://project.supabase.co' })).toThrow(/WEB_ORIGIN must use HTTPS/);
+    expect(() => parseConfig({ ...valid, SINDRAL_ENV: 'production', SUPABASE_URL: 'https://project.supabase.co', WEB_ORIGIN: 'https://app.example.com' })).toThrow(/GITHUB_WEBHOOK_SECRET/);
   });
 });
