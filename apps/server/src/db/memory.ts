@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
+import { ARTIFACT_CONTENT_TYPES, MAX_ARTIFACT_BYTES } from '@sindral/shared';
 import type { AgentResult, Artifact, Job, Message, PullRequest, SecretProvider, Task, TaskEvent, TaskRepository, Worker, WorkerKey, WorkflowRecord } from '@sindral/shared';
 import {
   ConflictError,
+  RepositoryError,
   type ArtifactInsert,
   type EventInsert,
   type JobInsert,
@@ -485,6 +487,11 @@ export class MemoryRepository implements Repository {
         return clone(out);
       }
     }
+    if (!ARTIFACT_CONTENT_TYPES.includes(input.contentType as (typeof ARTIFACT_CONTENT_TYPES)[number])) {
+      throw new RepositoryError(`Unsupported artifact content type: ${input.contentType}`, '22023');
+    }
+    const byteSize = Buffer.byteLength(input.content, 'utf8');
+    if (byteSize > MAX_ARTIFACT_BYTES) throw new RepositoryError(`Artifact exceeds the ${MAX_ARTIFACT_BYTES}-byte limit`, '22001');
     const artifact: Owned<Artifact> = {
       id: randomUUID(),
       userId,
@@ -493,6 +500,8 @@ export class MemoryRepository implements Repository {
       name: input.name,
       contentType: input.contentType,
       content: input.content,
+      byteSize,
+      downloadUrl: null,
       createdAt: this.now(),
     };
     this.artifacts.set(artifact.id, artifact);

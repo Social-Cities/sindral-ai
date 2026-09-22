@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type {
   AgentResult,
@@ -23,6 +24,7 @@ import type {
   WorkflowRecord,
   GitHubFeedbackKind,
 } from '@sindral/shared';
+import { ARTIFACT_CONTENT_TYPES, MAX_ARTIFACT_BYTES } from '@sindral/shared';
 import {
   ConflictError,
   RepositoryError,
@@ -157,7 +159,9 @@ interface ArtifactRow {
   job_id: string | null;
   name: string;
   content_type: string;
-  content: string;
+  content: string | null;
+  storage_path: string | null;
+  byte_size: number;
   dedupe_key?: string | null;
   created_at: string;
 }
@@ -326,13 +330,15 @@ const mapEvent = (r: EventRow): TaskEvent => ({
   createdAt: r.created_at,
 });
 
-const mapArtifact = (r: ArtifactRow): Artifact => ({
+const mapArtifact = (r: ArtifactRow, downloadUrl: string | null = null): Artifact => ({
   id: r.id,
   taskId: r.task_id,
   jobId: r.job_id,
   name: r.name,
   contentType: r.content_type,
   content: r.content,
+  byteSize: Number(r.byte_size),
+  downloadUrl,
   createdAt: r.created_at,
 });
 
@@ -436,7 +442,61 @@ function workerPatchToRow(patch: WorkerPatch): Record<string, unknown> {
 
 /** Repository backed by Supabase Postgres via the service-role client. Every query is additionally scoped by user id. */
 export class SupabaseRepository implements Repository {
+  private artifactBucketReady: Promise<void> | null = null;
+
   constructor(private readonly client: SupabaseClient) {}
+
+  private ensureArtifactBucket(): Promise<void> {
+    if (this.artifactBucketReady) return this.artifactBucketReady;
+    this.artifactBucketReady = (async () => {
+      const buckets = this.client.storage;
+      const existing = await buckets.getBucket('task-artifacts');
+      const options = { public: false, fileSizeLimit: MAX_ARTIFACT_BYTES, allowedMimeTypes: [...ARTIFACT_CONTENT_TYPES] };
+      if (existing.data) {
+        const { error } = await buckets.updateBucket('task-artifacts', options);
+        if (error) throw new RepositoryError(`Could not secure artifact storage: ${error.message}`);
+        return;
+      }
+      const created = await buckets.createBucket('task-artifacts', options);
+      if (created.error) {
+        // Another server instance may have won the create race. Re-read before failing.
+        const raced = await buckets.getBucket('task-artifacts');
+        if (!raced.data) throw new RepositoryError(`Could not create artifact storage: ${created.error.message}`);
+        const { error } = await buckets.updateBucket('task-artifacts', options);
+        if (error) throw new RepositoryError(`Could not secure artifact storage: ${error.message}`);
+      }
+    })().catch((error: unknown) => {
+      this.artifactBucketReady = null;
+      throw error;
+    });
+    return this.artifactBucketReady;
+  }
+
+  private async hydrateArtifact(row: ArtifactRow): Promise<Artifact> {
+    if (!row.storage_path) return mapArtifact(row);
+    await this.ensureArtifactBucket();
+    const { data, error } = await this.client.storage.from('task-artifacts').createSignedUrl(row.storage_path, 15 * 60, { download: row.name });
+    if (error || !data?.signedUrl) throw new RepositoryError(`Could not authorize artifact download: ${error?.message ?? 'missing signed URL'}`);
+    return mapArtifact(row, data.signedUrl);
+  }
+
+  private async drainArtifactDeletions(userId: string): Promise<void> {
+    let bucketReady = false;
+    while (true) {
+      const rows = await run<{ storage_path: string }[]>(
+        this.client.from('artifact_storage_deletions').select('storage_path').eq('user_id', userId).order('created_at').limit(100),
+      );
+      if (rows.length === 0) return;
+      if (!bucketReady) {
+        await this.ensureArtifactBucket();
+        bucketReady = true;
+      }
+      const paths = rows.map((row) => row.storage_path);
+      const { error } = await this.client.storage.from('task-artifacts').remove(paths);
+      if (error) throw new RepositoryError(`Could not remove deleted artifacts: ${error.message}`);
+      await run(this.client.from('artifact_storage_deletions').delete().eq('user_id', userId).in('storage_path', paths));
+    }
+  }
 
   // ---- profiles ----
   async ensureProfile(userId: string, displayNameHint: string | null): Promise<Profile> {
@@ -627,6 +687,7 @@ export class SupabaseRepository implements Repository {
 
   async deleteTask(userId: string, id: string): Promise<boolean> {
     const rows = await run<{ id: string }[]>(this.client.from('tasks').delete().eq('user_id', userId).eq('id', id).select('id'));
+    if (rows.length > 0) await this.drainArtifactDeletions(userId);
     return rows.length > 0;
   }
 
@@ -811,10 +872,38 @@ export class SupabaseRepository implements Repository {
     const rows = await run<ArtifactRow[]>(
       this.client.from('task_artifacts').select('*').eq('user_id', userId).eq('task_id', taskId).order('created_at', { ascending: true }),
     );
-    return rows.map(mapArtifact);
+    return Promise.all(rows.map((row) => this.hydrateArtifact(row)));
   }
 
   async createArtifact(userId: string, input: ArtifactInsert): Promise<Artifact> {
+    if (input.dedupeKey) {
+      const existing = await run<ArtifactRow | null>(
+        this.client.from('task_artifacts').select('*').eq('user_id', userId).eq('task_id', input.taskId).eq('dedupe_key', input.dedupeKey).maybeSingle(),
+      );
+      if (existing) return this.hydrateArtifact(existing);
+    }
+
+    if (!ARTIFACT_CONTENT_TYPES.includes(input.contentType as (typeof ARTIFACT_CONTENT_TYPES)[number])) {
+      throw new RepositoryError(`Unsupported artifact content type: ${input.contentType}`, '22023');
+    }
+    const byteSize = Buffer.byteLength(input.content, 'utf8');
+    if (byteSize > MAX_ARTIFACT_BYTES) throw new RepositoryError(`Artifact exceeds the ${MAX_ARTIFACT_BYTES}-byte limit`, '22001');
+    const stored = byteSize > 64 * 1024;
+    const storagePath = stored
+      ? `${userId}/${input.taskId}/${createHash('sha256').update(input.dedupeKey ?? '').update('\0').update(input.name).update('\0').update(input.contentType).update('\0').update(input.content).digest('hex')}`
+      : null;
+
+    if (storagePath) {
+      await this.ensureArtifactBucket();
+      await this.drainArtifactDeletions(userId);
+      const { error } = await this.client.storage.from('task-artifacts').upload(storagePath, Buffer.from(input.content, 'utf8'), {
+        contentType: input.contentType,
+        upsert: false,
+      });
+      const conflict = error && (String(error.statusCode) === '409' || /already exists/i.test(error.message));
+      if (error && !conflict) throw new RepositoryError(`Could not store artifact: ${error.message}`);
+    }
+
     const row = await run<ArtifactRow>(
       this.client
         .from('task_artifacts')
@@ -825,7 +914,9 @@ export class SupabaseRepository implements Repository {
             job_id: input.jobId ?? null,
             name: input.name,
             content_type: input.contentType,
-            content: input.content,
+            content: stored ? null : input.content,
+            storage_path: storagePath,
+            byte_size: byteSize,
             dedupe_key: input.dedupeKey ?? null,
           },
           input.dedupeKey ? { onConflict: 'task_id,dedupe_key', ignoreDuplicates: true } : undefined,
@@ -833,11 +924,11 @@ export class SupabaseRepository implements Repository {
         .select('*')
         .maybeSingle(),
     );
-    if (row) return mapArtifact(row);
+    if (row) return this.hydrateArtifact(row);
     const existing = await run<ArtifactRow>(
       this.client.from('task_artifacts').select('*').eq('user_id', userId).eq('task_id', input.taskId).eq('dedupe_key', input.dedupeKey!).single(),
     );
-    return mapArtifact(existing);
+    return this.hydrateArtifact(existing);
   }
 
   // ---- jobs ----

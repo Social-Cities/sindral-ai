@@ -622,7 +622,7 @@ describe('subtask stacks', () => {
     expect((await ctx.repo.listEvents(userId, sibling.id)).some((event) => event.type === 'conflict-resolution-escalated')).toBe(true);
     const evidence = (await ctx.repo.listArtifacts(userId, sibling.id)).find((artifact) => artifact.name.startsWith('conflict-resolution-'));
     expect(evidence).toBeDefined();
-    expect(JSON.parse(evidence!.content)).toMatchObject({ promptVersion: 'rebase-conflict-v1', outcome: 'escalated', error: 'Ambiguous intent' });
+    expect(JSON.parse(evidence!.content!)).toMatchObject({ promptVersion: 'rebase-conflict-v1', outcome: 'escalated', error: 'Ambiguous intent' });
   });
 
   it('completes the parent when every child is done', async () => {

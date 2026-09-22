@@ -12,6 +12,11 @@ function isMarkdown(a: Artifact): boolean {
   return /markdown|md/i.test(a.contentType) || /\.(md|markdown)$/i.test(a.name);
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KiB`;
+}
+
 export function ArtifactsTab({ task }: ArtifactsTabProps) {
   const artifacts = [...task.artifacts].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -54,9 +59,25 @@ export function ArtifactsTab({ task }: ArtifactsTabProps) {
           <>
             <div className="flex items-center gap-3 mb-4">
               <span className="text-xs font-mono text-foreground">{selected.name}</span>
+              <span className="text-[10px] font-mono text-muted-foreground">{formatBytes(selected.byteSize)}</span>
               <span className="text-[10px] font-mono text-muted-foreground">{formatDateTime(selected.createdAt)}</span>
             </div>
-            {isMarkdown(selected) ? (
+            {selected.content === null ? (
+              <div className="p-4 rounded-lg bg-muted border border-border max-w-3xl">
+                <p className="text-xs text-muted-foreground mb-3">This artifact is stored securely and is not loaded into the page.</p>
+                {selected.downloadUrl ? (
+                  <a
+                    href={selected.downloadUrl}
+                    download={selected.name}
+                    className="inline-flex rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
+                  >
+                    Download artifact
+                  </a>
+                ) : (
+                  <p role="alert" className="text-xs text-destructive">A download link could not be authorized. Refresh to try again.</p>
+                )}
+              </div>
+            ) : isMarkdown(selected) ? (
               <div className="p-4 rounded-lg bg-muted border border-border max-w-3xl">
                 <Markdown>{selected.content}</Markdown>
               </div>

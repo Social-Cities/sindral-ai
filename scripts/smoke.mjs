@@ -111,6 +111,40 @@ const list = await api('/api/tasks'); ok(list.body.tasks.length === 1, 'top-leve
 const listAll = await api('/api/tasks?includeSubtasks=true'); ok(listAll.body.tasks.length === 3, 'includeSubtasks lists children');
 const ev = await api(`/api/tasks/${taskId}/events`); ok(ev.body.events.some((e) => e.type === 'subtasks-created'), 'audit events recorded');
 
+// private artifact storage: small text remains inline; larger text is signed on demand
+const documentWorkflow = wfs.body.workflows.find((workflow) => workflow.name === 'Document (non-code)');
+const documentTask = await api('/api/tasks', {
+  method: 'POST',
+  body: JSON.stringify({ title: 'Write a large research brief', description: 'Exercise private artifact storage.', workflowId: documentWorkflow.id }),
+});
+ok(documentTask.status === 201, 'document task created');
+const documentTaskId = documentTask.body.task.id;
+const documentStart = await action(documentTaskId, 'start');
+ok(documentStart.status === 200, 'document workflow started');
+const documentClaim = await w('/api/worker/jobs/claim', { workerId: reg.body.workerId, max: 1 });
+ok(documentClaim.body.jobs.length === 1 && documentClaim.body.jobs[0].job.taskId === documentTaskId, 'worker claimed document job');
+const documentJob = documentClaim.body.jobs[0].job;
+const largeContent = `# Research brief\n\n${'private artifact content '.repeat(3200)}`;
+const documentComplete = await w(`/api/worker/jobs/${documentJob.id}/complete`, {
+  attempt: documentJob.attempt,
+  result: {
+    kind: 'document',
+    summary: 'Research brief ready.',
+    artifacts: [
+      { name: 'summary.md', contentType: 'text/markdown', content: '# Summary' },
+      { name: 'research.md', contentType: 'text/markdown', content: largeContent },
+    ],
+  },
+});
+ok(documentComplete.status === 200, `document job completed (${documentComplete.status})`);
+const artifactsResponse = await api(`/api/tasks/${documentTaskId}/artifacts`);
+const smallArtifact = artifactsResponse.body.artifacts.find((artifact) => artifact.name === 'summary.md');
+const largeArtifact = artifactsResponse.body.artifacts.find((artifact) => artifact.name === 'research.md');
+ok(smallArtifact.content === '# Summary' && smallArtifact.downloadUrl === null, 'small artifact remains inline');
+ok(largeArtifact.content === null && largeArtifact.byteSize > 65536 && largeArtifact.downloadUrl && !('storagePath' in largeArtifact), 'large artifact exposes only a signed download');
+const artifactDownload = await fetch(largeArtifact.downloadUrl);
+ok(artifactDownload.status === 200 && await artifactDownload.text() === largeContent, 'signed artifact download returns exact content');
+
 // webhook HMAC
 const crypto = await import('node:crypto');
 const raw = JSON.stringify({ action: 'created', comment: { id: 1, body: 'x', user: { login: 'a' } }, issue: { pull_request: { html_url: 'https://github.com/acme/app/pull/1' } } });
@@ -124,8 +158,13 @@ ok(goodSig.status === 202, 'webhook with valid signature accepted (no matching P
 const su2 = await j(`${SUPA}/auth/v1/signup`, { method: 'POST', headers: { apikey: ANON, 'content-type': 'application/json' }, body: JSON.stringify({ email: `other+${Date.now()}@example.com`, password }) });
 const other = await j(`${API}/api/tasks/${taskId}`, { headers: { authorization: `Bearer ${su2.body.access_token}` } });
 ok(other.status === 404, 'other user cannot see the task (404)');
+const otherArtifacts = await j(`${API}/api/tasks/${documentTaskId}/artifacts`, { headers: { authorization: `Bearer ${su2.body.access_token}` } });
+ok(otherArtifacts.status === 404, 'other user cannot mint artifact download URLs');
 
 const del = await api(`/api/tasks/${taskId}`, { method: 'DELETE' }); ok(del.status === 200, 'task deleted');
+const delDocument = await api(`/api/tasks/${documentTaskId}`, { method: 'DELETE' }); ok(delDocument.status === 200, 'document task deleted');
+const deletedArtifactDownload = await fetch(largeArtifact.downloadUrl);
+ok([400, 404].includes(deletedArtifactDownload.status), `stored artifact removed with task (${deletedArtifactDownload.status})`);
 ok((await api(`/api/tasks/${taskId}`)).status === 404, 'deleted task is gone');
 ok((await api('/api/tasks?includeSubtasks=true')).body.tasks.length === 0, 'subtasks cascade-deleted with the parent');
 // ---- Row level security: the anon key + a user JWT must only ever see that user's rows ----

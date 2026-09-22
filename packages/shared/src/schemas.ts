@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ALL_OUTPUT_KINDS, ALL_PERMISSIONS, ALL_TOOLS } from './defaultWorkflows.js';
+import { ARTIFACT_CONTENT_TYPES, MAX_ARTIFACT_BYTES } from './types.js';
 
 const id = z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9-_]*$/i);
 const shortText = z.string().trim().min(1).max(200);
@@ -116,8 +117,11 @@ export const workerJobEventSchema = z.object({
 
 const artifactSchema = z.object({
   name: z.string().trim().min(1).max(200).regex(/^[^/\\]+$/, 'Artifact names cannot contain path separators'),
-  contentType: z.string().trim().min(1).max(100),
-  content: z.string().max(1_000_000),
+  contentType: z.enum(ARTIFACT_CONTENT_TYPES),
+  content: z
+    .string()
+    .max(MAX_ARTIFACT_BYTES)
+    .refine((content) => new TextEncoder().encode(content).byteLength <= MAX_ARTIFACT_BYTES, 'Artifact content exceeds the byte limit'),
 });
 
 export const agentResultSchema = z.discriminatedUnion('kind', [

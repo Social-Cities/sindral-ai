@@ -44,6 +44,19 @@ describe('validateResult', () => {
     expect(unknown.ok).toBe(false);
   });
 
+  it('allows only bounded text artifact payloads', () => {
+    const unsupported = validateResult({
+      kind: 'document', summary: 's', artifacts: [{ name: 'payload.bin', contentType: 'application/octet-stream', content: 'data' }],
+    });
+    expect(unsupported.ok).toBe(false);
+
+    const oversizedUtf8 = validateResult({
+      kind: 'document', summary: 's', artifacts: [{ name: 'large.txt', contentType: 'text/plain', content: 'é'.repeat(500_001) }],
+    });
+    expect(oversizedUtf8.ok).toBe(false);
+    expect(!oversizedUtf8.ok && oversizedUtf8.reason).toMatch(/byte limit/);
+  });
+
   it('extracts summaries', () => {
     expect(summaryOf({ summary: '  hi ' })).toBe('hi');
     expect(summaryOf({ summary: '' })).toBeNull();

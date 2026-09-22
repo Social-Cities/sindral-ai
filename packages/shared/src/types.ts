@@ -145,9 +145,27 @@ export interface Artifact {
   jobId?: string | null;
   name: string;
   contentType: string;
-  content: string;
+  /** Small text artifacts are returned inline; stored artifacts use downloadUrl instead. */
+  content: string | null;
+  byteSize: number;
+  /** Short-lived, owner-authorized URL for artifacts held in private object storage. */
+  downloadUrl: string | null;
   createdAt: string;
 }
+
+export const ARTIFACT_CONTENT_TYPES = [
+  'text/markdown',
+  'text/plain',
+  'application/json',
+  'text/html',
+  'text/csv',
+  'text/yaml',
+  'application/xml',
+  'image/svg+xml',
+] as const;
+
+export type ArtifactContentType = (typeof ARTIFACT_CONTENT_TYPES)[number];
+export const MAX_ARTIFACT_BYTES = 1_000_000;
 
 export type PullRequestStatus = 'open' | 'merged' | 'closed';
 export type MergeMethod = 'squash' | 'merge' | 'rebase';

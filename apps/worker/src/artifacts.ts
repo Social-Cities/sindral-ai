@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { ARTIFACT_CONTENT_TYPES, MAX_ARTIFACT_BYTES } from '@sindral/shared';
 
 export interface ArtifactFile {
   name: string;
@@ -7,7 +8,7 @@ export interface ArtifactFile {
   content: string;
 }
 
-export const MAX_ARTIFACT_BYTES = 1_000_000;
+export { MAX_ARTIFACT_BYTES };
 export const MAX_ARTIFACTS = 50;
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -83,7 +84,11 @@ export function mergeArtifacts(declared: unknown, collected: ArtifactFile[], lim
     const name = artifactName(a['name']);
     if (!name || seen.has(name)) continue;
     seen.add(name);
-    merged.push({ name, contentType: typeof a['contentType'] === 'string' && a['contentType'] ? a['contentType'] : contentTypeFor(name), content: a['content'] });
+    const declaredType = typeof a['contentType'] === 'string' ? a['contentType'] : '';
+    const contentType = ARTIFACT_CONTENT_TYPES.includes(declaredType as (typeof ARTIFACT_CONTENT_TYPES)[number])
+      ? declaredType
+      : contentTypeFor(name);
+    merged.push({ name, contentType, content: a['content'] });
   }
   for (const file of collected) {
     if (seen.has(file.name)) continue;

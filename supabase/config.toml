@@ -41,7 +41,7 @@ enabled = false
 enabled = false
 
 [storage]
-enabled = false
+enabled = true
 
 [edge_runtime]
 enabled = false
