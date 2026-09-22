@@ -9,7 +9,7 @@
 | GitHub | HMAC-SHA256 (`X-Hub-Signature-256`) | `/api/webhooks/github` only |
 | Server | Supabase service-role key (never shipped to clients) | Postgres |
 
-Every repository call is scoped by the authenticated user id. Supabase RLS is enabled on every table (owner-only `select` for the UI; no client policies at all for `user_secrets`, `worker_keys`, or operational writes). Server-side functions (`claim_jobs`, `next_task_number`, `apply_task_transition`, and the job-outcome lease functions) are `security definer` and revoked from `anon`/`authenticated`. Each privileged orchestration function fixes an empty `search_path`; transition and outcome functions also verify ownership plus task version or job attempt before recording idempotent state.
+Every repository call is scoped by the authenticated user id. Supabase RLS is enabled on every table (owner-only `select` for the UI; no client policies at all for `user_secrets`, `worker_keys`, or operational writes). Server-side functions (`claim_jobs`, `next_task_number`, `apply_task_transition`, and the job-outcome/webhook-delivery lease functions) are `security definer` and revoked from `anon`/`authenticated`. Each privileged orchestration function fixes an empty `search_path`; transition and outcome functions also verify ownership plus task version or job attempt before recording idempotent state. The global webhook-delivery ledger contains hashes and responses but no user content, and is accessible only to the service role.
 
 ## Secrets
 
@@ -27,7 +27,7 @@ Every repository call is scoped by the authenticated user id. Supabase RLS is en
 - **A05 Security misconfiguration** – Helmet CSP, strict CORS, rate limiting, `.env` ignored, no stack traces to clients.
 - **A06 Vulnerable components** – pinned versions, `pnpm audit` in CI.
 - **A07 Identification & auth failures** – Supabase Auth, JWT verification (JWKS or HS256), constant-time comparisons, key revocation.
-- **A08 Integrity failures** – webhook HMAC, worker results validated with schemas and fenced by durable outcome hashes/leases before effects are applied, tasks pinned to workflow snapshots.
+- **A08 Integrity failures** – webhook HMAC plus delivery-ID/payload-hash replay fencing, worker results validated with schemas and fenced by durable outcome hashes/leases before effects are applied, tasks pinned to workflow snapshots.
 - **A09 Logging failures** – structured pino logs, task event audit trail, job logs.
 - **A10 SSRF** – ticket import only fetches exact allow-listed provider hosts parsed from the URL; GitHub diff fetch only for `github.com/<owner>/<repo>/pull/<n>`.
 

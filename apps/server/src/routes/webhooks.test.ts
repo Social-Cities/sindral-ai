@@ -1,10 +1,12 @@
 import { createHmac } from 'node:crypto';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { completeNext, createTestApp, plan, pr, review, testConfig, verdict, type TestContext } from '../test/helpers.js';
 
 let ctx: TestContext;
+let deliverySequence = 0;
 beforeEach(async () => {
   ctx = await createTestApp();
+  deliverySequence = 0;
 });
 afterEach(async () => {
   await ctx.app.close();
@@ -22,12 +24,18 @@ function comment(overrides: Record<string, unknown> = {}, user: Record<string, u
   };
 }
 
-async function post(payload: unknown, opts: { signature?: string; event?: string } = {}) {
+async function post(payload: unknown, opts: { signature?: string; event?: string; delivery?: string; omitDelivery?: boolean } = {}) {
   const body = JSON.stringify(payload);
+  deliverySequence += 1;
   return ctx.app.inject({
     method: 'POST',
     url: '/api/webhooks/github',
-    headers: { 'content-type': 'application/json', 'x-github-event': opts.event ?? 'issue_comment', 'x-hub-signature-256': opts.signature ?? sign(body) },
+    headers: {
+      'content-type': 'application/json',
+      'x-github-event': opts.event ?? 'issue_comment',
+      'x-hub-signature-256': opts.signature ?? sign(body),
+      ...(!opts.omitDelivery ? { 'x-github-delivery': opts.delivery ?? `delivery-${deliverySequence}` } : {}),
+    },
     payload: body,
   });
 }
@@ -61,6 +69,16 @@ describe('GitHub webhook', () => {
     expect((await post(comment(), { signature: 'sha1=abc' })).statusCode).toBe(401);
   });
 
+  it('requires and durably replays GitHub delivery identifiers', async () => {
+    await taskInReview();
+    expect((await post(comment(), { omitDelivery: true })).statusCode).toBe(400);
+    const first = await post(comment(), { delivery: 'same-delivery' });
+    const replay = await post(comment(), { delivery: 'same-delivery' });
+    expect(replay.statusCode).toBe(first.statusCode);
+    expect(replay.json()).toEqual(first.json());
+    expect((await post(comment({ body: 'changed' }), { delivery: 'same-delivery' })).statusCode).toBe(409);
+  });
+
   it('ingests a PR comment as feedback and triggers the revision agent, idempotently', async () => {
     const task = await taskInReview();
     const res = await post(comment());
@@ -80,6 +98,21 @@ describe('GitHub webhook', () => {
     expect(dup.statusCode).toBe(200);
     expect(dup.json()).toMatchObject({ duplicate: true });
     expect((await ctx.repo.listMessages(ctx.userA, task.id)).filter((m) => m.source === 'github')).toHaveLength(1);
+  });
+
+  it('recovers when the comment is saved before feedback dispatch succeeds', async () => {
+    const task = await taskInReview();
+    vi.spyOn(ctx.repo, 'applyTaskTransition').mockRejectedValueOnce(new Error('transient transition failure'));
+    const first = await post(comment(), { delivery: 'retry-delivery' });
+    expect(first.statusCode).toBe(500);
+    expect((await ctx.repo.getTask(ctx.userA, task.id))?.state).toBe('in-review');
+
+    const retry = await post(comment(), { delivery: 'retry-delivery' });
+    expect(retry.statusCode).toBe(200);
+    expect(retry.json()).toEqual({ ok: true, duplicate: true, feedback: true });
+    expect((await ctx.repo.getTask(ctx.userA, task.id))?.state).toBe('implement-feedback');
+    expect((await ctx.repo.listMessages(ctx.userA, task.id)).filter((message) => message.source === 'github')).toHaveLength(1);
+    expect((await ctx.repo.listJobsForTask(ctx.userA, task.id)).filter((job) => job.status === 'queued')).toHaveLength(1);
   });
 
   it('handles review comments and ignores bots, sindral markers and non-PR comments', async () => {

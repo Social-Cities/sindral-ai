@@ -57,7 +57,7 @@ Create a task on the Home page (pick repositories and a workflow), click **Start
 
 ### GitHub comments as feedback
 
-Point a GitHub webhook (`issue_comment`, `pull_request_review_comment`, `pull_request`, JSON, secret = `GITHUB_WEBHOOK_SECRET`) at `https://<server>/api/webhooks/github`. Comments on PRs opened by Sindral become chat messages on the task; when the task is waiting for review they trigger an implement-feedback cycle. Pull-request events reconcile manual close/merge state.
+Point a GitHub webhook (`issue_comment`, `pull_request_review_comment`, `pull_request`, JSON, secret = `GITHUB_WEBHOOK_SECRET`) at `https://<server>/api/webhooks/github`. GitHub's standard `X-GitHub-Delivery` header is required and durably deduplicated. Comments on PRs opened by Sindral become chat messages on the task; when the task is waiting for review they trigger an implement-feedback cycle. Pull-request events reconcile manual close/merge state.
 
 ## Production
 

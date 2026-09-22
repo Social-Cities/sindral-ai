@@ -27,6 +27,8 @@ import {
   type WorkerPatch,
   type WorkflowInsert,
   type WorkflowPatch,
+  type WebhookDeliveryClaim,
+  type WebhookDeliveryResponse,
 } from './repository.js';
 
 type Owned<T> = T & { userId: string };
@@ -57,6 +59,10 @@ export class MemoryRepository implements Repository {
   private readonly workerKeys = new Map<string, WorkerKeyLookup>();
   private readonly secrets = new Map<string, StoredSecret>();
   private readonly transitionCommands = new Map<string, { requestHash: string; result: TaskTransitionResult }>();
+  private readonly webhookDeliveries = new Map<
+    string,
+    { eventName: string; payloadHash: string; token: string; startedAt: number; response: WebhookDeliveryResponse | null }
+  >();
   private logSeq = 0;
 
   private now(): string {
@@ -408,6 +414,29 @@ export class MemoryRepository implements Repository {
     this.messages.set(message.id, message);
     const { userId: _u, ...out } = message;
     return clone(out);
+  }
+
+  async beginWebhookDelivery(deliveryId: string, eventName: string, payloadHash: string): Promise<WebhookDeliveryClaim> {
+    const existing = this.webhookDeliveries.get(deliveryId);
+    if (existing) {
+      if (existing.eventName !== eventName || existing.payloadHash !== payloadHash) throw new ConflictError('GitHub delivery ID was reused with different content');
+      if (existing.response) return { state: 'replay', token: null, response: clone(existing.response) };
+      if (existing.startedAt > Date.now() - 30_000) return { state: 'busy', token: null, response: null };
+    }
+    const token = randomUUID();
+    this.webhookDeliveries.set(deliveryId, { eventName, payloadHash, token, startedAt: Date.now(), response: null });
+    return { state: 'acquired', token, response: null };
+  }
+
+  async finalizeWebhookDelivery(deliveryId: string, payloadHash: string, token: string, response: WebhookDeliveryResponse): Promise<void> {
+    const delivery = this.webhookDeliveries.get(deliveryId);
+    if (!delivery || delivery.payloadHash !== payloadHash || delivery.token !== token) throw new ConflictError('GitHub delivery lease was superseded');
+    delivery.response = clone(response);
+  }
+
+  async abandonWebhookDelivery(deliveryId: string, payloadHash: string, token: string): Promise<void> {
+    const delivery = this.webhookDeliveries.get(deliveryId);
+    if (delivery?.payloadHash === payloadHash && delivery.token === token && !delivery.response) this.webhookDeliveries.delete(deliveryId);
   }
 
   // ---- events ----

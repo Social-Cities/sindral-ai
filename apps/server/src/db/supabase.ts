@@ -51,6 +51,8 @@ import {
   type WorkerPatch,
   type WorkflowInsert,
   type WorkflowPatch,
+  type WebhookDeliveryClaim,
+  type WebhookDeliveryResponse,
 } from './repository.js';
 
 export function createSupabaseClient(url: string, serviceRoleKey: string): SupabaseClient {
@@ -723,6 +725,32 @@ export class SupabaseRepository implements Repository {
       if (err instanceof ConflictError && input.externalId) return null;
       throw err;
     }
+  }
+
+  async beginWebhookDelivery(deliveryId: string, eventName: string, payloadHash: string): Promise<WebhookDeliveryClaim> {
+    try {
+      return await run<WebhookDeliveryClaim>(
+        this.client.rpc('begin_webhook_delivery', { p_delivery_id: deliveryId, p_event_name: eventName, p_payload_hash: payloadHash }),
+      );
+    } catch (error) {
+      if (error instanceof RepositoryError && ['22023', '40001'].includes(error.code ?? '')) throw new ConflictError(error.message);
+      throw error;
+    }
+  }
+
+  async finalizeWebhookDelivery(deliveryId: string, payloadHash: string, token: string, response: WebhookDeliveryResponse): Promise<void> {
+    await run(
+      this.client.rpc('finalize_webhook_delivery', {
+        p_delivery_id: deliveryId,
+        p_payload_hash: payloadHash,
+        p_token: token,
+        p_response: response,
+      }),
+    );
+  }
+
+  async abandonWebhookDelivery(deliveryId: string, payloadHash: string, token: string): Promise<void> {
+    await run(this.client.rpc('abandon_webhook_delivery', { p_delivery_id: deliveryId, p_payload_hash: payloadHash, p_token: token }));
   }
 
   // ---- events ----

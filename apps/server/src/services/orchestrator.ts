@@ -225,11 +225,14 @@ export class Orchestrator {
   ): Promise<{ message: Message | null; task: Task }> {
     let task = await this.getTask(userId, taskId);
     const message = await this.repo.createMessage(userId, { taskId, role: 'user', content, source, externalId: externalId ?? null });
-    if (!message) return { message: null, task };
     const workflow = await this.resolveWorkflow(userId, task);
     if (workflow && chatTriggersFeedback(task, workflow)) {
-      task = await this.applyEvent(userId, task, 'feedback', { actor: 'user', detail: { source } });
-    } else {
+      task = await this.applyEvent(userId, task, 'feedback', {
+        actor: 'user',
+        detail: { source },
+        ...(externalId ? { idempotencyKey: `message:${source}:${task.id}:${externalId}:feedback` } : {}),
+      });
+    } else if (message) {
       this.hub.publish(userId, { type: 'task.updated', taskId });
     }
     return { message, task };

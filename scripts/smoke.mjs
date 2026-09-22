@@ -117,7 +117,7 @@ const raw = JSON.stringify({ action: 'created', comment: { id: 1, body: 'x', use
 const badSig = await j(`${API}/api/webhooks/github`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-github-event': 'issue_comment', 'x-hub-signature-256': 'sha256=deadbeef' }, body: raw });
 ok(badSig.status === 401, 'webhook with bad signature rejected');
 const sig = 'sha256=' + crypto.createHmac('sha256', WEBHOOK_SECRET).update(raw).digest('hex');
-const goodSig = await j(`${API}/api/webhooks/github`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-github-event': 'issue_comment', 'x-hub-signature-256': sig }, body: raw });
+const goodSig = await j(`${API}/api/webhooks/github`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-github-event': 'issue_comment', 'x-github-delivery': `smoke-${Date.now()}`, 'x-hub-signature-256': sig }, body: raw });
 ok(goodSig.status === 202, 'webhook with valid signature accepted (no matching PR -> ignored)');
 
 // cross-user isolation

@@ -159,6 +159,17 @@ export interface JobOutcomeClaim {
   token: string | null;
 }
 
+export interface WebhookDeliveryResponse {
+  statusCode: number;
+  body: Record<string, unknown>;
+}
+
+export interface WebhookDeliveryClaim {
+  state: 'acquired' | 'busy' | 'replay';
+  token: string | null;
+  response: WebhookDeliveryResponse | null;
+}
+
 export interface TaskTransitionCommand {
   taskId: string;
   expectedVersion: number;
@@ -282,6 +293,11 @@ export interface Repository {
   listMessages(userId: string, taskId: string): Promise<Message[]>;
   /** Returns null when `externalId` already exists for the task (idempotent ingestion). */
   createMessage(userId: string, input: MessageInsert): Promise<Message | null>;
+
+  // webhook deliveries
+  beginWebhookDelivery(deliveryId: string, eventName: string, payloadHash: string): Promise<WebhookDeliveryClaim>;
+  finalizeWebhookDelivery(deliveryId: string, payloadHash: string, token: string, response: WebhookDeliveryResponse): Promise<void>;
+  abandonWebhookDelivery(deliveryId: string, payloadHash: string, token: string): Promise<void>;
 
   // events
   listEvents(userId: string, taskId: string): Promise<TaskEvent[]>;

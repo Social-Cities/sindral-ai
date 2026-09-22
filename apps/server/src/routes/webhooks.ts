@@ -1,8 +1,9 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { chatTriggersFeedback } from '@sindral/shared';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import type { RouteOptions } from '../context.js';
-import { badRequest, serviceUnavailable, unauthorized } from '../errors.js';
+import { ConflictError } from '../db/repository.js';
+import { badRequest, conflict, serviceUnavailable, unauthorized } from '../errors.js';
 
 export const SINDRAL_MARKER = '<!-- sindral -->';
 
@@ -87,28 +88,50 @@ export const webhookRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx
     }
 
     const eventName = headerValue(request, 'x-github-event');
+    const deliveryId = headerValue(request, 'x-github-delivery');
+    if (!eventName || !deliveryId) throw badRequest('Missing GitHub event or delivery identifier');
+    const payloadHash = createHash('sha256').update(raw, 'utf8').digest('hex');
+    let delivery;
+    try {
+      delivery = await ctx.repo.beginWebhookDelivery(deliveryId, eventName, payloadHash);
+    } catch (error) {
+      if (error instanceof ConflictError) throw conflict(error.message);
+      throw error;
+    }
+    if (delivery.state === 'replay' && delivery.response) return reply.code(delivery.response.statusCode).send(delivery.response.body);
+    if (delivery.state === 'busy' || !delivery.token) throw serviceUnavailable('GitHub delivery is already being processed; retry shortly');
+    const finish = async (statusCode: number, body: Record<string, unknown>) => {
+      await ctx.repo.finalizeWebhookDelivery(deliveryId, payloadHash, delivery.token!, { statusCode, body });
+      return reply.code(statusCode).send(body);
+    };
+
     const payload = (request.body ?? {}) as GitHubWebhookPayload;
-    const prState = extractPrState(eventName, payload);
-    if (prState) {
-      const matched = await ctx.orchestrator.reconcilePullRequest(prState.prUrl, prState.status, prState.mergedAt);
-      return reply.code(matched ? 200 : 202).send({ ok: true, ...(matched ? { reconciled: true } : { ignored: 'no task for pull request' }) });
-    }
-    const extracted = extractPrComment(eventName, payload);
-    if (!extracted) return reply.code(202).send({ ok: true, ignored: 'unsupported event' });
-    const { prUrl, comment } = extracted;
-    const body = comment.body ?? '';
-    if (comment.user?.type === 'Bot' || body.includes(SINDRAL_MARKER) || comment.id === undefined || body.trim() === '') {
-      return reply.code(202).send({ ok: true, ignored: 'bot or marker comment' });
-    }
+    try {
+      const prState = extractPrState(eventName, payload);
+      if (prState) {
+        const matched = await ctx.orchestrator.reconcilePullRequest(prState.prUrl, prState.status, prState.mergedAt);
+        return finish(matched ? 200 : 202, { ok: true, ...(matched ? { reconciled: true } : { ignored: 'no task for pull request' }) });
+      }
+      const extracted = extractPrComment(eventName, payload);
+      if (!extracted) return finish(202, { ok: true, ignored: 'unsupported event' });
+      const { prUrl, comment } = extracted;
+      const body = comment.body ?? '';
+      if (comment.user?.type === 'Bot' || body.includes(SINDRAL_MARKER) || comment.id === undefined || body.trim() === '') {
+        return finish(202, { ok: true, ignored: 'bot or marker comment' });
+      }
 
-    const task = await ctx.repo.findTaskByPrUrl(prUrl);
-    if (!task) return reply.code(202).send({ ok: true, ignored: 'no task for pull request' });
+      const task = await ctx.repo.findTaskByPrUrl(prUrl);
+      if (!task) return finish(202, { ok: true, ignored: 'no task for pull request' });
 
-    const login = comment.user?.login ?? 'someone';
-    const content = `@${login} on GitHub:\n\n${body}`;
-    const workflow = await ctx.orchestrator.resolveWorkflow(task.userId, task);
-    const triggers = workflow ? chatTriggersFeedback(task, workflow) : false;
-    const { message } = await ctx.orchestrator.postUserMessage(task.userId, task.id, content, 'github', String(comment.id));
-    return reply.code(200).send({ ok: true, duplicate: message === null, feedback: message !== null && triggers });
+      const login = comment.user?.login ?? 'someone';
+      const content = `@${login} on GitHub:\n\n${body}`;
+      const workflow = await ctx.orchestrator.resolveWorkflow(task.userId, task);
+      const triggers = workflow ? chatTriggersFeedback(task, workflow) : false;
+      const { message } = await ctx.orchestrator.postUserMessage(task.userId, task.id, content, 'github', String(comment.id));
+      return finish(200, { ok: true, duplicate: message === null, feedback: triggers });
+    } catch (error) {
+      await ctx.repo.abandonWebhookDelivery(deliveryId, payloadHash, delivery.token);
+      throw error;
+    }
   });
 };
