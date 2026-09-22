@@ -188,8 +188,8 @@ export class WorkspaceManager {
     const resumed = !remoteBranch.failed && remoteBranch.exitCode === 0;
     const startPoint = resumed ? `origin/${opts.branch}` : `origin/${opts.baseBranch}`;
 
-    const existing = await this.listWorktrees(opts.repoDir);
-    if (existing.includes(opts.dir) && (await exists(opts.dir))) {
+    const existing = await findEquivalentPath(await this.listWorktrees(opts.repoDir), opts.dir);
+    if (existing && (await exists(opts.dir))) {
       await assertPathContained(this.paths.worktrees, opts.dir);
       const wt = this.git(opts.dir, opts.auth);
       await wt.try(['checkout', opts.branch]);
@@ -259,7 +259,8 @@ export class WorkspaceManager {
     for (const dir of repoDirs) {
       if (!(await safeRoot(dir))) continue;
       for (const wt of await this.listWorktrees(dir)) {
-        const rel = path.relative(this.paths.worktrees, wt);
+        const rel = await canonicalRelative(this.paths.worktrees, wt);
+        if (rel === null) continue;
         const taskKey = rel.split(path.sep)[0];
         if (rel.startsWith('..') || path.isAbsolute(rel) || !taskKey) continue;
         const taskDir = path.join(this.paths.worktrees, taskKey);
@@ -351,4 +352,22 @@ async function listEntries(base: string) {
 async function touch(candidate: string): Promise<void> {
   const now = new Date();
   await fs.utimes(candidate, now, now);
+}
+
+async function findEquivalentPath(candidates: string[], target: string): Promise<string | null> {
+  const realTarget = await fs.realpath(target).catch(() => null);
+  if (!realTarget) return null;
+  for (const candidate of candidates) {
+    const realCandidate = await fs.realpath(candidate).catch(() => null);
+    if (realCandidate === realTarget) return candidate;
+  }
+  return null;
+}
+
+async function canonicalRelative(root: string, candidate: string): Promise<string | null> {
+  const [realRoot, realCandidate] = await Promise.all([fs.realpath(root).catch(() => null), fs.realpath(candidate).catch(() => null)]);
+  if (!realRoot || !realCandidate) return null;
+  const relative = path.relative(realRoot, realCandidate);
+  if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
+  return relative;
 }

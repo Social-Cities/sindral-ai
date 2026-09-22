@@ -78,11 +78,14 @@ export async function runConflictResolution(opts: ConflictResolutionOptions): Pr
   const dir = worktreeDir(opts.config.workdir, `conflict__${payload.taskKey}`, repo);
   await repoGit.try(['worktree', 'remove', '--force', dir]);
   await fs.rm(dir, { recursive: true, force: true });
+  await fs.mkdir(opts.config.workdir, { recursive: true, mode: 0o700 });
   await fs.mkdir(path.dirname(dir), { recursive: true });
+  await assertPathContained(opts.config.workdir, path.dirname(dir));
   await repoGit(['worktree', 'add', '--detach', dir, payload.sourceSha]);
   // Real git creates the directory; keeping this idempotent also makes custom
   // GitFactory implementations obey the workspace contract.
   await fs.mkdir(dir, { recursive: true });
+  await assertPathContained(opts.config.workdir, dir);
   const wt = gitFactory(dir, auth);
   try {
     const rebase = await wt.try(['-c', 'user.name=Sindral AI', '-c', 'user.email=sindral@users.noreply.github.com', 'rebase', payload.targetSha]);

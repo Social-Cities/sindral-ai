@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { RebaseResult, RebaseStackJobPayload } from '@sindral/shared';
 import { assertBranchName, gitAuth, gitIn } from './git.js';
 import type { Redactor } from './redact.js';
-import { findWorktreeForBranch, parseRepo, worktreeDir, type GitFactory, type WorkspaceManager } from './workspace.js';
+import { assertPathContained, findWorktreeForBranch, parseRepo, worktreeDir, type GitFactory, type WorkspaceManager } from './workspace.js';
 
 export interface RebaseStackOptions {
   payload: RebaseStackJobPayload;
@@ -104,10 +104,21 @@ async function ensureBranchWorktree(
   taskId: string,
 ): Promise<string> {
   const existing = await findWorktreeForBranch(repoGit, branch);
-  if (existing) return existing;
+  if (existing) {
+    try {
+      await assertPathContained(workdir, existing);
+      return existing;
+    } catch {
+      // A stale worktree registration is not reusable; create a fresh one.
+    }
+  }
   const dir = worktreeDir(workdir, `rebase__${taskId}`, repo);
   await fs.rm(dir, { recursive: true, force: true });
+  await fs.mkdir(workdir, { recursive: true, mode: 0o700 });
   await fs.mkdir(path.dirname(dir), { recursive: true });
+  await assertPathContained(workdir, path.dirname(dir));
   await repoGit(['worktree', 'add', '-B', branch, dir, `origin/${branch}`]);
+  await fs.mkdir(dir, { recursive: true });
+  await assertPathContained(workdir, dir);
   return dir;
 }

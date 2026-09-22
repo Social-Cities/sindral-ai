@@ -67,6 +67,7 @@ describe('runRebaseStack', () => {
 
   it('reuses a worktree that already has the branch checked out and reports full success', async () => {
     const existing = path.join(workdir, 'worktrees', 'ENG-1', 'widgets');
+    await fs.mkdir(existing, { recursive: true });
     const git = fakeGit((args) => {
       if (args[0] === 'worktree' && args[1] === 'list') return ok(`worktree ${existing}\nbranch refs/heads/sindral/eng-1\n`);
       return undefined;
