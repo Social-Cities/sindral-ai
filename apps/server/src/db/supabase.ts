@@ -41,6 +41,8 @@ import {
   type TaskInsert,
   type TaskPatch,
   type TaskRepositoryUpsert,
+  type TaskTransitionCommand,
+  type TaskTransitionResult,
   type PullRequestUpsert,
   type WorkerInsert,
   type WorkerKeyInsert,
@@ -74,6 +76,7 @@ interface WorkflowRow {
 interface TaskRow {
   id: string;
   user_id: string;
+  version: number;
   key: string;
   title: string;
   description: string;
@@ -234,6 +237,7 @@ const mapWorkflow = (r: WorkflowRow): WorkflowRecord => ({
 const mapTask = (r: TaskRow): Task => ({
   id: r.id,
   userId: r.user_id,
+  version: Number(r.version),
   key: r.key,
   title: r.title,
   description: r.description,
@@ -527,6 +531,62 @@ export class SupabaseRepository implements Repository {
       this.client.from('tasks').update(taskPatchToRow(patch)).eq('user_id', userId).eq('id', id).select('*').maybeSingle(),
     );
     return row ? mapTask(row) : null;
+  }
+
+  async getTaskTransitionReplay(userId: string, idempotencyKey: string, requestHash: string): Promise<TaskTransitionResult | null> {
+    const row = await run<{ request_hash: string; response: { task: TaskRow; job: JobRow | null; replayed: boolean } | null } | null>(
+      this.client
+        .from('idempotency_keys')
+        .select('request_hash,response')
+        .eq('user_id', userId)
+        .eq('idempotency_key', idempotencyKey)
+        .eq('operation', 'task-transition')
+        .maybeSingle(),
+    );
+    if (!row) return null;
+    if (row.request_hash !== requestHash) throw new ConflictError('Idempotency key was already used for a different request');
+    if (!row.response) throw new ConflictError('Idempotent command is still in progress');
+    return {
+      task: mapTask(row.response.task),
+      job: row.response.job ? mapJob(row.response.job) : null,
+      replayed: true,
+    };
+  }
+
+  async applyTaskTransition(userId: string, command: TaskTransitionCommand): Promise<TaskTransitionResult> {
+    const event = command.event;
+    const job = command.job;
+    try {
+      const response = await run<{ task: TaskRow; job: JobRow | null; replayed: boolean }>(
+        this.client.rpc('apply_task_transition', {
+          p_user_id: userId,
+          p_task_id: command.taskId,
+          p_expected_version: command.expectedVersion,
+          p_idempotency_key: command.idempotencyKey,
+          p_request_hash: command.requestHash,
+          p_next_state: command.patch.state,
+          p_next_step_id: command.patch.currentStepId,
+          p_failed_step_id: command.patch.failedStepId,
+          p_pin_workflow: command.patch.pinnedWorkflow !== undefined,
+          p_pinned_workflow: command.patch.pinnedWorkflow ?? null,
+          p_event: {
+            type: event.type,
+            fromState: event.fromState ?? null,
+            toState: event.toState ?? null,
+            stepId: event.stepId ?? null,
+            detail: event.detail ?? null,
+          },
+          p_job: job ? { kind: job.kind, stepId: job.stepId, payload: job.payload } : null,
+          p_cancel_queued: command.cancelQueuedJobs ?? false,
+        }),
+      );
+      return { task: mapTask(response.task), job: response.job ? mapJob(response.job) : null, replayed: response.replayed };
+    } catch (error) {
+      if (error instanceof RepositoryError && (error.code === '40001' || error.code === '22023' || error.code === '42501')) {
+        throw new ConflictError(error.message);
+      }
+      throw error;
+    }
   }
 
   async deleteTask(userId: string, id: string): Promise<boolean> {

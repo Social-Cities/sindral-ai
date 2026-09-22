@@ -18,6 +18,8 @@
     "db:start": "supabase start",
     "db:reset": "supabase db reset",
     "db:migrate": "supabase db push",
+    "db:test": "supabase test db",
+    "db:lint": "supabase db lint --local --level warning",
     "smoke": "node scripts/smoke.mjs"
   },
   "devDependencies": {

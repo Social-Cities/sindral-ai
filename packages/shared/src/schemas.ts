@@ -65,6 +65,7 @@ export const updateTaskSchema = z.object({
 
 export const taskActionSchema = z.object({
   event: z.string().trim().min(1).max(32).regex(/^[a-z][a-z0-9-_]*$/),
+  expectedVersion: z.number().int().nonnegative(),
 });
 
 export const sendMessageSchema = z.object({

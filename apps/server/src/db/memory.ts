@@ -17,6 +17,8 @@ import {
   type TaskInsert,
   type TaskPatch,
   type TaskRepositoryUpsert,
+  type TaskTransitionCommand,
+  type TaskTransitionResult,
   type PullRequestUpsert,
   type WorkerInsert,
   type WorkerKeyInsert,
@@ -51,6 +53,7 @@ export class MemoryRepository implements Repository {
   private readonly workers = new Map<string, Worker>();
   private readonly workerKeys = new Map<string, WorkerKeyLookup>();
   private readonly secrets = new Map<string, StoredSecret>();
+  private readonly transitionCommands = new Map<string, { requestHash: string; result: TaskTransitionResult }>();
   private logSeq = 0;
 
   private now(): string {
@@ -125,6 +128,7 @@ export class MemoryRepository implements Repository {
     const task: Task = {
       id: randomUUID(),
       userId,
+      version: 0,
       key: input.key,
       title: input.title,
       description: input.description,
@@ -178,6 +182,86 @@ export class MemoryRepository implements Repository {
     if (!t || t.userId !== userId) return null;
     Object.assign(t, clone(patch), { updatedAt: this.now() });
     return clone(t);
+  }
+
+  async getTaskTransitionReplay(userId: string, idempotencyKey: string, requestHash: string): Promise<TaskTransitionResult | null> {
+    const recorded = this.transitionCommands.get(`${userId}:${idempotencyKey}`);
+    if (!recorded) return null;
+    if (recorded.requestHash !== requestHash) throw new ConflictError('Idempotency key was already used for a different request');
+    return clone({ ...recorded.result, replayed: true });
+  }
+
+  async applyTaskTransition(userId: string, command: TaskTransitionCommand): Promise<TaskTransitionResult> {
+    const ledgerKey = `${userId}:${command.idempotencyKey}`;
+    const recorded = this.transitionCommands.get(ledgerKey);
+    if (recorded) {
+      if (recorded.requestHash !== command.requestHash) throw new ConflictError('Idempotency key was already used for a different request');
+      return clone({ ...recorded.result, replayed: true });
+    }
+
+    const task = this.tasks.get(command.taskId);
+    if (!task || task.userId !== userId) throw new ConflictError('Task does not exist or is not owned by this user');
+    if (task.version !== command.expectedVersion) {
+      throw new ConflictError(`Task version ${command.expectedVersion} is stale; current version is ${task.version}`);
+    }
+
+    Object.assign(task, clone(command.patch), { version: task.version + 1, updatedAt: this.now() });
+    const event: Owned<TaskEvent> = {
+      id: randomUUID(),
+      userId,
+      taskId: command.event.taskId,
+      type: command.event.type,
+      fromState: command.event.fromState ?? null,
+      toState: command.event.toState ?? null,
+      stepId: command.event.stepId ?? null,
+      detail: command.event.detail ? clone(command.event.detail) : null,
+      createdAt: this.now(),
+    };
+    this.events.set(event.id, event);
+
+    let job: Job | null = null;
+    if (command.job) {
+      job = {
+        id: randomUUID(),
+        userId,
+        taskId: command.job.taskId,
+        kind: command.job.kind,
+        stepId: command.job.stepId,
+        status: 'queued',
+        workerId: null,
+        attempt: 1,
+        payload: clone(command.job.payload),
+        result: null,
+        error: null,
+        createdAt: this.now(),
+        claimedAt: null,
+        finishedAt: null,
+      };
+      this.jobs.set(job.id, job);
+      const queued: Owned<TaskEvent> = {
+        id: randomUUID(),
+        userId,
+        taskId: command.taskId,
+        type: 'job-queued',
+        fromState: null,
+        toState: null,
+        stepId: job.stepId,
+        detail: { jobId: job.id, kind: job.kind },
+        createdAt: this.now(),
+      };
+      this.events.set(queued.id, queued);
+    }
+    if (command.cancelQueuedJobs) {
+      for (const candidate of this.jobs.values()) {
+        if (candidate.userId === userId && candidate.taskId === command.taskId && candidate.status === 'queued' && candidate.id !== job?.id) {
+          candidate.status = 'cancelled';
+          candidate.finishedAt = this.now();
+        }
+      }
+    }
+    const result = { task: clone(task), job: job ? clone(job) : null, replayed: false };
+    this.transitionCommands.set(ledgerKey, { requestHash: command.requestHash, result: clone(result) });
+    return result;
   }
 
   async deleteTask(userId: string, id: string): Promise<boolean> {

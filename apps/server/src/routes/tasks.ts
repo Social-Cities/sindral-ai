@@ -44,8 +44,12 @@ export const taskRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx })
 
   app.post('/api/tasks/:id/actions', async (request) => {
     const { id } = validate(idParamsSchema, request.params);
-    const { event } = validate(taskActionSchema, request.body);
-    const task = await orchestrator.applyUserEvent(request.user!.id, id, event);
+    const { event, expectedVersion } = validate(taskActionSchema, request.body);
+    const idempotencyKey = request.headers['idempotency-key'];
+    if (typeof idempotencyKey !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,199}$/.test(idempotencyKey)) {
+      throw badRequest('A valid Idempotency-Key header is required');
+    }
+    const task = await orchestrator.applyUserEvent(request.user!.id, id, event, expectedVersion, idempotencyKey);
     return { task };
   });
 

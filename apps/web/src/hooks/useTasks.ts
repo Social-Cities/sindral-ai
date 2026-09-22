@@ -91,7 +91,11 @@ export function useTaskAction(taskId: string, workflow: Workflow | null) {
   const qc = useQueryClient();
   const key = queryKeys.task(taskId);
   return useMutation({
-    mutationFn: (event: string) => runTaskAction(taskId, event),
+    mutationFn: (event: string) => {
+      const task = qc.getQueryData<TaskWithRelations>(key);
+      if (!task) throw new ApiError(409, 'CONFLICT', 'Task data is stale; refresh and try again');
+      return runTaskAction(taskId, event, task.version);
+    },
     onMutate: async (event) => {
       await qc.cancelQueries({ queryKey: key });
       const previous = qc.getQueryData<TaskWithRelations>(key);

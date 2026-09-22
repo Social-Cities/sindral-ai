@@ -57,6 +57,28 @@ describe('task creation', () => {
   });
 });
 
+describe('atomic task commands', () => {
+  it('replays a concurrent duplicate and fences a concurrent distinct command', async () => {
+    const duplicateTask = await newTask();
+    const duplicate = await Promise.all([
+      orch().applyUserEvent(userId, duplicateTask.id, 'start', duplicateTask.version, 'concurrent-same-key'),
+      orch().applyUserEvent(userId, duplicateTask.id, 'start', duplicateTask.version, 'concurrent-same-key'),
+    ]);
+    expect(duplicate[0]).toEqual(duplicate[1]);
+    expect(await queuedJobs(duplicateTask.id)).toHaveLength(1);
+    expect((await ctx.repo.listEvents(userId, duplicateTask.id)).filter((event) => event.type === 'transition')).toHaveLength(1);
+
+    const racingTask = await newTask();
+    const racing = await Promise.allSettled([
+      orch().applyUserEvent(userId, racingTask.id, 'start', racingTask.version, 'concurrent-key-one'),
+      orch().applyUserEvent(userId, racingTask.id, 'start', racingTask.version, 'concurrent-key-two'),
+    ]);
+    expect(racing.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(racing.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    expect(await queuedJobs(racingTask.id)).toHaveLength(1);
+  });
+});
+
 describe('full SDLC happy path', () => {
   it('moves from todo to done through worker completions and pins the workflow on first start', async () => {
     let task = await newTask();

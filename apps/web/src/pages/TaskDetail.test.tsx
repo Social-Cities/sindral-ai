@@ -105,7 +105,7 @@ describe('TaskDetail', () => {
     setup(task);
     await user.click(await screen.findByRole('button', { name: 'Start Planning' }));
     expect(screen.getByTestId('status-badge')).toHaveTextContent('Planning');
-    expect(api.runTaskAction).toHaveBeenCalledWith('t6', 'start');
+    expect(api.runTaskAction).toHaveBeenCalledWith('t6', 'start', 0);
     reject(new api.ApiError(409, 'INVALID_EVENT', 'Nope'));
     await waitFor(() => expect(screen.getByTestId('status-badge')).toHaveTextContent('Todo'));
     expect(await screen.findByRole('alert')).toHaveTextContent('Nope');

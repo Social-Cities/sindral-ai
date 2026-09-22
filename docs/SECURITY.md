@@ -9,7 +9,7 @@
 | GitHub | HMAC-SHA256 (`X-Hub-Signature-256`) | `/api/webhooks/github` only |
 | Server | Supabase service-role key (never shipped to clients) | Postgres |
 
-Every repository call is scoped by the authenticated user id. Supabase RLS is enabled on every table (owner-only `select` for the UI; no client policies at all for `user_secrets`, `worker_keys`, `jobs` writes). Server-side functions (`claim_jobs`, `next_task_number`) are `security definer` and revoked from `anon`/`authenticated`.
+Every repository call is scoped by the authenticated user id. Supabase RLS is enabled on every table (owner-only `select` for the UI; no client policies at all for `user_secrets`, `worker_keys`, or operational writes). Server-side functions (`claim_jobs`, `next_task_number`, `apply_task_transition`) are `security definer` and revoked from `anon`/`authenticated`; the transition function also fixes an empty `search_path`, checks task ownership and version, and records idempotent responses.
 
 ## Secrets
 

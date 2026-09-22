@@ -149,6 +149,28 @@ export interface JobInsert {
   payload: JobPayload;
 }
 
+export interface TaskTransitionCommand {
+  taskId: string;
+  expectedVersion: number;
+  idempotencyKey: string;
+  requestHash: string;
+  patch: {
+    state: Task['state'];
+    currentStepId: string | null;
+    failedStepId: string | null;
+    pinnedWorkflow?: Workflow | null;
+  };
+  event: EventInsert;
+  job?: JobInsert;
+  cancelQueuedJobs?: boolean;
+}
+
+export interface TaskTransitionResult {
+  task: Task;
+  job: Job | null;
+  replayed: boolean;
+}
+
 export type JobPatch = Partial<Pick<Job, 'status' | 'workerId' | 'attempt' | 'result' | 'error' | 'claimedAt' | 'finishedAt'>>;
 
 export type JobLogType = 'log' | 'progress' | 'message';
@@ -228,6 +250,10 @@ export interface Repository {
   listTasks(userId: string, filter: TaskFilter): Promise<Task[]>;
   listSubtasks(userId: string, parentTaskId: string): Promise<Task[]>;
   updateTask(userId: string, id: string, patch: TaskPatch): Promise<Task | null>;
+  /** Returns a completed replay, null for a new key, and rejects key reuse with a different hash. */
+  getTaskTransitionReplay(userId: string, idempotencyKey: string, requestHash: string): Promise<TaskTransitionResult | null>;
+  /** Atomically applies a versioned transition, its audit events, and optional queued job. */
+  applyTaskTransition(userId: string, command: TaskTransitionCommand): Promise<TaskTransitionResult>;
   deleteTask(userId: string, id: string): Promise<boolean>;
   /** Cross-user: used by the GitHub webhook which carries no user context. */
   findTaskByPrUrl(prUrl: string): Promise<Task | null>;

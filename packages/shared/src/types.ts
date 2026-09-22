@@ -175,6 +175,8 @@ export interface PullRequest {
 export interface Task {
   id: string;
   userId: string;
+  /** Monotonic optimistic-concurrency token incremented by durable workflow commands. */
+  version: number;
   /** Human-friendly key, e.g. ENG-142 (ticket id) or SIN-17. */
   key: string;
   title: string;

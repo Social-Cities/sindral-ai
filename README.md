@@ -77,6 +77,8 @@ Run the server behind TLS. Use a hosted Supabase project, apply migrations with 
 | `pnpm lint` | eslint (typescript-eslint) |
 | `pnpm build` | production builds |
 | `pnpm db:reset` | recreate the local database from migrations |
+| `pnpm db:test` | run pgTAP transaction, idempotency, and RLS tests against local Supabase |
+| `pnpm db:lint` | lint the local Postgres schema |
 | `pnpm smoke` | live end-to-end check against a running server + Supabase (see `scripts/smoke.mjs`) |
 
 The smoke test drives the real stack: sign-up, task creation, the plan → feedback → approve →

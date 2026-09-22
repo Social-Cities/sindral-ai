@@ -36,6 +36,16 @@ const api = (p, init = {}) => {
   const headers = init.body ? { ...H, ...(init.headers ?? {}) } : { authorization: H.authorization, ...(init.headers ?? {}) };
   return j(`${API}${p}`, { ...init, headers });
 };
+let actionSequence = 0;
+const action = async (taskId, event) => {
+  const current = await api(`/api/tasks/${taskId}`);
+  actionSequence += 1;
+  return api(`/api/tasks/${taskId}/actions`, {
+    method: 'POST',
+    headers: { 'idempotency-key': `smoke-action-${actionSequence}` },
+    body: JSON.stringify({ event, expectedVersion: current.body.task.version }),
+  });
+};
 
 ok((await j(`${API}/api/tasks`)).status === 401, 'unauthenticated request rejected with 401');
 const me = await api('/api/me'); ok(me.status === 200 && me.body.user.email === email, 'GET /api/me');
@@ -50,9 +60,9 @@ const bad = await api('/api/tasks', { method: 'POST', body: JSON.stringify({ tit
 ok(bad.status === 400 && bad.body.error.code === 'VALIDATION_ERROR', 'validation error on bad task input');
 
 // start planning -> job queued
-const st = await api(`/api/tasks/${taskId}/actions`, { method: 'POST', body: JSON.stringify({ event: 'start' }) });
+const st = await action(taskId, 'start');
 ok(st.status === 200 && st.body.task.state === 'planning' && st.body.task.pinnedWorkflow, 'start -> planning, workflow pinned');
-const inv = await api(`/api/tasks/${taskId}/actions`, { method: 'POST', body: JSON.stringify({ event: 'approve' }) });
+const inv = await action(taskId, 'approve');
 ok(inv.status === 409, 'invalid transition -> 409');
 
 // worker key + register + claim (exercises claim_jobs SQL)
@@ -88,7 +98,7 @@ await w(`/api/worker/jobs/${c3.body.jobs[0].job.id}/complete`, { attempt: c3.bod
 t = (await api(`/api/tasks/${taskId}`)).body.task; ok(t.state === 'plan-review' && t.plan === '# Plan v2', 'back to plan-review with revised plan');
 
 // approve -> subtask 1 starts instead of parent implement
-const ap = await api(`/api/tasks/${taskId}/actions`, { method: 'POST', body: JSON.stringify({ event: 'approve' }) });
+const ap = await action(taskId, 'approve');
 ok(ap.status === 200 && ap.body.task.state === 'implement', 'approve -> parent implement');
 const c4 = await w('/api/worker/jobs/claim', { workerId: reg.body.workerId, max: 3 });
 ok(c4.body.jobs.length === 1 && c4.body.jobs[0].job.taskId !== taskId && c4.body.jobs[0].job.payload.step.id === 'planning', 'subtask #1 planning dispatched (not parent implement)');

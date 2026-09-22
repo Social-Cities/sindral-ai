@@ -18,6 +18,18 @@ afterEach(async () => {
 
 const asA = () => ({ authorization: `Bearer ${ctx.tokenA}` });
 const asB = () => ({ authorization: `Bearer ${ctx.tokenB}` });
+let actionSequence = 0;
+
+async function taskAction(taskId: string, event: string, headers = asA()) {
+  actionSequence += 1;
+  const current = await ctx.repo.getTask(ctx.userA, taskId);
+  return ctx.app.inject({
+    method: 'POST',
+    url: `/api/tasks/${taskId}/actions`,
+    headers: { ...headers, 'idempotency-key': `route-test-${actionSequence}` },
+    payload: { event, expectedVersion: current?.version ?? 0 },
+  });
+}
 
 async function createTask(headers = asA(), payload: Record<string, unknown> = { title: 'Task', repos: ['acme/app'] }): Promise<Task> {
   const res = await ctx.app.inject({ method: 'POST', url: '/api/tasks', headers, payload });
@@ -54,7 +66,7 @@ describe('tasks API', () => {
       const res = await ctx.app.inject({ method, url: `/api/tasks/${task.id}`, headers: asB(), payload: method === 'PATCH' ? { title: 'pwned' } : undefined });
       expect(res.statusCode, method).toBe(404);
     }
-    expect((await ctx.app.inject({ method: 'POST', url: `/api/tasks/${task.id}/actions`, headers: asB(), payload: { event: 'start' } })).statusCode).toBe(404);
+    expect((await taskAction(task.id, 'start', asB())).statusCode).toBe(404);
     expect((await ctx.app.inject({ method: 'POST', url: `/api/tasks/${task.id}/messages`, headers: asB(), payload: { content: 'hi' } })).statusCode).toBe(404);
     expect((await ctx.app.inject({ method: 'GET', url: `/api/tasks/${task.id}/jobs`, headers: asB() })).statusCode).toBe(404);
     const listB = await ctx.app.inject({ method: 'GET', url: '/api/tasks', headers: asB() });
@@ -64,20 +76,47 @@ describe('tasks API', () => {
 
   it('returns 409 for invalid transitions and 404 for unknown tasks', async () => {
     const task = await createTask();
-    const res = await ctx.app.inject({ method: 'POST', url: `/api/tasks/${task.id}/actions`, headers: asA(), payload: { event: 'approve' } });
+    const res = await taskAction(task.id, 'approve');
     expect(res.statusCode).toBe(409);
     expect(res.json()).toMatchObject({ error: { code: 'INVALID_TRANSITION' } });
-    expect((await ctx.app.inject({ method: 'POST', url: `/api/tasks/${task.id}/actions`, headers: asA(), payload: { event: 'Bad Event' } })).statusCode).toBe(400);
-    const ok = await ctx.app.inject({ method: 'POST', url: `/api/tasks/${task.id}/actions`, headers: asA(), payload: { event: 'start' } });
+    expect((await taskAction(task.id, 'Bad Event')).statusCode).toBe(400);
+    const ok = await taskAction(task.id, 'start');
     expect(ok.statusCode).toBe(200);
     expect(ok.json<{ task: Task }>().task.state).toBe('planning');
-    expect((await ctx.app.inject({ method: 'POST', url: `/api/tasks/00000000-0000-4000-8000-000000000000/actions`, headers: asA(), payload: { event: 'start' } })).statusCode).toBe(404);
+    expect((await taskAction('00000000-0000-4000-8000-000000000000', 'start')).statusCode).toBe(404);
+  });
+
+  it('makes versioned task actions idempotent and rejects stale concurrent actions', async () => {
+    const task = await createTask();
+    const url = `/api/tasks/${task.id}/actions`;
+    const payload = { event: 'start', expectedVersion: task.version };
+    const missingKey = await ctx.app.inject({ method: 'POST', url, headers: asA(), payload });
+    expect(missingKey.statusCode).toBe(400);
+
+    const headers = { ...asA(), 'idempotency-key': 'same-command-key' };
+    const first = await ctx.app.inject({ method: 'POST', url, headers, payload });
+    const replay = await ctx.app.inject({ method: 'POST', url, headers, payload });
+    expect(first.statusCode).toBe(200);
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json<{ task: Task }>().task).toEqual(first.json<{ task: Task }>().task);
+    expect(await ctx.repo.listJobsForTask(ctx.userA, task.id)).toHaveLength(1);
+    expect((await ctx.repo.listEvents(ctx.userA, task.id)).filter((event) => event.type === 'transition')).toHaveLength(1);
+
+    const reused = await ctx.app.inject({ method: 'POST', url, headers, payload: { event: 'retry', expectedVersion: task.version } });
+    expect(reused.statusCode).toBe(409);
+    const stale = await ctx.app.inject({
+      method: 'POST',
+      url,
+      headers: { ...asA(), 'idempotency-key': 'different-command-key' },
+      payload,
+    });
+    expect(stale.statusCode).toBe(409);
   });
 
   it('returns relations, lists with filters and patches with state guards', async () => {
     const task = await createTask();
     await createTask(asA(), { title: 'Other thing', repos: [] });
-    await ctx.app.inject({ method: 'POST', url: `/api/tasks/${task.id}/actions`, headers: asA(), payload: { event: 'start' } });
+    await taskAction(task.id, 'start');
     await ctx.app.inject({ method: 'POST', url: `/api/tasks/${task.id}/messages`, headers: asA(), payload: { content: 'note' } });
 
     const detail = await ctx.app.inject({ method: 'GET', url: `/api/tasks/${task.id}`, headers: asA() });
@@ -159,7 +198,7 @@ describe('workflows API', () => {
     expect((await ctx.app.inject({ method: 'PUT', url: `/api/workflows/${custom.id}`, headers: asB(), payload: definition })).statusCode).toBe(404);
 
     const task = await createTask(asA(), { title: 'pinned', workflowId: custom.id });
-    await ctx.app.inject({ method: 'POST', url: `/api/tasks/${task.id}/actions`, headers: asA(), payload: { event: 'start' } });
+    await taskAction(task.id, 'start');
     expect((await ctx.app.inject({ method: 'DELETE', url: `/api/workflows/${custom.id}`, headers: asA() })).json()).toEqual({ ok: true });
     const fresh = await ctx.repo.getTask(ctx.userA, task.id);
     expect(fresh?.workflowId).toBeNull();
@@ -188,7 +227,7 @@ describe('worker API', () => {
 
     await ctx.app.ctx.secrets.set(ctx.userA, 'github', 'ghp_workertoken');
     const task = await createTask();
-    await ctx.app.inject({ method: 'POST', url: `/api/tasks/${task.id}/actions`, headers: asA(), payload: { event: 'start' } });
+    await taskAction(task.id, 'start');
     const claim = await ctx.app.inject({ method: 'POST', url: '/api/worker/jobs/claim', headers, payload: { workerId } });
     const { jobs } = claim.json<{ jobs: { job: { id: string; status: string; payload: { step: { id: string } } }; credentials: { githubToken: string | null } }[] }>();
     expect(jobs).toHaveLength(1);
@@ -231,7 +270,7 @@ describe('worker API', () => {
   it('fails a job and cannot touch another user’s jobs', async () => {
     const { headers, workerId } = await registeredWorker();
     const task = await createTask();
-    await ctx.app.inject({ method: 'POST', url: `/api/tasks/${task.id}/actions`, headers: asA(), payload: { event: 'start' } });
+    await taskAction(task.id, 'start');
     const claim = await ctx.app.inject({ method: 'POST', url: '/api/worker/jobs/claim', headers, payload: { workerId } });
     const jobId = claim.json<{ jobs: { job: { id: string } }[] }>().jobs[0]!.job.id;
 
@@ -360,12 +399,12 @@ describe('end to end through HTTP', () => {
     const workflows = (await ctx.app.inject({ method: 'GET', url: '/api/workflows', headers: asA() })).json<{ workflows: WorkflowRecord[] }>().workflows;
     const fast = workflows.find((w) => w.name === 'Fast Track')!;
     const task = await createTask(asA(), { title: 'quick', repos: ['acme/app'], workflowId: fast.id });
-    await ctx.app.inject({ method: 'POST', url: `/api/tasks/${task.id}/actions`, headers: asA(), payload: { event: 'start' } });
+    await taskAction(task.id, 'start');
     await completeNext(ctx, ctx.userA, pr(3));
     await completeNext(ctx, ctx.userA, verdict(true));
     expect((await ctx.repo.getTask(ctx.userA, task.id))?.state).toBe('in-review');
     expect((await ctx.app.inject({ method: 'GET', url: `/api/tasks/${task.id}/artifacts`, headers: asA() })).json<{ artifacts: { name: string }[] }>().artifacts.map((a) => a.name)).toEqual(['verify-report.md']);
-    const accepted = await ctx.app.inject({ method: 'POST', url: `/api/tasks/${task.id}/actions`, headers: asA(), payload: { event: 'accept' } });
+    const accepted = await taskAction(task.id, 'accept');
     expect(accepted.json<{ task: Task }>().task.state).toBe('merge');
     await completeMerge(ctx, ctx.userA);
     expect((await ctx.repo.getTask(ctx.userA, task.id))?.state).toBe('done');

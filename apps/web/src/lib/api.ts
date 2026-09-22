@@ -113,10 +113,11 @@ export function deleteTask(id: string) {
   return apiFetch<ResponseOf<'DELETE /api/tasks/:id'>>(`/api/tasks/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
-export function runTaskAction(id: string, event: string) {
+export function runTaskAction(id: string, event: string, expectedVersion: number, idempotencyKey = crypto.randomUUID()) {
   return apiFetch<ResponseOf<'POST /api/tasks/:id/actions'>>(`/api/tasks/${encodeURIComponent(id)}/actions`, {
     method: 'POST',
-    json: { event },
+    headers: { 'Idempotency-Key': idempotencyKey },
+    json: { event, expectedVersion },
   });
 }
 

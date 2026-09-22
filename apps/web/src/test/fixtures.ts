@@ -20,6 +20,7 @@ export function makeTask(overrides: Partial<Task> = {}): Task {
   return {
     id: `task-${counter}`,
     userId: 'user-1',
+    version: 0,
     key: `SIN-${counter}`,
     title: `Task ${counter}`,
     description: 'Some description',

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   DEFAULT_TROUBLESHOOT_STEP,
   START_EVENT,
@@ -34,6 +35,8 @@ export type Actor = 'user' | 'worker' | 'system';
 
 interface ApplyOptions {
   actor: Actor;
+  idempotencyKey?: string;
+  expectedVersion?: number;
   /** Replaces the chat-derived feedback in the dispatched job context (used for verify NO_GO). */
   feedbackOverride?: string;
   detail?: Record<string, unknown>;
@@ -64,6 +67,17 @@ const DEFAULT_CONFLICT_PROTECTED_PATHS = [
   'Dockerfile',
   '.env',
 ];
+
+function transitionRequestHash(
+  userId: string,
+  taskId: string,
+  expectedVersion: number,
+  event: string,
+  actor: Actor,
+  detail: Record<string, unknown> | undefined,
+): string {
+  return createHash('sha256').update(JSON.stringify({ userId, taskId, expectedVersion, event, actor, detail: detail ?? null })).digest('hex');
+}
 
 export function branchNameFor(key: string): string {
   return `sindral/${key.toLowerCase()}`;
@@ -186,9 +200,18 @@ export class Orchestrator {
 
   // ---------------------------------------------------------------- events & messages
 
-  async applyUserEvent(userId: string, taskId: string, event: string): Promise<Task> {
+  async applyUserEvent(userId: string, taskId: string, event: string, expectedVersion?: number, idempotencyKey?: string): Promise<Task> {
     const task = await this.getTask(userId, taskId);
-    return this.applyEvent(userId, task, event, { actor: 'user' });
+    const version = expectedVersion ?? task.version;
+    const key = idempotencyKey ?? `direct:${task.id}:${version}:${event}`;
+    const replay = await this.repo.getTaskTransitionReplay(userId, key, transitionRequestHash(userId, task.id, version, event, 'user', undefined));
+    if (replay) return replay.task;
+    if (task.version !== version) throw conflict(`Task version ${version} is stale; current version is ${task.version}`);
+    return this.applyEvent(userId, task, event, {
+      actor: 'user',
+      expectedVersion: version,
+      idempotencyKey: key,
+    });
   }
 
   /** Stores a user message; on human steps with a `feedback` edge this dispatches the revision agent. */
@@ -218,29 +241,54 @@ export class Orchestrator {
     const workflow = pinNow ? snapshotWorkflow(live) : live;
 
     const t: Transition = transition(task, workflow, event);
-    const patch: Parameters<Repository['updateTask']>[2] = { state: t.nextState, currentStepId: t.nextStepId, failedStepId: t.failedStepId };
+    const patch: Parameters<Repository['applyTaskTransition']>[1]['patch'] = {
+      state: t.nextState,
+      currentStepId: t.nextStepId,
+      failedStepId: t.failedStepId,
+    };
     if (pinNow) patch.pinnedWorkflow = workflow;
-    const updated = await this.repo.updateTask(userId, task.id, patch);
-    if (!updated) throw notFound('Task');
-
-    await this.repo.createEvent(userId, {
+    let queuedJob: Parameters<Repository['createJob']>[1] | undefined;
+    let parentDispatchStepId: string | null = null;
+    for (const effect of t.effects) {
+      if (effect.type === 'dispatch') {
+        const step = getStep(workflow, effect.stepId);
+        if (!step) throw new TransitionError(`Unknown step ${effect.stepId}`, 'NO_STEP');
+        if (step.output === 'merge') queuedJob = await this.buildMergeJob(userId, task, step.id);
+        else if (step.output === 'pr' && task.parentTaskId === null && (await this.repo.listSubtasks(userId, task.id)).length > 0) {
+          parentDispatchStepId = step.id;
+        } else queuedJob = await this.buildAgentJob(userId, task, step, options.feedbackOverride);
+      } else if (effect.type === 'dispatch-troubleshoot') {
+        queuedJob = await this.buildAgentJob(userId, task, workflow.troubleshootStep ?? DEFAULT_TROUBLESHOOT_STEP, options.feedbackOverride);
+      }
+    }
+    const expectedVersion = options.expectedVersion ?? task.version;
+    const requestHash = transitionRequestHash(userId, task.id, expectedVersion, event, options.actor, options.detail);
+    const applied = await this.repo.applyTaskTransition(userId, {
       taskId: task.id,
-      type: 'transition',
-      fromState: task.state,
-      toState: t.nextState,
-      stepId: t.nextStepId,
-      detail: { event, actor: options.actor, ...(options.detail ?? {}) },
+      expectedVersion,
+      idempotencyKey: options.idempotencyKey ?? `transition:${task.id}:${expectedVersion}:${event}`,
+      requestHash,
+      patch,
+      event: {
+        taskId: task.id,
+        type: 'transition',
+        fromState: task.state,
+        toState: t.nextState,
+        stepId: t.nextStepId,
+        detail: { event, actor: options.actor, ...(options.detail ?? {}) },
+      },
+      job: queuedJob,
+      cancelQueuedJobs: event === UNIVERSAL_EVENTS.FAIL,
     });
-    if (event === UNIVERSAL_EVENTS.FAIL) await this.repo.cancelQueuedJobs(userId, task.id);
+    if (applied.replayed) return applied.task;
 
-    let current = updated;
+    let current = applied.task;
     for (const effect of t.effects) {
       switch (effect.type) {
         case 'dispatch':
-          current = await this.handleDispatch(userId, current, workflow, effect.stepId, options.feedbackOverride);
+          if (parentDispatchStepId === effect.stepId) current = await this.handleParentDispatch(userId, current, effect.stepId);
           break;
         case 'dispatch-troubleshoot':
-          await this.enqueueAgentJob(userId, current, workflow.troubleshootStep ?? DEFAULT_TROUBLESHOOT_STEP, options.feedbackOverride);
           break;
         case 'complete-task':
           await this.onTaskCompleted(userId, current);
@@ -261,44 +309,35 @@ export class Orchestrator {
 
   // ---------------------------------------------------------------- dispatch
 
-  private async handleDispatch(userId: string, task: Task, workflow: Workflow, stepId: string, feedbackOverride?: string): Promise<Task> {
-    const step = getStep(workflow, stepId);
-    if (!step) throw new TransitionError(`Unknown step ${stepId}`, 'NO_STEP');
-
-    if (step.output === 'merge') {
-      await this.enqueueMergeJob(userId, task);
-      return task;
-    }
-
+  private async handleParentDispatch(userId: string, task: Task, stepId: string): Promise<Task> {
     // A parent whose plan produced subtasks does not implement anything itself:
     // the first child is started instead and the parent waits on the stack.
-    if (step.output === 'pr' && task.parentTaskId === null) {
-      const children = await this.repo.listSubtasks(userId, task.id);
-      if (children.length > 0) {
-        await this.repo.createEvent(userId, { taskId: task.id, type: 'subtasks-started', stepId: step.id, detail: { count: children.length } });
-        const first = children[0]!;
-        if (first.state === 'todo') await this.applyEvent(userId, first, START_EVENT, { actor: 'system', detail: { reason: 'parent-implement' } });
-        else if (children.every((c) => c.state === 'done')) await this.completeParent(userId, task);
-        return (await this.repo.getTask(userId, task.id)) ?? task;
-      }
+    const children = await this.repo.listSubtasks(userId, task.id);
+    if (children.length > 0) {
+      await this.repo.createEvent(userId, { taskId: task.id, type: 'subtasks-started', stepId, detail: { count: children.length } });
+      const first = children[0]!;
+      if (first.state === 'todo') await this.applyEvent(userId, first, START_EVENT, { actor: 'system', detail: { reason: 'parent-implement' } });
+      else if (children.every((c) => c.state === 'done')) await this.completeParent(userId, task);
     }
-    await this.enqueueAgentJob(userId, task, step, feedbackOverride);
-    return task;
+    return (await this.repo.getTask(userId, task.id)) ?? task;
   }
 
-  private async enqueueAgentJob(userId: string, task: Task, step: WorkflowStep, feedbackOverride?: string): Promise<Job> {
+  private async buildAgentJob(
+    userId: string,
+    task: Task,
+    step: WorkflowStep,
+    feedbackOverride?: string,
+  ): Promise<Parameters<Repository['createJob']>[1]> {
     const context = await this.buildJobContext(userId, task, feedbackOverride);
-    const job = await this.repo.createJob(userId, {
+    return {
       taskId: task.id,
       kind: 'agent',
       stepId: step.id,
       payload: { kind: 'agent', step, context, repos: task.repos, branch: task.branch, baseBranch: task.baseBranch, prUrl: task.prUrl },
-    });
-    await this.repo.createEvent(userId, { taskId: task.id, type: 'job-queued', stepId: step.id, detail: { jobId: job.id, kind: 'agent' } });
-    return job;
+    };
   }
 
-  private async enqueueMergeJob(userId: string, task: Task): Promise<Job> {
+  private async buildMergeJob(userId: string, task: Task, stepId: string): Promise<Parameters<Repository['createJob']>[1]> {
     const [repositories, pullRequests] = await Promise.all([
       this.repo.listTaskRepositories(userId, task.id),
       this.repo.listPullRequests(userId, task.id),
@@ -318,19 +357,12 @@ export class Orchestrator {
         method: repository.mergeMethod,
       };
     });
-    const job = await this.repo.createJob(userId, {
+    return {
       taskId: task.id,
       kind: 'merge-pull-requests',
-      stepId: task.currentStepId,
+      stepId,
       payload: { kind: 'merge-pull-requests', pullRequests: items },
-    });
-    await this.repo.createEvent(userId, {
-      taskId: task.id,
-      type: 'job-queued',
-      stepId: task.currentStepId,
-      detail: { jobId: job.id, kind: 'merge-pull-requests', count: items.length },
-    });
-    return job;
+    };
   }
 
   async buildJobContext(userId: string, task: Task, feedbackOverride?: string): Promise<JobContext> {
