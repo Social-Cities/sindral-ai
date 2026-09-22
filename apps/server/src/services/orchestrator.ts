@@ -25,8 +25,8 @@ import {
   type WorkflowStep,
 } from '@sindral/shared';
 import type { FastifyBaseLogger } from 'fastify';
-import type { Repository } from '../db/repository.js';
-import { badRequest, conflict, notFound } from '../errors.js';
+import { ConflictError, type JobOutcomeClaim, type Repository } from '../db/repository.js';
+import { badRequest, conflict, notFound, serviceUnavailable } from '../errors.js';
 import type { Hub } from '../realtime/hub.js';
 import { parsePrUrl } from './github.js';
 import { toWorkflow, type WorkflowService } from './workflows.js';
@@ -55,6 +55,7 @@ export const VERIFY_ARTIFACT = 'verify-report.md';
 export const CONFLICT_PROMPT_VERSION = 'rebase-conflict-v1';
 export const STALE_JOB_AFTER_MS = 15 * 60_000;
 export const WORKER_LOST_AFTER_MS = 5 * 60_000;
+export const OUTCOME_LEASE_MS = 30_000;
 export const MAX_JOB_ATTEMPTS = 3;
 const MIN_SUBTASKS = 2;
 const DEFAULT_CONFLICT_PROTECTED_PATHS = [
@@ -235,6 +236,10 @@ export class Orchestrator {
   }
 
   private async applyEvent(userId: string, task: Task, event: string, options: ApplyOptions): Promise<Task> {
+    if (options.idempotencyKey) {
+      const replay = await this.repo.getTaskTransitionReplayByKey(userId, options.idempotencyKey);
+      if (replay) return replay.task;
+    }
     const live = await this.resolveWorkflow(userId, task);
     if (!live) throw new TransitionError('Task has no workflow', 'NO_WORKFLOW');
     const pinNow = task.pinnedWorkflow === null;
@@ -409,8 +414,6 @@ export class Orchestrator {
     if (!job) throw notFound('Job');
     if (expectedAttempt === undefined && job.attempt > 1) throw conflict('Job attempt number is required after a retry');
     if (expectedAttempt !== undefined && job.attempt !== expectedAttempt) throw conflict(`Job attempt ${expectedAttempt} has been superseded`);
-    if (job.status === 'completed' && JSON.stringify(job.result) === JSON.stringify(result)) return;
-    if (job.status !== 'claimed' && job.status !== 'running') throw conflict(`Job is ${job.status}`);
     const expectedKind =
       job.kind === 'rebase-stack'
         ? 'rebase'
@@ -425,33 +428,55 @@ export class Orchestrator {
 
     const task = await this.repo.getTask(userId, job.taskId);
     if (!task) throw notFound('Task');
-    await this.repo.updateJob(userId, job.id, { status: 'completed', result, finishedAt: this.now().toISOString() });
+    const attempt = expectedAttempt ?? job.attempt;
+    const outcomeHash = this.jobOutcomeHash({ result });
+    const claim = await this.beginJobOutcome(userId, job.id, attempt, outcomeHash, { result });
+    if (claim.state === 'replay') return;
+    if (claim.state === 'busy' || !claim.token) throw serviceUnavailable('Job outcome is already being applied; retry shortly');
+    try {
+      if (result.kind === 'rebase') await this.applyRebaseResult(userId, claim.job, task, result);
+      else if (result.kind === 'conflict-resolution') await this.applyConflictResolutionResult(userId, claim.job, task, result);
+      else if (result.kind === 'merge') await this.applyMergeResult(userId, claim.job, task, result);
+      else {
+        let current = await this.applyResult(userId, claim.job, task, result);
+        await this.repo.createMessage(userId, {
+          taskId: task.id,
+          role: 'agent',
+          content: result.summary,
+          source: 'worker',
+          externalId: `job:${job.id}:summary`,
+        });
 
-    if (result.kind === 'rebase') {
-      await this.applyRebaseResult(userId, job, task, result);
-      return;
+        const transitionKey = `job:${job.id}:attempt:${attempt}:transition`;
+        const transitionReplay = await this.repo.getTaskTransitionReplayByKey(userId, transitionKey);
+        if (transitionReplay) {
+          current = transitionReplay.task;
+        } else if (this.isJobCurrent(current, claim.job)) {
+          const feedbackOverride = result.kind === 'verdict' && result.verdict === 'NO_GO' ? (result.feedback ?? result.summary) : undefined;
+          current = await this.applyEvent(userId, current, eventForResult(result), {
+            actor: 'worker',
+            feedbackOverride,
+            detail: { jobId: job.id },
+            idempotencyKey: transitionKey,
+          });
+        } else {
+          this.log.warn({ jobId: job.id, taskId: task.id }, 'job result arrived for a task that has moved on; stored without transition');
+          await this.repo.createEvent(userId, {
+            taskId: task.id,
+            type: 'stale-result',
+            stepId: job.stepId,
+            detail: { jobId: job.id },
+            dedupeKey: `job:${job.id}:stale-result`,
+          });
+        }
+        if (result.kind === 'pr' && current.parentTaskId) await this.enqueueStackRebase(userId, current, `job:${job.id}:stack-rebase`);
+        this.hub.publish(userId, { type: 'task.updated', taskId: task.id });
+      }
+      await this.repo.finalizeJobOutcome(userId, job.id, attempt, outcomeHash, claim.token, 'completed');
+    } catch (error) {
+      await this.repo.abandonJobOutcome(userId, job.id, attempt, outcomeHash, claim.token);
+      throw error;
     }
-    if (result.kind === 'conflict-resolution') {
-      await this.applyConflictResolutionResult(userId, job, task, result);
-      return;
-    }
-    if (result.kind === 'merge') {
-      await this.applyMergeResult(userId, job, task, result);
-      return;
-    }
-
-    let current = await this.applyResult(userId, job, task, result);
-    await this.repo.createMessage(userId, { taskId: task.id, role: 'agent', content: result.summary, source: 'worker' });
-
-    if (this.isJobCurrent(current, job)) {
-      const feedbackOverride = result.kind === 'verdict' && result.verdict === 'NO_GO' ? (result.feedback ?? result.summary) : undefined;
-      current = await this.applyEvent(userId, current, eventForResult(result), { actor: 'worker', feedbackOverride, detail: { jobId: job.id } });
-    } else {
-      this.log.warn({ jobId: job.id, taskId: task.id }, 'job result arrived for a task that has moved on; stored without transition');
-      await this.repo.createEvent(userId, { taskId: task.id, type: 'stale-result', stepId: job.stepId, detail: { jobId: job.id } });
-    }
-    if (result.kind === 'pr' && current.parentTaskId) await this.enqueueStackRebase(userId, current);
-    this.hub.publish(userId, { type: 'task.updated', taskId: task.id });
   }
 
   async failJob(userId: string, jobId: string, error: string, expectedAttempt?: number): Promise<void> {
@@ -459,15 +484,23 @@ export class Orchestrator {
     if (!job) throw notFound('Job');
     if (expectedAttempt === undefined && job.attempt > 1) throw conflict('Job attempt number is required after a retry');
     if (expectedAttempt !== undefined && job.attempt !== expectedAttempt) throw conflict(`Job attempt ${expectedAttempt} has been superseded`);
-    if (job.status === 'failed' && job.error === error) return;
-    if (job.status !== 'claimed' && job.status !== 'running') throw conflict(`Job is ${job.status}`);
-    await this.repo.updateJob(userId, job.id, { status: 'failed', error, finishedAt: this.now().toISOString() });
     const task = await this.repo.getTask(userId, job.taskId);
     if (!task) throw notFound('Task');
-    await this.failTask(userId, task, job, error);
+    const attempt = expectedAttempt ?? job.attempt;
+    const outcomeHash = this.jobOutcomeHash({ error });
+    const claim = await this.beginJobOutcome(userId, job.id, attempt, outcomeHash, { error });
+    if (claim.state === 'replay') return;
+    if (claim.state === 'busy' || !claim.token) throw serviceUnavailable('Job outcome is already being applied; retry shortly');
+    try {
+      await this.failTask(userId, task, claim.job, error, attempt);
+      await this.repo.finalizeJobOutcome(userId, job.id, attempt, outcomeHash, claim.token, 'failed');
+    } catch (cause) {
+      await this.repo.abandonJobOutcome(userId, job.id, attempt, outcomeHash, claim.token);
+      throw cause;
+    }
   }
 
-  private async failTask(userId: string, task: Task, job: Job, error: string): Promise<void> {
+  private async failTask(userId: string, task: Task, job: Job, error: string, attempt = job.attempt): Promise<void> {
     await this.repo.updateTask(userId, task.id, { lastError: error });
     const label =
       job.payload.kind === 'agent'
@@ -477,18 +510,51 @@ export class Orchestrator {
           : job.payload.kind === 'merge-pull-requests'
             ? 'Pull request merge'
             : 'Stack rebase';
-    await this.repo.createMessage(userId, { taskId: task.id, role: 'agent', content: `${label} failed: ${error}`, source: 'worker' });
+    await this.repo.createMessage(userId, {
+      taskId: task.id,
+      role: 'agent',
+      content: `${label} failed: ${error}`,
+      source: 'worker',
+      externalId: `job:${job.id}:failure`,
+    });
     if (job.kind === 'resolve-rebase-conflict' && task.state === 'conflict-resolution') {
       const fresh = (await this.repo.getTask(userId, task.id)) ?? task;
-      await this.applyEvent(userId, fresh, UNIVERSAL_EVENTS.CONFLICT_ESCALATED, { actor: 'worker', detail: { jobId: job.id } });
+      await this.applyEvent(userId, fresh, UNIVERSAL_EVENTS.CONFLICT_ESCALATED, {
+        actor: 'worker',
+        detail: { jobId: job.id },
+        idempotencyKey: `job:${job.id}:attempt:${attempt}:failure-transition`,
+      });
     } else if (
       ((job.kind === 'agent' && this.isJobCurrent(task, job)) || (job.kind === 'merge-pull-requests' && task.state === 'merge')) &&
       task.state !== 'failure'
     ) {
       const fresh = (await this.repo.getTask(userId, task.id)) ?? task;
-      await this.applyEvent(userId, fresh, UNIVERSAL_EVENTS.FAIL, { actor: 'worker', detail: { jobId: job.id } });
+      await this.applyEvent(userId, fresh, UNIVERSAL_EVENTS.FAIL, {
+        actor: 'worker',
+        detail: { jobId: job.id },
+        idempotencyKey: `job:${job.id}:attempt:${attempt}:failure-transition`,
+      });
     } else {
       this.hub.publish(userId, { type: 'task.updated', taskId: task.id });
+    }
+  }
+
+  private jobOutcomeHash(outcome: { result: AgentResult } | { error: string }): string {
+    return createHash('sha256').update(JSON.stringify(outcome)).digest('hex');
+  }
+
+  private async beginJobOutcome(
+    userId: string,
+    jobId: string,
+    attempt: number,
+    outcomeHash: string,
+    outcome: { result: AgentResult; error?: never } | { error: string; result?: never },
+  ): Promise<JobOutcomeClaim> {
+    try {
+      return await this.repo.beginJobOutcome(userId, jobId, attempt, outcomeHash, outcome);
+    } catch (error) {
+      if (error instanceof ConflictError) throw conflict(error.message);
+      throw error;
     }
   }
 
@@ -510,7 +576,7 @@ export class Orchestrator {
       case 'plan': {
         const updated = await this.repo.updateTask(userId, task.id, { plan: result.plan });
         if (result.subtasks && result.subtasks.length >= MIN_SUBTASKS && task.parentTaskId === null) {
-          await this.createSubtasks(userId, updated ?? task, result.subtasks);
+          await this.createSubtasks(userId, updated ?? task, result.subtasks, `job:${job.id}:subtasks`);
         }
         return updated ?? task;
       }
@@ -552,52 +618,101 @@ export class Orchestrator {
         return (await this.repo.updateTask(userId, task.id, { prUrl: result.prUrl, branch: result.branch || task.branch })) ?? task;
       }
       case 'review':
-        await this.repo.createArtifact(userId, { taskId: task.id, jobId: job.id, name: REVIEW_ARTIFACT, contentType: 'text/markdown', content: result.report });
+        await this.repo.createArtifact(userId, {
+          taskId: task.id,
+          jobId: job.id,
+          name: REVIEW_ARTIFACT,
+          contentType: 'text/markdown',
+          content: result.report,
+          dedupeKey: `job:${job.id}:artifact:${REVIEW_ARTIFACT}`,
+        });
         return task;
       case 'verdict':
-        await this.repo.createArtifact(userId, { taskId: task.id, jobId: job.id, name: VERIFY_ARTIFACT, contentType: 'text/markdown', content: result.report });
+        await this.repo.createArtifact(userId, {
+          taskId: task.id,
+          jobId: job.id,
+          name: VERIFY_ARTIFACT,
+          contentType: 'text/markdown',
+          content: result.report,
+          dedupeKey: `job:${job.id}:artifact:${VERIFY_ARTIFACT}`,
+        });
         return task;
       case 'document':
-        for (const artifact of result.artifacts) {
-          await this.repo.createArtifact(userId, { taskId: task.id, jobId: job.id, name: artifact.name, contentType: artifact.contentType, content: artifact.content });
+        for (const [index, artifact] of result.artifacts.entries()) {
+          await this.repo.createArtifact(userId, {
+            taskId: task.id,
+            jobId: job.id,
+            name: artifact.name,
+            contentType: artifact.contentType,
+            content: artifact.content,
+            dedupeKey: `job:${job.id}:artifact:${index}`,
+          });
         }
         return task;
       case 'troubleshoot':
-        await this.repo.createMessage(userId, { taskId: task.id, role: 'agent', content: result.diagnosis, source: 'worker' });
+        await this.repo.createMessage(userId, {
+          taskId: task.id,
+          role: 'agent',
+          content: result.diagnosis,
+          source: 'worker',
+          externalId: `job:${job.id}:diagnosis`,
+        });
         return task;
     }
   }
 
   // ---------------------------------------------------------------- subtasks
 
-  private async createSubtasks(userId: string, parent: Task, subtasks: { title: string; goal: string }[]): Promise<void> {
-    // Re-planning after children exist would duplicate the stack; keep the first one.
-    if ((await this.repo.listSubtasks(userId, parent.id)).length > 0) return;
+  private async createSubtasks(
+    userId: string,
+    parent: Task,
+    subtasks: { title: string; goal: string }[],
+    dedupePrefix?: string,
+  ): Promise<void> {
+    const existing = await this.repo.listSubtasks(userId, parent.id);
+    if (existing.length > 0 && (await this.repo.listEvents(userId, parent.id)).some((event) => event.type === 'subtasks-created')) return;
+    const existingBySequence = new Map(existing.map((child) => [child.sequence, child]));
     let previousBranch: string | null = null;
     for (const [index, sub] of subtasks.entries()) {
-      const key = `SIN-${await this.repo.nextTaskNumber(userId)}`;
-      const branch = parent.repos.length > 0 ? branchNameFor(key) : null;
-      const child = await this.repo.createTask(userId, {
-        key,
-        title: sub.title,
-        description: sub.goal,
-        state: 'todo',
-        currentStepId: null,
-        workflowId: parent.workflowId,
-        pinnedWorkflow: parent.pinnedWorkflow,
-        repos: parent.repos,
-        ticketUrl: null,
-        branch,
-        baseBranch: previousBranch,
-        parentTaskId: parent.id,
-        sequence: index + 1,
-      });
+      const sequence = index + 1;
+      const prior = existingBySequence.get(sequence);
+      let child = prior;
+      if (!child) {
+        const key = `SIN-${await this.repo.nextTaskNumber(userId)}`;
+        const branch = parent.repos.length > 0 ? branchNameFor(key) : null;
+        child = await this.repo.createTask(userId, {
+          key,
+          title: sub.title,
+          description: sub.goal,
+          state: 'todo',
+          currentStepId: null,
+          workflowId: parent.workflowId,
+          pinnedWorkflow: parent.pinnedWorkflow,
+          repos: parent.repos,
+          ticketUrl: null,
+          branch,
+          baseBranch: previousBranch,
+          parentTaskId: parent.id,
+          sequence,
+        });
+      }
       await this.syncTaskRepositories(userId, child);
-      await this.repo.createEvent(userId, { taskId: child.id, type: 'created', toState: 'todo', detail: { actor: 'system', parentTaskId: parent.id } });
-      this.hub.publish(userId, { type: 'task.created', taskId: child.id });
-      previousBranch = branch;
+      await this.repo.createEvent(userId, {
+        taskId: child.id,
+        type: 'created',
+        toState: 'todo',
+        detail: { actor: 'system', parentTaskId: parent.id },
+        dedupeKey: dedupePrefix ? `${dedupePrefix}:child:${sequence}:created` : null,
+      });
+      if (!prior) this.hub.publish(userId, { type: 'task.created', taskId: child.id });
+      previousBranch = child.branch;
     }
-    await this.repo.createEvent(userId, { taskId: parent.id, type: 'subtasks-created', detail: { count: subtasks.length } });
+    await this.repo.createEvent(userId, {
+      taskId: parent.id,
+      type: 'subtasks-created',
+      detail: { count: subtasks.length },
+      dedupeKey: dedupePrefix ? `${dedupePrefix}:created` : null,
+    });
   }
 
   private async syncTaskRepositories(userId: string, task: Task): Promise<void> {
@@ -645,7 +760,7 @@ export class Orchestrator {
   }
 
   /** After a child pushes a PR, later siblings that already have PRs must be rebased on top of it. */
-  private async enqueueStackRebase(userId: string, child: Task): Promise<Job | null> {
+  private async enqueueStackRebase(userId: string, child: Task, dedupePrefix?: string): Promise<Job | null> {
     if (!child.parentTaskId || child.sequence === null || !child.branch) return null;
     const siblings = await this.repo.listSubtasks(userId, child.parentTaskId);
     const later = siblings.filter((s) => (s.sequence ?? 0) > child.sequence! && s.prUrl && s.branch);
@@ -663,12 +778,14 @@ export class Orchestrator {
         kind: 'rebase-stack',
         stepId: null,
         payload: { kind: 'rebase-stack', repos: [repository], stack },
+        dedupeKey: dedupePrefix ? `${dedupePrefix}:${repository}` : null,
       });
       first ??= job;
       await this.repo.createEvent(userId, {
         taskId: child.parentTaskId,
         type: 'job-queued',
         detail: { jobId: job.id, kind: 'rebase-stack', repository, trigger: child.id },
+        dedupeKey: dedupePrefix ? `${dedupePrefix}:${repository}:event` : null,
       });
     }
     this.hub.publish(userId, { type: 'task.updated', taskId: child.parentTaskId });
@@ -676,41 +793,68 @@ export class Orchestrator {
   }
 
   private async applyRebaseResult(userId: string, job: Job, parent: Task, result: Extract<AgentResult, { kind: 'rebase' }>): Promise<void> {
-    await this.repo.createMessage(userId, { taskId: parent.id, role: 'agent', content: result.summary, source: 'worker' });
+    await this.repo.createMessage(userId, {
+      taskId: parent.id,
+      role: 'agent',
+      content: result.summary,
+      source: 'worker',
+      externalId: `job:${job.id}:summary`,
+    });
     for (const entry of result.rebased) {
       if (entry.ok) continue;
       const sibling = await this.repo.getTask(userId, entry.taskId);
       if (!sibling || sibling.parentTaskId !== parent.id) continue;
       const error = entry.error ?? `Rebase of ${entry.branch} failed`;
       await this.repo.updateTask(userId, sibling.id, { lastError: error });
-      await this.repo.createMessage(userId, { taskId: sibling.id, role: 'agent', content: `Stack rebase failed: ${error}`, source: 'worker' });
+      await this.repo.createMessage(userId, {
+        taskId: sibling.id,
+        role: 'agent',
+        content: `Stack rebase failed: ${error}`,
+        source: 'worker',
+        externalId: `job:${job.id}:rebase:${sibling.id}:failure`,
+      });
       if (entry.conflict && sibling.state !== 'failure' && sibling.state !== 'done') {
-        const resolving = await this.applyEvent(userId, sibling, UNIVERSAL_EVENTS.REBASE_CONFLICT, {
-          actor: 'system',
-          detail: { jobId: job.id, repository: entry.conflict.repository, conflictedPaths: entry.conflict.conflictedPaths },
-        });
-        const repeated = (await this.repo.listJobsForTask(userId, sibling.id)).some(
+        const resolverKey = `job:${job.id}:resolver:${sibling.id}`;
+        const priorResolvers = (await this.repo.listJobsForTask(userId, sibling.id)).filter(
           (candidate) =>
             candidate.payload.kind === 'resolve-rebase-conflict' &&
             candidate.payload.sourceSha === entry.conflict!.sourceSha &&
             candidate.payload.targetSha === entry.conflict!.targetSha,
         );
+        if (priorResolvers.some((candidate) => candidate.dedupeKey === resolverKey)) continue;
+        const resolving = await this.applyEvent(userId, sibling, UNIVERSAL_EVENTS.REBASE_CONFLICT, {
+          actor: 'system',
+          detail: { jobId: job.id, repository: entry.conflict.repository, conflictedPaths: entry.conflict.conflictedPaths },
+          idempotencyKey: `job:${job.id}:rebase:${sibling.id}:conflict-transition`,
+        });
+        const repeated = priorResolvers.length > 0;
         if (repeated) {
           const repeatedError = 'Automatic conflict resolution already attempted for this source/target commit pair';
           await this.repo.updateTask(userId, sibling.id, { lastError: repeatedError });
-          await this.repo.createMessage(userId, { taskId: sibling.id, role: 'agent', content: repeatedError, source: 'worker' });
+          await this.repo.createMessage(userId, {
+            taskId: sibling.id,
+            role: 'agent',
+            content: repeatedError,
+            source: 'worker',
+            externalId: `job:${job.id}:rebase:${sibling.id}:attempt-limit`,
+          });
           await this.applyEvent(userId, resolving, UNIVERSAL_EVENTS.CONFLICT_ESCALATED, {
             actor: 'system',
             detail: { jobId: job.id, reason: 'conflict-resolution-attempt-limit' },
+            idempotencyKey: `job:${job.id}:rebase:${sibling.id}:escalation-transition`,
           });
           continue;
         }
-        await this.enqueueConflictResolution(userId, resolving, entry.conflict);
+        await this.enqueueConflictResolution(userId, resolving, entry.conflict, resolverKey);
         continue;
       }
       if (sibling.state !== 'failure' && sibling.state !== 'done') {
         const fresh = (await this.repo.getTask(userId, sibling.id)) ?? sibling;
-        await this.applyEvent(userId, fresh, UNIVERSAL_EVENTS.FAIL, { actor: 'system', detail: { jobId: job.id, reason: 'rebase' } });
+        await this.applyEvent(userId, fresh, UNIVERSAL_EVENTS.FAIL, {
+          actor: 'system',
+          detail: { jobId: job.id, reason: 'rebase' },
+          idempotencyKey: `job:${job.id}:rebase:${sibling.id}:failure-transition`,
+        });
       }
     }
     this.hub.publish(userId, { type: 'task.updated', taskId: parent.id });
@@ -720,6 +864,7 @@ export class Orchestrator {
     userId: string,
     task: Task,
     conflictInfo: NonNullable<Extract<AgentResult, { kind: 'rebase' }>['rebased'][number]['conflict']>,
+    dedupeKey?: string,
   ): Promise<Job> {
     const context = await this.buildJobContext(userId, task);
     const payload: ResolveRebaseConflictJobPayload = {
@@ -744,11 +889,12 @@ export class Orchestrator {
         maxChangedLines: 1_000,
       },
     };
-    const job = await this.repo.createJob(userId, { taskId: task.id, kind: 'resolve-rebase-conflict', stepId: null, payload });
+    const job = await this.repo.createJob(userId, { taskId: task.id, kind: 'resolve-rebase-conflict', stepId: null, payload, dedupeKey });
     await this.repo.createEvent(userId, {
       taskId: task.id,
       type: 'conflict-resolution-queued',
       detail: { jobId: job.id, repository: conflictInfo.repository, branch: payload.branch, conflictedPaths: conflictInfo.conflictedPaths },
+      dedupeKey: dedupeKey ? `${dedupeKey}:event` : null,
     });
     this.hub.publish(userId, { type: 'task.updated', taskId: task.id });
     return job;
@@ -763,7 +909,13 @@ export class Orchestrator {
     if (job.payload.kind !== 'resolve-rebase-conflict' || result.taskId !== task.id || result.branch !== job.payload.branch) {
       throw badRequest('Conflict-resolution result does not match its dispatched task and branch');
     }
-    await this.repo.createMessage(userId, { taskId: task.id, role: 'agent', content: result.summary, source: 'worker' });
+    await this.repo.createMessage(userId, {
+      taskId: task.id,
+      role: 'agent',
+      content: result.summary,
+      source: 'worker',
+      externalId: `job:${job.id}:summary`,
+    });
     await this.repo.createEvent(userId, {
       taskId: task.id,
       type: result.resolved ? 'conflict-resolution-succeeded' : 'conflict-resolution-escalated',
@@ -775,6 +927,7 @@ export class Orchestrator {
         resolutionCommit: result.resolutionCommit ?? null,
         error: result.error ?? null,
       },
+      dedupeKey: `job:${job.id}:conflict-resolution-event`,
     });
     await this.repo.createArtifact(userId, {
       taskId: task.id,
@@ -803,16 +956,25 @@ export class Orchestrator {
         null,
         2,
       ),
+      dedupeKey: `job:${job.id}:conflict-resolution-artifact`,
     });
     if (result.resolved) {
-      const resumed = await this.applyEvent(userId, task, UNIVERSAL_EVENTS.CONFLICT_RESOLVED, { actor: 'worker', detail: { jobId: job.id } });
+      const resumed = await this.applyEvent(userId, task, UNIVERSAL_EVENTS.CONFLICT_RESOLVED, {
+        actor: 'worker',
+        detail: { jobId: job.id },
+        idempotencyKey: `job:${job.id}:resolution-transition`,
+      });
       const updated = (await this.repo.updateTask(userId, task.id, { lastError: null })) ?? resumed;
-      if (updated.parentTaskId) await this.enqueueStackRebase(userId, updated);
+      if (updated.parentTaskId) await this.enqueueStackRebase(userId, updated, `job:${job.id}:resolved-stack-rebase`);
     } else if (task.state === 'conflict-resolution') {
       const error = result.error ?? 'Automatic conflict resolution requires human review';
       await this.repo.updateTask(userId, task.id, { lastError: error });
       const fresh = (await this.repo.getTask(userId, task.id)) ?? task;
-      await this.applyEvent(userId, fresh, UNIVERSAL_EVENTS.CONFLICT_ESCALATED, { actor: 'system', detail: { jobId: job.id, reason: 'conflict-resolution' } });
+      await this.applyEvent(userId, fresh, UNIVERSAL_EVENTS.CONFLICT_ESCALATED, {
+        actor: 'system',
+        detail: { jobId: job.id, reason: 'conflict-resolution' },
+        idempotencyKey: `job:${job.id}:escalation-transition`,
+      });
     }
     this.hub.publish(userId, { type: 'task.updated', taskId: task.id });
   }
@@ -847,11 +1009,17 @@ export class Orchestrator {
         baseBranch: pullRequest.baseBranch,
         headSha: pullRequest.headSha,
         status: 'merged',
-        mergedAt: item.mergedAt ?? this.now().toISOString(),
+        mergedAt: pullRequest.mergedAt ?? item.mergedAt ?? this.now().toISOString(),
       });
     }
 
-    await this.repo.createMessage(userId, { taskId: task.id, role: 'agent', content: result.summary, source: 'worker' });
+    await this.repo.createMessage(userId, {
+      taskId: task.id,
+      role: 'agent',
+      content: result.summary,
+      source: 'worker',
+      externalId: `job:${job.id}:summary`,
+    });
     const persisted = await this.repo.listPullRequests(userId, task.id);
     const fullyMerged = result.complete && persisted.length === dispatchedIds.size && persisted.every((pullRequest) => pullRequest.status === 'merged');
     await this.repo.createEvent(userId, {
@@ -859,14 +1027,23 @@ export class Orchestrator {
       type: fullyMerged ? 'merge-complete' : 'merge-partial-failure',
       stepId: job.stepId,
       detail: { jobId: job.id, pullRequests: result.pullRequests },
+      dedupeKey: `job:${job.id}:merge-result`,
     });
     if (fullyMerged && task.state === 'merge') {
-      await this.applyEvent(userId, task, 'complete', { actor: 'worker', detail: { jobId: job.id } });
+      await this.applyEvent(userId, task, 'complete', {
+        actor: 'worker',
+        detail: { jobId: job.id },
+        idempotencyKey: `job:${job.id}:merge-transition`,
+      });
     } else if (task.state === 'merge') {
       const error = result.pullRequests.find((pullRequest) => !pullRequest.merged)?.error ?? 'Not every pull request could be merged';
       await this.repo.updateTask(userId, task.id, { lastError: error });
       const fresh = (await this.repo.getTask(userId, task.id)) ?? task;
-      await this.applyEvent(userId, fresh, UNIVERSAL_EVENTS.FAIL, { actor: 'worker', detail: { jobId: job.id, reason: 'merge' } });
+      await this.applyEvent(userId, fresh, UNIVERSAL_EVENTS.FAIL, {
+        actor: 'worker',
+        detail: { jobId: job.id, reason: 'merge' },
+        idempotencyKey: `job:${job.id}:merge-transition`,
+      });
     }
     this.hub.publish(userId, { type: 'task.updated', taskId: task.id });
   }
@@ -912,6 +1089,19 @@ export class Orchestrator {
     let requeued = 0;
     let failed = 0;
     for (const job of await this.repo.listActiveJobs()) {
+      if (job.status === 'applying') {
+        const outcomeStartedAt = job.outcomeStartedAt ? Date.parse(job.outcomeStartedAt) : 0;
+        if (outcomeStartedAt > now.getTime() - OUTCOME_LEASE_MS) continue;
+        if (!job.outcomeHash || !job.outcomeToken || (!job.result && !job.error)) {
+          this.log.error({ jobId: job.id }, 'cannot recover job with incomplete outcome state');
+          continue;
+        }
+        await this.repo.abandonJobOutcome(job.userId, job.id, job.attempt, job.outcomeHash, job.outcomeToken);
+        if (job.result) await this.completeJob(job.userId, job.id, job.result, job.attempt);
+        else await this.failJob(job.userId, job.id, job.error!, job.attempt);
+        this.log.warn({ jobId: job.id, attempt: job.attempt }, 'resumed abandoned job outcome');
+        continue;
+      }
       const claimedAt = job.claimedAt ? Date.parse(job.claimedAt) : 0;
       if (claimedAt > cutoff) continue;
       const worker = job.workerId ? await this.repo.getWorker(job.userId, job.workerId) : null;

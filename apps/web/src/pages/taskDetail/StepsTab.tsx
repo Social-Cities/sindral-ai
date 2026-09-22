@@ -43,6 +43,7 @@ const JOB_STATUS_COLOR: Record<Job['status'], string> = {
   queued: '#8b92a8',
   claimed: '#fbbf24',
   running: '#a78bfa',
+  applying: '#60a5fa',
   completed: '#34d399',
   failed: '#f87171',
   cancelled: '#52596b',

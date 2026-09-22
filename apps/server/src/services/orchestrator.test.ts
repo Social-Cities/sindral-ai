@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_TROUBLESHOOT_STEP, TransitionError, type AgentJobPayload, type Task } from '@sindral/shared';
 import { claimNext, completeMerge, completeNext, createTestApp, plan, pr, reload, review, verdict, type TestContext } from '../test/helpers.js';
 import { HttpError } from '../errors.js';
@@ -354,6 +355,49 @@ describe('failure handling', () => {
     expect((await ctx.repo.listMessages(userId, task.id)).length).toBe(messageCount);
   });
 
+  it('fences concurrent completion processing and safely resumes an abandoned outcome', async () => {
+    let task = await newTask();
+    await orch().applyUserEvent(userId, task.id, 'start');
+    const job = await claimNext(ctx, userId);
+    const result = plan('# durable');
+    const concurrent = await Promise.allSettled([
+      orch().completeJob(userId, job!.id, result, job!.attempt),
+      orch().completeJob(userId, job!.id, result, job!.attempt),
+    ]);
+    expect(concurrent.some((entry) => entry.status === 'fulfilled')).toBe(true);
+    await expect(orch().completeJob(userId, job!.id, result, job!.attempt)).resolves.toBeUndefined();
+    expect((await ctx.repo.listMessages(userId, task.id)).filter((message) => message.externalId === `job:${job!.id}:summary`)).toHaveLength(1);
+    expect((await ctx.repo.listEvents(userId, task.id)).filter((event) => event.type === 'transition')).toHaveLength(2);
+
+    task = await newTask();
+    await orch().applyUserEvent(userId, task.id, 'start');
+    const abandoned = await claimNext(ctx, userId);
+    const outcomeHash = createHash('sha256').update(JSON.stringify({ result })).digest('hex');
+    const claim = await ctx.repo.beginJobOutcome(userId, abandoned!.id, abandoned!.attempt, outcomeHash, { result });
+    expect(claim.state).toBe('acquired');
+    await ctx.repo.abandonJobOutcome(userId, abandoned!.id, abandoned!.attempt, outcomeHash, claim.token!);
+    await expect(orch().completeJob(userId, abandoned!.id, result, abandoned!.attempt)).resolves.toBeUndefined();
+    expect((await ctx.repo.getJob(userId, abandoned!.id))?.status).toBe('completed');
+    await expect(ctx.repo.beginJobOutcome(ctx.userB, abandoned!.id, abandoned!.attempt, outcomeHash, { result })).rejects.toThrow(/owned/);
+  });
+
+  it('resumes after task effects commit but outcome finalization fails', async () => {
+    const task = await newTask();
+    await orch().applyUserEvent(userId, task.id, 'start');
+    const job = await claimNext(ctx, userId);
+    const result = plan('# committed once');
+    vi.spyOn(ctx.repo, 'finalizeJobOutcome').mockRejectedValueOnce(new Error('transient database failure'));
+
+    await expect(orch().completeJob(userId, job!.id, result, job!.attempt)).rejects.toThrow('transient database failure');
+    expect((await reload(ctx, userId, task)).state).toBe('plan-review');
+    await expect(orch().completeJob(userId, job!.id, result, job!.attempt)).resolves.toBeUndefined();
+
+    const events = await ctx.repo.listEvents(userId, task.id);
+    expect(events.filter((event) => event.type === 'transition')).toHaveLength(2);
+    expect(events.filter((event) => event.type === 'stale-result')).toHaveLength(0);
+    expect((await ctx.repo.listMessages(userId, task.id)).filter((message) => message.externalId === `job:${job!.id}:summary`)).toHaveLength(1);
+  });
+
   it('stores a stale result without transitioning when the task has moved on', async () => {
     let task = await newTask();
     await orch().applyUserEvent(userId, task.id, 'start');
@@ -412,6 +456,14 @@ describe('subtask stacks', () => {
     await orch().applyUserEvent(userId, parent.id, 'start');
     await completeNext(ctx, userId, plan('# p', [{ title: 'only', goal: 'one' }]));
     expect(await ctx.repo.listSubtasks(userId, parent.id)).toHaveLength(0);
+  });
+
+  it('keeps the first completed subtask stack when a plan is revised', async () => {
+    const { parent, children } = await plannedParent();
+    await orch().postUserMessage(userId, parent.id, 'Revise the plan without replacing the active stack', 'web');
+    await completeNext(ctx, userId, plan('# Revised', [...SUBTASKS, { title: 'Unexpected extra', goal: 'Do not append this' }]));
+
+    expect((await ctx.repo.listSubtasks(userId, parent.id)).map((child) => child.id)).toEqual(children.map((child) => child.id));
   });
 
   it('starts child #1 instead of dispatching the parent implement step, then runs children serially', async () => {
@@ -623,6 +675,22 @@ describe('job claiming', () => {
 });
 
 describe('stale job sweeper', () => {
+  it('resumes an abandoned durable outcome instead of rerunning the worker job', async () => {
+    const task = await newTask();
+    await orch().applyUserEvent(userId, task.id, 'start');
+    const worker = await ctx.repo.createWorker(userId, { name: 'w', hostname: 'h', version: '1', workerKeyId: null });
+    const [job] = await ctx.repo.claimJobs(userId, worker.id, 1);
+    const result = { kind: 'plan' as const, summary: 'Recovered plan', plan: 'Durable plan' };
+    const hash = createHash('sha256').update(JSON.stringify({ result })).digest('hex');
+    const claim = await ctx.repo.beginJobOutcome(userId, job!.id, job!.attempt, hash, { result });
+
+    expect(claim.state).toBe('acquired');
+    expect(await orch().sweepStaleJobs(new Date(Date.now() + 31_000))).toEqual({ requeued: 0, failed: 0 });
+    expect(await ctx.repo.getJob(userId, job!.id)).toMatchObject({ status: 'completed', result });
+    expect((await reload(ctx, userId, task)).state).toBe('plan-review');
+    expect((await ctx.repo.listMessages(userId, task.id)).filter((message) => message.content === result.summary)).toHaveLength(1);
+  });
+
   it('requeues jobs from lost workers and fails them after the last attempt', async () => {
     const task = await newTask();
     await orch().applyUserEvent(userId, task.id, 'start');

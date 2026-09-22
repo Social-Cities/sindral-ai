@@ -210,7 +210,7 @@ export interface TaskWithRelations extends Task {
   pullRequests: PullRequest[];
 }
 
-export type JobStatus = 'queued' | 'claimed' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type JobStatus = 'queued' | 'claimed' | 'running' | 'applying' | 'completed' | 'failed' | 'cancelled';
 export type JobKind = 'agent' | 'rebase-stack' | 'resolve-rebase-conflict' | 'merge-pull-requests';
 
 export interface JobContext {
@@ -239,6 +239,10 @@ export interface Job {
   payload: JobPayload;
   result: AgentResult | null;
   error: string | null;
+  outcomeHash: string | null;
+  outcomeToken: string | null;
+  outcomeStartedAt: string | null;
+  dedupeKey: string | null;
   createdAt: string;
   claimedAt: string | null;
   finishedAt: string | null;

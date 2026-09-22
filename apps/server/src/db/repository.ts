@@ -1,4 +1,5 @@
 import type {
+  AgentResult,
   Artifact,
   Job,
   JobKind,
@@ -132,6 +133,7 @@ export interface EventInsert {
   toState?: string | null;
   stepId?: string | null;
   detail?: Record<string, unknown> | null;
+  dedupeKey?: string | null;
 }
 
 export interface ArtifactInsert {
@@ -140,6 +142,7 @@ export interface ArtifactInsert {
   name: string;
   contentType: string;
   content: string;
+  dedupeKey?: string | null;
 }
 
 export interface JobInsert {
@@ -147,6 +150,13 @@ export interface JobInsert {
   kind: JobKind;
   stepId: string | null;
   payload: JobPayload;
+  dedupeKey?: string | null;
+}
+
+export interface JobOutcomeClaim {
+  job: Job;
+  state: 'acquired' | 'busy' | 'replay';
+  token: string | null;
 }
 
 export interface TaskTransitionCommand {
@@ -252,6 +262,8 @@ export interface Repository {
   updateTask(userId: string, id: string, patch: TaskPatch): Promise<Task | null>;
   /** Returns a completed replay, null for a new key, and rejects key reuse with a different hash. */
   getTaskTransitionReplay(userId: string, idempotencyKey: string, requestHash: string): Promise<TaskTransitionResult | null>;
+  /** Internal retry lookup when the original task version is already committed. */
+  getTaskTransitionReplayByKey(userId: string, idempotencyKey: string): Promise<TaskTransitionResult | null>;
   /** Atomically applies a versioned transition, its audit events, and optional queued job. */
   applyTaskTransition(userId: string, command: TaskTransitionCommand): Promise<TaskTransitionResult>;
   deleteTask(userId: string, id: string): Promise<boolean>;
@@ -281,6 +293,15 @@ export interface Repository {
 
   // jobs
   createJob(userId: string, input: JobInsert): Promise<Job>;
+  beginJobOutcome(
+    userId: string,
+    jobId: string,
+    attempt: number,
+    outcomeHash: string,
+    outcome: { result: AgentResult; error?: never } | { error: string; result?: never },
+  ): Promise<JobOutcomeClaim>;
+  finalizeJobOutcome(userId: string, jobId: string, attempt: number, outcomeHash: string, token: string, status: 'completed' | 'failed'): Promise<Job>;
+  abandonJobOutcome(userId: string, jobId: string, attempt: number, outcomeHash: string, token: string): Promise<void>;
   getJob(userId: string, id: string): Promise<Job | null>;
   listJobsForTask(userId: string, taskId: string): Promise<Job[]>;
   updateJob(userId: string, id: string, patch: JobPatch): Promise<Job | null>;
@@ -288,7 +309,7 @@ export interface Repository {
   claimJobs(userId: string, workerId: string, max: number): Promise<Job[]>;
   renewJobLeases(userId: string, workerId: string, jobIds: string[], renewedAt: string): Promise<number>;
   cancelQueuedJobs(userId: string, taskId: string): Promise<number>;
-  /** Cross-user: claimed/running jobs, used by the stale-job sweeper. */
+  /** Cross-user: claimed/running/applying jobs, used by the stale-job sweeper. */
   listActiveJobs(): Promise<Job[]>;
 
   // job logs

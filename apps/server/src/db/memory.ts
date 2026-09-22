@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import type { Artifact, Job, Message, PullRequest, SecretProvider, Task, TaskEvent, TaskRepository, Worker, WorkerKey, WorkflowRecord } from '@sindral/shared';
+import type { AgentResult, Artifact, Job, Message, PullRequest, SecretProvider, Task, TaskEvent, TaskRepository, Worker, WorkerKey, WorkflowRecord } from '@sindral/shared';
 import {
   ConflictError,
   type ArtifactInsert,
   type EventInsert,
   type JobInsert,
+  type JobOutcomeClaim,
   type JobLog,
   type JobLogInsert,
   type JobPatch,
@@ -47,7 +48,9 @@ export class MemoryRepository implements Repository {
   private readonly pullRequests = new Map<string, PullRequest>();
   private readonly messages = new Map<string, Owned<Message>>();
   private readonly events = new Map<string, Owned<TaskEvent>>();
+  private readonly eventDedupe = new Map<string, string>();
   private readonly artifacts = new Map<string, Owned<Artifact>>();
+  private readonly artifactDedupe = new Map<string, string>();
   private readonly jobs = new Map<string, Job>();
   private readonly jobLogs = new Map<number, Owned<JobLog>>();
   private readonly workers = new Map<string, Worker>();
@@ -191,6 +194,11 @@ export class MemoryRepository implements Repository {
     return clone({ ...recorded.result, replayed: true });
   }
 
+  async getTaskTransitionReplayByKey(userId: string, idempotencyKey: string): Promise<TaskTransitionResult | null> {
+    const recorded = this.transitionCommands.get(`${userId}:${idempotencyKey}`);
+    return recorded ? clone({ ...recorded.result, replayed: true }) : null;
+  }
+
   async applyTaskTransition(userId: string, command: TaskTransitionCommand): Promise<TaskTransitionResult> {
     const ledgerKey = `${userId}:${command.idempotencyKey}`;
     const recorded = this.transitionCommands.get(ledgerKey);
@@ -233,6 +241,10 @@ export class MemoryRepository implements Repository {
         payload: clone(command.job.payload),
         result: null,
         error: null,
+        outcomeHash: null,
+        outcomeToken: null,
+        outcomeStartedAt: null,
+        dedupeKey: command.job.dedupeKey ?? null,
         createdAt: this.now(),
         claimedAt: null,
         finishedAt: null,
@@ -404,6 +416,14 @@ export class MemoryRepository implements Repository {
   }
 
   async createEvent(userId: string, input: EventInsert): Promise<TaskEvent> {
+    if (input.dedupeKey) {
+      const existingId = this.eventDedupe.get(`${input.taskId}:${input.dedupeKey}`);
+      const existing = existingId ? this.events.get(existingId) : undefined;
+      if (existing && existing.userId === userId) {
+        const { userId: _u, ...out } = existing;
+        return clone(out);
+      }
+    }
     const event: Owned<TaskEvent> = {
       id: randomUUID(),
       userId,
@@ -416,6 +436,7 @@ export class MemoryRepository implements Repository {
       createdAt: this.now(),
     };
     this.events.set(event.id, event);
+    if (input.dedupeKey) this.eventDedupe.set(`${input.taskId}:${input.dedupeKey}`, event.id);
     const { userId: _u, ...out } = event;
     return clone(out);
   }
@@ -426,6 +447,14 @@ export class MemoryRepository implements Repository {
   }
 
   async createArtifact(userId: string, input: ArtifactInsert): Promise<Artifact> {
+    if (input.dedupeKey) {
+      const existingId = this.artifactDedupe.get(`${input.taskId}:${input.dedupeKey}`);
+      const existing = existingId ? this.artifacts.get(existingId) : undefined;
+      if (existing && existing.userId === userId) {
+        const { userId: _u, ...out } = existing;
+        return clone(out);
+      }
+    }
     const artifact: Owned<Artifact> = {
       id: randomUUID(),
       userId,
@@ -437,12 +466,18 @@ export class MemoryRepository implements Repository {
       createdAt: this.now(),
     };
     this.artifacts.set(artifact.id, artifact);
+    if (input.dedupeKey) this.artifactDedupe.set(`${input.taskId}:${input.dedupeKey}`, artifact.id);
     const { userId: _u, ...out } = artifact;
     return clone(out);
   }
 
   // ---- jobs ----
   async createJob(userId: string, input: JobInsert): Promise<Job> {
+    if (input.dedupeKey) {
+      for (const existing of this.jobs.values()) {
+        if (existing.userId === userId && existing.dedupeKey === input.dedupeKey) return clone(existing);
+      }
+    }
     const job: Job = {
       id: randomUUID(),
       userId,
@@ -455,12 +490,69 @@ export class MemoryRepository implements Repository {
       payload: clone(input.payload),
       result: null,
       error: null,
+      outcomeHash: null,
+      outcomeToken: null,
+      outcomeStartedAt: null,
+      dedupeKey: input.dedupeKey ?? null,
       createdAt: this.now(),
       claimedAt: null,
       finishedAt: null,
     };
     this.jobs.set(job.id, job);
     return clone(job);
+  }
+
+  async beginJobOutcome(
+    userId: string,
+    jobId: string,
+    attempt: number,
+    outcomeHash: string,
+    outcome: { result: AgentResult; error?: never } | { error: string; result?: never },
+  ): Promise<JobOutcomeClaim> {
+    const job = this.jobs.get(jobId);
+    if (!job || job.userId !== userId) throw new ConflictError('Job does not exist or is not owned by this user');
+    if (job.attempt !== attempt) throw new ConflictError(`Job attempt ${attempt} has been superseded`);
+    if (job.outcomeHash && job.outcomeHash !== outcomeHash) throw new ConflictError('Job outcome does not match the accepted outcome');
+    if (job.status === 'completed' || job.status === 'failed') return { job: clone(job), state: 'replay', token: null };
+    if (job.status === 'applying' && job.outcomeStartedAt && Date.parse(job.outcomeStartedAt) > Date.now() - 30_000) {
+      return { job: clone(job), state: 'busy', token: null };
+    }
+    if (job.status !== 'claimed' && job.status !== 'running' && job.status !== 'applying') throw new ConflictError(`Job is ${job.status}`);
+    const token = randomUUID();
+    Object.assign(job, {
+      status: 'applying' as const,
+      outcomeHash,
+      outcomeToken: token,
+      outcomeStartedAt: this.now(),
+      result: outcome.result ?? null,
+      error: outcome.error ?? null,
+    });
+    return { job: clone(job), state: 'acquired', token };
+  }
+
+  async finalizeJobOutcome(
+    userId: string,
+    jobId: string,
+    attempt: number,
+    outcomeHash: string,
+    token: string,
+    status: 'completed' | 'failed',
+  ): Promise<Job> {
+    const job = this.jobs.get(jobId);
+    if (!job || job.userId !== userId) throw new ConflictError('Job does not exist or is not owned by this user');
+    if (job.status === status && job.attempt === attempt && job.outcomeHash === outcomeHash) return clone(job);
+    if (job.status !== 'applying' || job.attempt !== attempt || job.outcomeHash !== outcomeHash || job.outcomeToken !== token) {
+      throw new ConflictError('Job outcome lease was superseded');
+    }
+    Object.assign(job, { status, outcomeToken: null, finishedAt: this.now() });
+    return clone(job);
+  }
+
+  async abandonJobOutcome(userId: string, jobId: string, attempt: number, outcomeHash: string, token: string): Promise<void> {
+    const job = this.jobs.get(jobId);
+    if (job?.userId === userId && job.status === 'applying' && job.attempt === attempt && job.outcomeHash === outcomeHash && job.outcomeToken === token) {
+      Object.assign(job, { status: 'running', outcomeToken: null, outcomeStartedAt: null });
+    }
   }
 
   async getJob(userId: string, id: string): Promise<Job | null> {
@@ -483,7 +575,7 @@ export class MemoryRepository implements Repository {
     const limit = Math.max(1, Math.min(max, 10));
     const busyTasks = new Set<string>();
     for (const j of this.jobs.values()) {
-      if (j.userId === userId && (j.status === 'claimed' || j.status === 'running')) busyTasks.add(j.taskId);
+      if (j.userId === userId && (j.status === 'claimed' || j.status === 'running' || j.status === 'applying')) busyTasks.add(j.taskId);
     }
     const claimed: Job[] = [];
     for (const j of this.jobs.values()) {
@@ -523,7 +615,7 @@ export class MemoryRepository implements Repository {
   }
 
   async listActiveJobs(): Promise<Job[]> {
-    return [...this.jobs.values()].filter((j) => j.status === 'claimed' || j.status === 'running').map(clone);
+    return [...this.jobs.values()].filter((j) => j.status === 'claimed' || j.status === 'running' || j.status === 'applying').map(clone);
   }
 
   // ---- job logs ----

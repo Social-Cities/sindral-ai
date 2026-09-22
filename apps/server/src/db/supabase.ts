@@ -28,6 +28,7 @@ import {
   type ArtifactInsert,
   type EventInsert,
   type JobInsert,
+  type JobOutcomeClaim,
   type JobLog,
   type JobLogInsert,
   type JobLogType,
@@ -141,6 +142,7 @@ interface EventRow {
   to_state: string | null;
   step_id: string | null;
   detail: Record<string, unknown> | null;
+  dedupe_key?: string | null;
   created_at: string;
 }
 interface ArtifactRow {
@@ -150,6 +152,7 @@ interface ArtifactRow {
   name: string;
   content_type: string;
   content: string;
+  dedupe_key?: string | null;
   created_at: string;
 }
 interface JobRow {
@@ -164,6 +167,10 @@ interface JobRow {
   payload: JobPayload;
   result: AgentResult | null;
   error: string | null;
+  outcome_hash: string | null;
+  outcome_token: string | null;
+  outcome_started_at: string | null;
+  dedupe_key: string | null;
   created_at: string;
   claimed_at: string | null;
   finished_at: string | null;
@@ -331,6 +338,10 @@ const mapJob = (r: JobRow): Job => ({
   payload: r.payload,
   result: r.result,
   error: r.error,
+  outcomeHash: r.outcome_hash,
+  outcomeToken: r.outcome_token,
+  outcomeStartedAt: r.outcome_started_at,
+  dedupeKey: r.dedupe_key,
   createdAt: r.created_at,
   claimedAt: r.claimed_at,
   finishedAt: r.finished_at,
@@ -553,6 +564,21 @@ export class SupabaseRepository implements Repository {
     };
   }
 
+  async getTaskTransitionReplayByKey(userId: string, idempotencyKey: string): Promise<TaskTransitionResult | null> {
+    const row = await run<{ response: { task: TaskRow; job: JobRow | null; replayed: boolean } | null } | null>(
+      this.client
+        .from('idempotency_keys')
+        .select('response')
+        .eq('user_id', userId)
+        .eq('idempotency_key', idempotencyKey)
+        .eq('operation', 'task-transition')
+        .maybeSingle(),
+    );
+    if (!row) return null;
+    if (!row.response) throw new ConflictError('Idempotent command is still in progress');
+    return { task: mapTask(row.response.task), job: row.response.job ? mapJob(row.response.job) : null, replayed: true };
+  }
+
   async applyTaskTransition(userId: string, command: TaskTransitionCommand): Promise<TaskTransitionResult> {
     const event = command.event;
     const job = command.job;
@@ -708,22 +734,30 @@ export class SupabaseRepository implements Repository {
   }
 
   async createEvent(userId: string, input: EventInsert): Promise<TaskEvent> {
-    const row = await run<EventRow>(
+    const row = await run<EventRow | null>(
       this.client
         .from('task_events')
-        .insert({
-          task_id: input.taskId,
-          user_id: userId,
-          type: input.type,
-          from_state: input.fromState ?? null,
-          to_state: input.toState ?? null,
-          step_id: input.stepId ?? null,
-          detail: input.detail ?? null,
-        })
+        .upsert(
+          {
+            task_id: input.taskId,
+            user_id: userId,
+            type: input.type,
+            from_state: input.fromState ?? null,
+            to_state: input.toState ?? null,
+            step_id: input.stepId ?? null,
+            detail: input.detail ?? null,
+            dedupe_key: input.dedupeKey ?? null,
+          },
+          input.dedupeKey ? { onConflict: 'task_id,dedupe_key', ignoreDuplicates: true } : undefined,
+        )
         .select('*')
-        .single(),
+        .maybeSingle(),
     );
-    return mapEvent(row);
+    if (row) return mapEvent(row);
+    const existing = await run<EventRow>(
+      this.client.from('task_events').select('*').eq('user_id', userId).eq('task_id', input.taskId).eq('dedupe_key', input.dedupeKey!).single(),
+    );
+    return mapEvent(existing);
   }
 
   // ---- artifacts ----
@@ -738,11 +772,26 @@ export class SupabaseRepository implements Repository {
     const row = await run<ArtifactRow>(
       this.client
         .from('task_artifacts')
-        .insert({ task_id: input.taskId, user_id: userId, job_id: input.jobId ?? null, name: input.name, content_type: input.contentType, content: input.content })
+        .upsert(
+          {
+            task_id: input.taskId,
+            user_id: userId,
+            job_id: input.jobId ?? null,
+            name: input.name,
+            content_type: input.contentType,
+            content: input.content,
+            dedupe_key: input.dedupeKey ?? null,
+          },
+          input.dedupeKey ? { onConflict: 'task_id,dedupe_key', ignoreDuplicates: true } : undefined,
+        )
         .select('*')
-        .single(),
+        .maybeSingle(),
     );
-    return mapArtifact(row);
+    if (row) return mapArtifact(row);
+    const existing = await run<ArtifactRow>(
+      this.client.from('task_artifacts').select('*').eq('user_id', userId).eq('task_id', input.taskId).eq('dedupe_key', input.dedupeKey!).single(),
+    );
+    return mapArtifact(existing);
   }
 
   // ---- jobs ----
@@ -750,11 +799,71 @@ export class SupabaseRepository implements Repository {
     const row = await run<JobRow>(
       this.client
         .from('jobs')
-        .insert({ user_id: userId, task_id: input.taskId, kind: input.kind, step_id: input.stepId, payload: input.payload })
+        .upsert(
+          { user_id: userId, task_id: input.taskId, kind: input.kind, step_id: input.stepId, payload: input.payload, dedupe_key: input.dedupeKey ?? null },
+          input.dedupeKey ? { onConflict: 'user_id,dedupe_key', ignoreDuplicates: true } : undefined,
+        )
         .select('*')
-        .single(),
+        .maybeSingle(),
     );
-    return mapJob(row);
+    if (row) return mapJob(row);
+    const existing = await run<JobRow>(this.client.from('jobs').select('*').eq('user_id', userId).eq('dedupe_key', input.dedupeKey!).single());
+    return mapJob(existing);
+  }
+
+  async beginJobOutcome(
+    userId: string,
+    jobId: string,
+    attempt: number,
+    outcomeHash: string,
+    outcome: { result: AgentResult; error?: never } | { error: string; result?: never },
+  ): Promise<JobOutcomeClaim> {
+    try {
+      const response = await run<{ state: JobOutcomeClaim['state']; token: string | null; job: JobRow }>(
+        this.client.rpc('begin_job_outcome', {
+          p_user_id: userId,
+          p_job_id: jobId,
+          p_attempt: attempt,
+          p_outcome_hash: outcomeHash,
+          p_result: outcome.result ?? null,
+          p_error: outcome.error ?? null,
+        }),
+      );
+      return { state: response.state, token: response.token, job: mapJob(response.job) };
+    } catch (error) {
+      if (error instanceof RepositoryError && ['22023', '40001', '42501'].includes(error.code ?? '')) throw new ConflictError(error.message);
+      throw error;
+    }
+  }
+
+  async finalizeJobOutcome(
+    userId: string,
+    jobId: string,
+    attempt: number,
+    outcomeHash: string,
+    token: string,
+    status: 'completed' | 'failed',
+  ): Promise<Job> {
+    try {
+      const row = await run<JobRow>(
+        this.client.rpc('finalize_job_outcome', {
+          p_user_id: userId,
+          p_job_id: jobId,
+          p_attempt: attempt,
+          p_outcome_hash: outcomeHash,
+          p_token: token,
+          p_status: status,
+        }),
+      );
+      return mapJob(row);
+    } catch (error) {
+      if (error instanceof RepositoryError && ['22023', '40001', '42501'].includes(error.code ?? '')) throw new ConflictError(error.message);
+      throw error;
+    }
+  }
+
+  async abandonJobOutcome(userId: string, jobId: string, attempt: number, outcomeHash: string, token: string): Promise<void> {
+    await run(this.client.rpc('abandon_job_outcome', { p_user_id: userId, p_job_id: jobId, p_attempt: attempt, p_outcome_hash: outcomeHash, p_token: token }));
   }
 
   async getJob(userId: string, id: string): Promise<Job | null> {
@@ -808,7 +917,7 @@ export class SupabaseRepository implements Repository {
   }
 
   async listActiveJobs(): Promise<Job[]> {
-    const rows = await run<JobRow[]>(this.client.from('jobs').select('*').in('status', ['claimed', 'running']));
+    const rows = await run<JobRow[]>(this.client.from('jobs').select('*').in('status', ['claimed', 'running', 'applying']));
     return rows.map(mapJob);
   }
 
