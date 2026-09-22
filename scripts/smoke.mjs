@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { WORKER_PROTOCOL_HEADER, WORKER_PROTOCOL_VERSION } from '../packages/shared/dist/index.js';
+
 /**
  * Live smoke test: drives the real server against a real Supabase instance.
  *
@@ -68,10 +70,10 @@ ok(inv.status === 409, 'invalid transition -> 409');
 // worker key + register + claim (exercises claim_jobs SQL)
 const wk = await api('/api/settings/worker-keys', { method: 'POST', body: JSON.stringify({ name: 'laptop' }) });
 ok(wk.status === 201 && wk.body.secret.startsWith('sk_sindral_'), 'worker key created');
-const WH = { authorization: `Bearer ${wk.body.secret}`, 'content-type': 'application/json' };
+const WH = { authorization: `Bearer ${wk.body.secret}`, 'content-type': 'application/json', [WORKER_PROTOCOL_HEADER]: String(WORKER_PROTOCOL_VERSION) };
 const w = (p, body) => j(`${API}${p}`, { method: 'POST', headers: WH, body: JSON.stringify(body) });
 const reg = await w('/api/worker/register', { name: 'laptop', hostname: 'mac', version: 'worker/0.1.0' });
-ok(reg.status === 200 && reg.body.workerId, 'worker registered');
+ok(reg.status === 200 && reg.body.workerId && reg.body.protocolVersion === WORKER_PROTOCOL_VERSION, 'worker protocol negotiated and registered');
 const claim = await w('/api/worker/jobs/claim', { workerId: reg.body.workerId, max: 2 });
 ok(claim.status === 200 && claim.body.jobs.length === 1 && claim.body.jobs[0].job.payload.step.id === 'planning', 'worker claimed planning job via claim_jobs()');
 const jobDispatch = claim.body.jobs[0];

@@ -1,4 +1,4 @@
-import type { AgentResult, JobDispatch } from '@sindral/shared';
+import { WORKER_PROTOCOL_HEADER, WORKER_PROTOCOL_VERSION, type AgentResult, type JobDispatch } from '@sindral/shared';
 import type { Logger } from './logger.js';
 import { silentLogger } from './logger.js';
 
@@ -18,6 +18,14 @@ export class WorkerAuthError extends ApiRequestError {
   override name = 'WorkerAuthError';
   constructor(message: string) {
     super(message, 401, 'unauthorized');
+  }
+}
+
+/** The server and worker speak incompatible wire protocols; retries cannot help. */
+export class WorkerProtocolError extends ApiRequestError {
+  override name = 'WorkerProtocolError';
+  constructor(message: string) {
+    super(message, 426, 'WORKER_PROTOCOL_MISMATCH');
   }
 }
 
@@ -71,8 +79,8 @@ export class ApiClient {
     this.maxAttempts = opts.maxAttempts ?? 6;
   }
 
-  register(body: { name: string; hostname: string; version: string; workerId?: string }): Promise<{ workerId: string }> {
-    return this.post<{ workerId: string }>('/api/worker/register', body);
+  register(body: { name: string; hostname: string; version: string; workerId?: string }): Promise<{ workerId: string; protocolVersion: number }> {
+    return this.post<{ workerId: string; protocolVersion: number }>('/api/worker/register', body);
   }
 
   heartbeat(body: { workerId: string; runningJobs: { jobId: string; leaseToken: string }[] }): Promise<{ ok: true }> {
@@ -111,7 +119,12 @@ export class ApiClient {
       try {
         response = await this.fetchFn(url, {
           method: 'POST',
-          headers: { 'content-type': 'application/json', accept: 'application/json', authorization: `Bearer ${this.workerKey}` },
+          headers: {
+            'content-type': 'application/json',
+            accept: 'application/json',
+            authorization: `Bearer ${this.workerKey}`,
+            [WORKER_PROTOCOL_HEADER]: String(WORKER_PROTOCOL_VERSION),
+          },
           body: payload,
           signal: combineSignals(opts.signal, AbortSignal.timeout(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS)),
         });
@@ -130,6 +143,9 @@ export class ApiClient {
       const { code, message } = await readError(response);
       if (response.status === 401) {
         throw new WorkerAuthError(`Server rejected the worker key (401 ${code}): ${message}. Check SINDRAL_WORKER_KEY.`);
+      }
+      if (response.status === 426) {
+        throw new WorkerProtocolError(`Server rejected worker protocol ${WORKER_PROTOCOL_VERSION} (426 ${code}): ${message}`);
       }
       const error = new ApiRequestError(`${route} failed with ${response.status} ${code}: ${message}`, response.status, code);
       if (response.status === 429 || response.status >= 500) {

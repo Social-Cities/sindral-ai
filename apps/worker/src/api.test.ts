@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ApiClient, ApiRequestError, MAX_DELAY_MS, WorkerAuthError, backoffDelay } from './api.js';
+import { WORKER_PROTOCOL_HEADER, WORKER_PROTOCOL_VERSION } from '@sindral/shared';
+import { ApiClient, ApiRequestError, MAX_DELAY_MS, WorkerAuthError, WorkerProtocolError, backoffDelay } from './api.js';
 import { WORKER_KEY } from './test/fixtures.js';
 
 const LEASE_TOKEN = '10000000-0000-4000-8000-000000000001';
@@ -39,11 +40,12 @@ describe('ApiClient', () => {
     const fetchImpl = vi.fn(async (url: string, init: RequestInit) => {
       expect(url).toBe('http://server.test/api/worker/register');
       expect((init.headers as Record<string, string>)['authorization']).toBe(`Bearer ${WORKER_KEY}`);
+      expect((init.headers as Record<string, string>)[WORKER_PROTOCOL_HEADER]).toBe(String(WORKER_PROTOCOL_VERSION));
       expect(JSON.parse(String(init.body))).toEqual({ name: 'w', hostname: 'h', version: 'v' });
-      return response(200, { workerId: 'abc' });
+      return response(200, { workerId: 'abc', protocolVersion: WORKER_PROTOCOL_VERSION });
     });
     const { api } = client(fetchImpl);
-    await expect(api.register({ name: 'w', hostname: 'h', version: 'v' })).resolves.toEqual({ workerId: 'abc' });
+    await expect(api.register({ name: 'w', hostname: 'h', version: 'v' })).resolves.toEqual({ workerId: 'abc', protocolVersion: WORKER_PROTOCOL_VERSION });
   });
 
   it('retries 5xx and 429 with backoff', async () => {
@@ -80,6 +82,13 @@ describe('ApiClient', () => {
     const fetchImpl = vi.fn(async () => response(401, { error: { code: 'unauthorized', message: 'bad key' } }));
     const { api } = client(fetchImpl);
     await expect(api.claim({ workerId: 'w', max: 1 })).rejects.toBeInstanceOf(WorkerAuthError);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws WorkerProtocolError on 426 without retrying', async () => {
+    const fetchImpl = vi.fn(async () => response(426, { error: { code: 'WORKER_PROTOCOL_MISMATCH', message: 'upgrade required' } }));
+    const { api } = client(fetchImpl);
+    await expect(api.register({ name: 'w', hostname: 'h', version: 'v' })).rejects.toBeInstanceOf(WorkerProtocolError);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 

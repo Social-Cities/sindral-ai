@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import type { JobDispatch } from '@sindral/shared';
+import { WORKER_PROTOCOL_VERSION, type JobDispatch } from '@sindral/shared';
 import { describe, expect, it, vi } from 'vitest';
-import { WorkerAuthError } from './api.js';
+import { WorkerAuthError, WorkerProtocolError } from './api.js';
 import { silentLogger } from './logger.js';
 import { Runner, taskKeysOf, type RunnerDeps } from './runner.js';
 import { dispatch, testConfig } from './test/fixtures.js';
@@ -28,7 +28,7 @@ function harness(batches: JobDispatch[][], overrides: Partial<RunnerDeps> = {}):
   const api = {
     claims: 0,
     failed,
-    register: vi.fn(async () => ({ workerId: randomUUID() })),
+    register: vi.fn(async () => ({ workerId: randomUUID(), protocolVersion: WORKER_PROTOCOL_VERSION })),
     heartbeat: vi.fn(async () => ({ ok: true as const })),
     claim: vi.fn(async (_body: { workerId: string; max: number }, signal?: AbortSignal) => {
       api.claims++;
@@ -96,6 +96,20 @@ describe('Runner', () => {
     await run;
     expect(h.api.register).toHaveBeenCalledWith({ name: 'test-worker', hostname: 'h', version: 'worker/test', workerId: 'old-id' });
     expect(persistence.saveWorkerId).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails before persistence or claiming when the server reports another protocol', async () => {
+    const persistence = { loadWorkerId: vi.fn(async () => null), saveWorkerId: vi.fn(async () => {}), saveRunning: vi.fn(async () => {}) };
+    const api = {
+      register: vi.fn(async () => ({ workerId: randomUUID(), protocolVersion: WORKER_PROTOCOL_VERSION + 1 })),
+      heartbeat: vi.fn(async () => ({ ok: true as const })),
+      claim: vi.fn(async () => []),
+      fail: vi.fn(async () => ({ ok: true as const })),
+    };
+    const h = harness([], { persistence, api });
+    await expect(h.runner.start()).rejects.toBeInstanceOf(WorkerProtocolError);
+    expect(persistence.saveWorkerId).not.toHaveBeenCalled();
+    expect(api.claim).not.toHaveBeenCalled();
   });
 
   it('never exceeds the concurrency limit', async () => {
@@ -189,7 +203,7 @@ describe('Runner', () => {
   it('exits when the worker key is rejected', async () => {
     const h = harness([], {
       api: {
-        register: vi.fn(async () => ({ workerId: randomUUID() })),
+        register: vi.fn(async () => ({ workerId: randomUUID(), protocolVersion: WORKER_PROTOCOL_VERSION })),
         heartbeat: vi.fn(async () => ({ ok: true as const })),
         claim: vi.fn(async () => {
           throw new WorkerAuthError('bad key');
@@ -200,12 +214,26 @@ describe('Runner', () => {
     await expect(h.runner.start()).rejects.toBeInstanceOf(WorkerAuthError);
   });
 
+  it('exits when a running server rejects the worker protocol', async () => {
+    const api = {
+      register: vi.fn(async () => ({ workerId: randomUUID(), protocolVersion: WORKER_PROTOCOL_VERSION })),
+      heartbeat: vi.fn(async () => ({ ok: true as const })),
+      claim: vi.fn(async () => {
+        throw new WorkerProtocolError('upgrade required');
+      }),
+      fail: vi.fn(async () => ({ ok: true as const })),
+    };
+    const h = harness([], { api });
+    await expect(h.runner.start()).rejects.toBeInstanceOf(WorkerProtocolError);
+    expect(api.claim).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps polling after transient claim errors', async () => {
     let calls = 0;
     const a = dispatch();
     const h = harness([], {
       api: {
-        register: vi.fn(async () => ({ workerId: randomUUID() })),
+        register: vi.fn(async () => ({ workerId: randomUUID(), protocolVersion: WORKER_PROTOCOL_VERSION })),
         heartbeat: vi.fn(async () => ({ ok: true as const })),
         claim: vi.fn(async () => {
           calls++;

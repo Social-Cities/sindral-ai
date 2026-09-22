@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { CryptoKey } from 'jose';
+import { WORKER_PROTOCOL_HEADER, WORKER_PROTOCOL_VERSION } from '@sindral/shared';
 import { createTestApp, mintToken, TEST_JWT_SECRET, type TestContext } from '../test/helpers.js';
 import { createUserTokenVerifier } from './user.js';
 
@@ -51,7 +52,12 @@ describe('user authentication', () => {
 
 describe('worker authentication', () => {
   const register = (key: string) =>
-    ctx.app.inject({ method: 'POST', url: '/api/worker/register', headers: { authorization: `Bearer ${key}` }, payload: { name: 'mac', hostname: 'mac.local', version: '0.1.0' } });
+    ctx.app.inject({
+      method: 'POST',
+      url: '/api/worker/register',
+      headers: { authorization: `Bearer ${key}`, [WORKER_PROTOCOL_HEADER]: String(WORKER_PROTOCOL_VERSION) },
+      payload: { name: 'mac', hostname: 'mac.local', version: '0.1.0' },
+    });
 
   it('rejects unknown, malformed and revoked keys', async () => {
     expect((await register('sk_sindral_' + '0'.repeat(40))).statusCode).toBe(401);

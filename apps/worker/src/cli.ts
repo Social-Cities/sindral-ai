@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
-import { ApiClient, WorkerAuthError } from './api.js';
+import { ApiClient, WorkerAuthError, WorkerProtocolError } from './api.js';
 import { ConfigError, expandHome, loadConfig, workdirPaths, type WorkerConfig } from './config.js';
 import { createEngines, describeVersion } from './engines/index.js';
 import { runJob } from './job.js';
@@ -153,7 +153,7 @@ async function start(config: WorkerConfig, logger: Logger): Promise<number> {
     await runner.start();
     return 0;
   } catch (err) {
-    if (err instanceof WorkerAuthError) {
+    if (err instanceof WorkerAuthError || err instanceof WorkerProtocolError) {
       logger.fatal(err.message);
       return 2;
     }

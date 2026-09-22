@@ -61,7 +61,7 @@ For each agent job the worker:
 4. Parses and validates the result file. For `pr` steps it commits leftover changes as `Sindral AI`, pushes with `--force-with-lease`, then opens a PR (`gh pr create`) or comments on the existing one with the agent's summary so GitHub reviewers see the response. For `document` steps it uploads the declared artifacts plus every text file in the output directory.
 5. Renews the job's 90-second capability lease every 30 seconds while it is running or locally queued, then calls `complete` or `fail` with that claim's attempt and lease token. Expired or superseded claims cannot publish events or outcomes.
 
-The lease fields are part of the worker protocol, so deploy the server and worker from the same release. A pre-lease worker cannot complete jobs claimed from a lease-enabled server; those claims expire and are safely requeued.
+Every worker request carries an explicit wire-protocol version. The server returns the negotiated version at registration and rejects missing or incompatible versions with HTTP 426 before claiming or mutating work. Deploy the server and worker from the same release. Protocol-aware incompatible workers stop on their next API request; older workers that predate negotiation are still fenced by the server, and any claimed jobs expire and are safely requeued.
 
 Rebase-stack jobs rebase each subtask branch onto its base in order and stop at the first conflict (later branches depend on it).
 

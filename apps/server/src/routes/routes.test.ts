@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Task, WorkflowRecord } from '@sindral/shared';
+import { WORKER_PROTOCOL_HEADER, WORKER_PROTOCOL_VERSION, type Task, type WorkflowRecord } from '@sindral/shared';
 import { completeMerge, completeNext, createTestApp, plan, pr, review, testConfig, verdict, type TestContext } from '../test/helpers.js';
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -209,15 +209,52 @@ describe('workflows API', () => {
 describe('worker API', () => {
   async function registeredWorker() {
     const key = await ctx.workerKeyFor(ctx.userA);
-    const headers = { authorization: `Bearer ${key}` };
+    const headers = { authorization: `Bearer ${key}`, [WORKER_PROTOCOL_HEADER]: String(WORKER_PROTOCOL_VERSION) };
     const res = await ctx.app.inject({ method: 'POST', url: '/api/worker/register', headers, payload: { name: 'mac', hostname: 'mac.local', version: '0.1.0' } });
     return { headers, workerId: res.json<{ workerId: string }>().workerId };
   }
 
+  it('rejects missing and incompatible worker protocols before mutating state', async () => {
+    const key = await ctx.workerKeyFor(ctx.userA);
+    const request = (protocol?: string) => ctx.app.inject({
+      method: 'POST',
+      url: '/api/worker/register',
+      headers: { authorization: `Bearer ${key}`, ...(protocol ? { [WORKER_PROTOCOL_HEADER]: protocol } : {}) },
+      payload: { name: 'old-worker', hostname: 'old.local', version: '0.0.1' },
+    });
+
+    const missing = await request();
+    expect(missing.statusCode).toBe(426);
+    expect(missing.headers.upgrade).toBe(`sindral-worker/${WORKER_PROTOCOL_VERSION}`);
+    expect(missing.json()).toMatchObject({
+      error: {
+        code: 'WORKER_PROTOCOL_MISMATCH',
+        details: { clientProtocolVersion: null, serverProtocolVersion: WORKER_PROTOCOL_VERSION },
+      },
+    });
+    const incompatible = await request(String(WORKER_PROTOCOL_VERSION + 1));
+    expect(incompatible.statusCode).toBe(426);
+    expect(incompatible.headers.upgrade).toBe(`sindral-worker/${WORKER_PROTOCOL_VERSION}`);
+    expect(incompatible.json()).toMatchObject({ error: { code: 'WORKER_PROTOCOL_MISMATCH' } });
+    expect(await ctx.repo.listWorkers(ctx.userA)).toEqual([]);
+
+    const staleWorker = await ctx.repo.createWorker(ctx.userA, { name: 'stale', hostname: 'old.local', version: '0.0.1', workerKeyId: null });
+    const task = await createTask();
+    await taskAction(task.id, 'start');
+    const staleClaim = await ctx.app.inject({
+      method: 'POST',
+      url: '/api/worker/jobs/claim',
+      headers: { authorization: `Bearer ${key}`, [WORKER_PROTOCOL_HEADER]: String(WORKER_PROTOCOL_VERSION + 1) },
+      payload: { workerId: staleWorker.id },
+    });
+    expect(staleClaim.statusCode).toBe(426);
+    expect((await ctx.repo.listJobsForTask(ctx.userA, task.id))[0]?.status).toBe('queued');
+  });
+
   it('runs a job end to end: register, claim (long poll), events, complete', async () => {
     const { headers, workerId } = await registeredWorker();
     const again = await ctx.app.inject({ method: 'POST', url: '/api/worker/register', headers, payload: { name: 'mac2', hostname: 'mac.local', version: '0.2.0', workerId } });
-    expect(again.json()).toEqual({ workerId });
+    expect(again.json()).toEqual({ workerId, protocolVersion: WORKER_PROTOCOL_VERSION });
     expect((await ctx.repo.listWorkers(ctx.userA)).map((w) => w.name)).toEqual(['mac2']);
 
     const empty = await ctx.app.inject({ method: 'POST', url: '/api/worker/jobs/claim', headers, payload: { workerId, max: 2 } });
@@ -259,7 +296,7 @@ describe('worker API', () => {
     const slow = await createTestApp({ claim: { waitMs: 1500, pollMs: 20 } });
     try {
       const key = await slow.workerKeyFor(slow.userA);
-      const headers = { authorization: `Bearer ${key}` };
+      const headers = { authorization: `Bearer ${key}`, [WORKER_PROTOCOL_HEADER]: String(WORKER_PROTOCOL_VERSION) };
       const reg = await slow.app.inject({ method: 'POST', url: '/api/worker/register', headers, payload: { name: 'w', hostname: 'h', version: '1' } });
       const { workerId } = reg.json<{ workerId: string }>();
       const pending = slow.app.inject({ method: 'POST', url: '/api/worker/jobs/claim', headers, payload: { workerId } });
@@ -281,8 +318,9 @@ describe('worker API', () => {
     const jobId = claimed.job.id;
 
     const otherKey = await ctx.workerKeyFor(ctx.userB);
-    expect((await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/fail`, headers: { authorization: `Bearer ${otherKey}` }, payload: { attempt: 1, leaseToken: claimed.lease.token, error: 'x' } })).statusCode).toBe(404);
-    expect((await ctx.app.inject({ method: 'POST', url: '/api/worker/jobs/claim', headers: { authorization: `Bearer ${otherKey}` }, payload: { workerId } })).statusCode).toBe(404);
+    const otherHeaders = { authorization: `Bearer ${otherKey}`, [WORKER_PROTOCOL_HEADER]: String(WORKER_PROTOCOL_VERSION) };
+    expect((await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/fail`, headers: otherHeaders, payload: { attempt: 1, leaseToken: claimed.lease.token, error: 'x' } })).statusCode).toBe(404);
+    expect((await ctx.app.inject({ method: 'POST', url: '/api/worker/jobs/claim', headers: otherHeaders, payload: { workerId } })).statusCode).toBe(404);
 
     const failed = await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/fail`, headers, payload: { attempt: 1, leaseToken: claimed.lease.token, error: 'agent crashed' } });
     expect(failed.statusCode).toBe(200);

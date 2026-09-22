@@ -1,4 +1,4 @@
-export { ApiClient, ApiRequestError, WorkerAuthError, backoffDelay } from './api.js';
+export { ApiClient, ApiRequestError, WorkerAuthError, WorkerProtocolError, backoffDelay } from './api.js';
 export { loadConfig, ConfigError, expandHome, workdirPaths, type WorkerConfig } from './config.js';
 export { Runner, taskKeysOf, type RunnerDeps, type RunningJob } from './runner.js';
 export { runJob, type JobDeps, type JobOutcome } from './job.js';

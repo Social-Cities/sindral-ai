@@ -6,12 +6,14 @@ import {
   workerJobEventSchema,
   workerJobFailSchema,
   workerRegisterSchema,
+  WORKER_PROTOCOL_HEADER,
+  WORKER_PROTOCOL_VERSION,
   type JobDispatch,
 } from '@sindral/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { requireWorker } from '../auth/worker.js';
 import type { RouteOptions } from '../context.js';
-import { conflict, notFound } from '../errors.js';
+import { conflict, notFound, upgradeRequired } from '../errors.js';
 import { idParamsSchema, validate } from '../validate.js';
 import { hasGitHubAppCredentials, mintGitHubInstallationToken } from '../services/githubApp.js';
 
@@ -29,6 +31,17 @@ function repositoriesForJob(job: JobDispatch['job']): string[] {
 
 export const workerRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx }) => {
   app.addHook('onRequest', requireWorker(ctx.repo));
+  app.addHook('onRequest', async (request, reply) => {
+    const received = request.headers[WORKER_PROTOCOL_HEADER];
+    if (received !== String(WORKER_PROTOCOL_VERSION)) {
+      const clientProtocolVersion = typeof received === 'string' ? received : null;
+      reply.header('upgrade', `sindral-worker/${WORKER_PROTOCOL_VERSION}`);
+      throw upgradeRequired(
+        `Worker protocol ${clientProtocolVersion ?? 'missing'} is incompatible; this server requires protocol ${WORKER_PROTOCOL_VERSION}. Upgrade the worker and server together.`,
+        { clientProtocolVersion, serverProtocolVersion: WORKER_PROTOCOL_VERSION },
+      );
+    }
+  });
   const { repo, orchestrator, hub } = ctx;
 
   app.post('/api/worker/register', async (request) => {
@@ -39,7 +52,7 @@ export const workerRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx 
     const existing = input.workerId ? await repo.updateWorker(userId, input.workerId, patch) : null;
     const worker = existing ?? (await repo.createWorker(userId, { name: input.name, hostname: input.hostname, version: input.version, workerKeyId }));
     hub.publish(userId, { type: 'worker.updated', workerId: worker.id });
-    return { workerId: worker.id };
+    return { workerId: worker.id, protocolVersion: WORKER_PROTOCOL_VERSION };
   });
 
   app.post('/api/worker/heartbeat', async (request) => {

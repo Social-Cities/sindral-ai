@@ -1,5 +1,5 @@
-import type { JobDispatch } from '@sindral/shared';
-import { WorkerAuthError, type ApiClient } from './api.js';
+import { WORKER_PROTOCOL_VERSION, type JobDispatch } from '@sindral/shared';
+import { WorkerAuthError, WorkerProtocolError, type ApiClient } from './api.js';
 import type { WorkerConfig } from './config.js';
 import { SHUTDOWN_REASON } from './job.js';
 import type { Logger } from './logger.js';
@@ -90,9 +90,17 @@ export class Runner {
       version: deps.version,
       ...(previous ? { workerId: previous } : {}),
     });
+    if (registered.protocolVersion !== WORKER_PROTOCOL_VERSION) {
+      throw new WorkerProtocolError(
+        `Server reported worker protocol ${String(registered.protocolVersion)}; this worker requires protocol ${WORKER_PROTOCOL_VERSION}. Upgrade the worker and server together.`,
+      );
+    }
     this.workerId = registered.workerId;
     await this.persistence.saveWorkerId(registered.workerId);
-    deps.logger.info({ workerId: registered.workerId, version: deps.version, concurrency: deps.config.concurrency }, 'worker registered');
+    deps.logger.info(
+      { workerId: registered.workerId, version: deps.version, protocolVersion: registered.protocolVersion, concurrency: deps.config.concurrency },
+      'worker registered',
+    );
 
     this.startHeartbeat();
     try {
@@ -136,7 +144,7 @@ export class Runner {
         this.schedule();
       } catch (err) {
         if (this.stopping) break;
-        if (err instanceof WorkerAuthError) {
+        if (err instanceof WorkerAuthError || err instanceof WorkerProtocolError) {
           this.fatal = err;
           this.stopping = true;
           break;
@@ -210,9 +218,9 @@ export class Runner {
       ];
       await this.deps.api.heartbeat({ workerId: this.workerId, runningJobs });
     } catch (err) {
-      if (err instanceof WorkerAuthError) {
+      if (err instanceof WorkerAuthError || err instanceof WorkerProtocolError) {
         this.fatal = err;
-        void this.stop('worker key rejected');
+        void this.stop(err instanceof WorkerProtocolError ? 'worker protocol rejected' : 'worker key rejected');
         return;
       }
       this.deps.logger.warn({ err: errorMessage(err) }, 'heartbeat failed');
@@ -221,7 +229,7 @@ export class Runner {
 
   private async drain(): Promise<void> {
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
-    const reason = this.fatal ? 'worker key rejected' : SHUTDOWN_REASON;
+    const reason = this.fatal instanceof WorkerProtocolError ? 'worker protocol rejected' : this.fatal ? 'worker key rejected' : SHUTDOWN_REASON;
 
     // Jobs claimed but never started must be released back as failures.
     const unstarted = this.pending;

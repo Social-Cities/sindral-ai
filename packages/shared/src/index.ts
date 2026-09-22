@@ -7,3 +7,4 @@ export * from './tickets.js';
 export * from './defaultWorkflows.js';
 export * from './schemas.js';
 export * from './api.js';
+export * from './workerProtocol.js';

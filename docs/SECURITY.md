@@ -11,6 +11,8 @@
 
 Every repository call is scoped by the authenticated user id. Supabase RLS is enabled on every table (owner-only `select` for the UI; no client policies at all for `user_secrets`, `worker_keys`, or operational writes). Browser reads of `jobs` are also column-scoped so worker lease and outcome capability tokens remain service-role-only even through direct PostgREST queries. Server-side functions (`claim_jobs`, `renew_job_leases`, `activate_job_lease`, `next_task_number`, `apply_task_transition`, and the job-outcome/webhook-delivery lease functions) are `security definer` and revoked from `anon`/`authenticated`. Each privileged orchestration function fixes an empty `search_path`; transition and outcome functions also verify ownership plus task version or an unexpired per-claim lease token before recording state. The global webhook-delivery ledger contains hashes and responses but no user content, and is accessible only to the service role.
 
+Worker routes authenticate the worker key before checking an exact wire-protocol header on every request. Missing or incompatible protocols receive HTTP 426 before handler state changes, including for workers that were already running during a server upgrade.
+
 ## Secrets
 
 - Provider tokens (GitHub, Linear, Jira) are encrypted with AES-256-GCM under `SECRETS_ENCRYPTION_KEY`; only a 4-character hint is ever returned to the UI.

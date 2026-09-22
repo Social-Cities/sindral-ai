@@ -55,7 +55,7 @@ export interface ApiRoutes {
   // realtime (SSE)
   'GET /api/events': { response: never };
   // worker
-  'POST /api/worker/register': { response: { workerId: string } };
+  'POST /api/worker/register': { response: { workerId: string; protocolVersion: number } };
   'POST /api/worker/heartbeat': { response: { ok: true } };
   'POST /api/worker/jobs/claim': { response: { jobs: JobDispatch[] } };
   'POST /api/worker/jobs/:id/events': { response: { ok: true } };
