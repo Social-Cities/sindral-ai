@@ -37,7 +37,7 @@ Evidence classes:
 | ENG-22 | Every user/API/database/event path is tenant scoped | `apps/server/src/routes/routes.test.ts`; `apps/server/src/auth/auth.test.ts`; `supabase/tests/tenant_isolation_matrix.test.sql`; `scripts/smoke.mjs` | Automated + live local |
 | ENG-23 | External inputs resist SSRF, redirects, oversized responses, malformed bodies, and webhook forgery | `apps/server/src/services/tickets.test.ts`; `apps/server/src/routes/webhooks.test.ts`; `apps/server/src/routes/routes.test.ts` | Automated |
 | ENG-24 | State changes and worker outcomes are atomic and idempotent under duplicates/races | `apps/server/src/services/orchestrator.test.ts`; `supabase/tests/atomic_task_transitions.test.sql`; `supabase/tests/durable_job_outcomes.test.sql` | Automated |
-| ENG-25 | All changes are typechecked, tested, linted, built, dependency-audited, and bundle-budgeted | `.github/workflows/ci.yml`; root `package.json` scripts | Automated |
+| ENG-25 | All changes are typechecked, tested, linted, built, dependency-audited, database-tested, and bundle-budgeted | `.github/workflows/ci.yml`; root `package.json` scripts | Automated |
 | ENG-26 | Production has startup compatibility checks, kill switches, metrics, alerts, and recovery procedures | `apps/server/src/config.test.ts`; `apps/server/src/db/supabase.test.ts`; `apps/server/src/metrics.test.ts`; `docs/operations/` | Automated + OPS gates |
 
 ## Design handoff and interaction coverage
@@ -80,8 +80,8 @@ These are intentionally not marked complete by repository tests.
 | OPS-03 | Provider, webhook, worker, service-role, metrics, and encryption-key rotation are demonstrated without data loss | `docs/operations/key-rotation.md` | Pending staging exercise |
 | A11Y-01 | Keyboard order, focus return/trapping, names/roles/statuses, reduced motion, contrast, zoom, and responsive reflow pass | `e2e/accessibility.spec.ts` plus manual assistive-technology review | Automated serious/critical Axe, reflow, and reduced-motion checks pass; manual assistive-technology review pending |
 | VIS-01 | Home, Tasks, Task Detail, Workflows, and Settings match the handoff at supported breakpoints with no clipped critical controls | Side-by-side review against `../sindral-ai-design` | Pending final visual review |
-| SEC-01 | Dependency, secret, static, and dynamic scans have no unresolved high/critical findings; OWASP checklist signed off | CI security jobs plus manual review of `docs/SECURITY.md` | Pending final security gate |
-| REL-01 | Immutable server image provenance and versioned worker release checksum/signature are retained | `docs/operations/deployment.md` and `docs/operations/worker-upgrade.md` | Pending release authority/signing identity |
+| SEC-01 | Dependency, secret, static, and dynamic scans have no unresolved high/critical findings; OWASP checklist signed off | `.github/workflows/ci.yml`; `.github/workflows/security.yml`; manual review of `docs/SECURITY.md` | Automated gates configured; first clean CI run and manual OWASP sign-off pending |
+| REL-01 | Immutable server image provenance and versioned worker release checksum/signature are retained | `.github/workflows/release.yml`; `scripts/package-worker.mjs`; `docs/operations/deployment.md`; `docs/operations/worker-upgrade.md` | Automated release path configured; first signed tag requires release authority |
 
 ## Standard evidence commands
 

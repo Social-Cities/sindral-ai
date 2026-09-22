@@ -28,7 +28,7 @@ Worker routes authenticate the worker key before checking an exact wire-protocol
 - **A03 Injection** – zod validation on all input, parameterised Supabase queries, agent CLIs invoked with argv arrays (no shell), path/ref sanitisation in the worker, markdown rendered without raw HTML.
 - **A04 Insecure design** – human gates in every bundled workflow, workflow pinning, PR creation always by the worker (agents cannot push).
 - **A05 Security misconfiguration** – Helmet CSP, strict CORS, rate limiting, `.env` ignored, no stack traces to clients.
-- **A06 Vulnerable components** – pinned versions, `pnpm audit` in CI.
+- **A06 Vulnerable components** – pinned versions, `pnpm audit` in CI, weekly CodeQL security-extended analysis, full-history Gitleaks scanning, and an OWASP ZAP baseline against the production bundle.
 - **A07 Identification & auth failures** – Supabase Auth, JWT verification (JWKS or HS256), constant-time comparisons, key revocation.
 - **A08 Integrity failures** – webhook HMAC plus delivery-ID/payload-hash replay fencing, worker results validated with schemas and fenced by durable outcome hashes/leases before effects are applied, tasks pinned to workflow snapshots.
 - **A09 Logging failures** – structured pino logs, task event audit trail, job logs.

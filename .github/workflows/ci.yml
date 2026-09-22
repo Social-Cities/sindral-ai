@@ -7,9 +7,9 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -25,3 +25,20 @@ jobs:
       - run: pnpm audit --audit-level high
       - name: Verify generated files are not tracked
         run: git diff --exit-code -- . ':(exclude)pnpm-lock.yaml'
+
+  database:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.117.0
+      - name: Start migrated database
+        run: supabase db start
+      - name: Run pgTAP authorization and durability suite
+        run: supabase test db
+      - name: Lint database schema
+        run: supabase db lint --local --level warning --fail-on warning
+      - name: Stop database
+        if: always()
+        run: supabase stop --no-backup

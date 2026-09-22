@@ -1,0 +1,85 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '23 9 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      packages: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+      - uses: github/codeql-action/analyze@v4
+
+  secrets:
+    name: Secret history scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Scan all commits with Gitleaks
+        run: docker run --rm --volume "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 detect --source=/repo --redact --verbose
+
+  dast:
+    name: OWASP ZAP baseline
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.117.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Start local Supabase
+        run: |
+          supabase start
+          supabase status -o env >> "$GITHUB_ENV"
+      - name: Start production bundle
+        env:
+          SUPABASE_URL: ${{ env.API_URL }}
+          SUPABASE_ANON_KEY: ${{ env.ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ env.SERVICE_ROLE_KEY }}
+          SECRETS_ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000000
+          LOG_LEVEL: silent
+        run: |
+          pnpm --filter @sindral/server start > server.log 2>&1 &
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8787/api/health > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat server.log
+          exit 1
+      - uses: zaproxy/action-baseline@v0.15.0
+        with:
+          target: http://127.0.0.1:8787
+          fail_action: true
+          allow_issue_writing: false
+          artifact_name: zap-baseline-report
+      - name: Stop Supabase
+        if: always()
+        run: supabase stop --no-backup

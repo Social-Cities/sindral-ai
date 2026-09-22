@@ -16,13 +16,14 @@
     "typecheck": "pnpm -r run typecheck && tsc -p tsconfig.e2e.json --noEmit",
     "test": "pnpm -r run test",
     "test:e2e": "playwright test",
-    "lint": "pnpm -r run lint && eslint e2e",
+    "lint": "pnpm -r run lint && eslint e2e scripts",
     "db:start": "supabase start",
     "db:reset": "supabase db reset",
     "db:migrate": "supabase db push",
     "db:test": "supabase test db",
     "db:lint": "supabase db lint --local --level warning",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "release:worker": "pnpm --filter @sindral/shared build && pnpm --filter @sindral/worker build && node scripts/package-worker.mjs release"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",

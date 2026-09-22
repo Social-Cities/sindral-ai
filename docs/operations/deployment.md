@@ -11,6 +11,8 @@ docker push registry.example.com/sindral-ai:<git-sha>
 
 Deploy by digest, not a mutable tag. Supply secrets through the platform secret manager; never bake `.env` into the image. The container runs as the unprivileged `node` user and serves both `/api/*` and the built SPA on port 8787.
 
+Pushing a `v*` tag builds the image as `ghcr.io/<owner>/<repository>/server:<tag>` and `:<git-sha>`, then records signed GitHub provenance for the resulting digest. Verify it before deployment with `gh attestation verify oci://ghcr.io/<owner>/<repository>/server:<tag> -R <owner>/<repository>` and retain the resolved digest in the deployment record.
+
 Before shifting traffic:
 
 1. Back up the database and record the restore point.

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -217,7 +217,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   return command === 'clean' ? clean(config, logger, commandArgs.includes('--dry-run')) : start(config, logger);
 }
 
-const invokedDirectly = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+// macOS temp and package-manager paths may enter through `/var` while the module URL
+// resolves to `/private/var`; compare canonical paths so packaged CLIs still execute.
+const invokedDirectly = process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
 if (invokedDirectly) {
   main()
     .then((code) => {

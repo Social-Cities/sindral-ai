@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "bin": {
     "sindral-worker": "./dist/cli.js"
   },
