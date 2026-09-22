@@ -23,6 +23,7 @@
     "db:test": "supabase test db",
     "db:lint": "supabase db lint --local --level warning",
     "smoke": "node scripts/smoke.mjs",
+    "smoke:staging": "node scripts/staging-smoke.mjs",
     "release:worker": "pnpm --filter @sindral/shared build && pnpm --filter @sindral/worker build && node scripts/package-worker.mjs release"
   },
   "devDependencies": {
