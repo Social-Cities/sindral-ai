@@ -87,6 +87,14 @@ export class ApiClient {
     return this.post<{ ok: true }>('/api/worker/heartbeat', body);
   }
 
+  disconnect(body: { workerId: string }): Promise<{ ok: true }> {
+    return this.post<{ ok: true }>('/api/worker/disconnect', body);
+  }
+
+  cleanupStatus(body: { workerId: string }): Promise<{ workerOnline: boolean; activeJobs: { jobId: string; taskKey: string }[] }> {
+    return this.post<{ workerOnline: boolean; activeJobs: { jobId: string; taskKey: string }[] }>('/api/worker/cleanup-status', body);
+  }
+
   async claim(body: { workerId: string; max: number }, signal?: AbortSignal): Promise<JobDispatch[]> {
     const res = await this.post<{ jobs: JobDispatch[] }>('/api/worker/jobs/claim', body, { timeoutMs: CLAIM_TIMEOUT_MS, signal });
     return Array.isArray(res.jobs) ? res.jobs : [];

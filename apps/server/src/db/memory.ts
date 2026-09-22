@@ -683,6 +683,12 @@ export class MemoryRepository implements Repository {
       .map((job) => ({ ...clone(job), leaseToken: this.jobLeaseTokens.get(job.id) ?? null }));
   }
 
+  async listActiveJobsForWorker(userId: string, workerId: string): Promise<ActiveJob[]> {
+    return [...this.jobs.values()]
+      .filter((job) => job.userId === userId && job.workerId === workerId && (job.status === 'claimed' || job.status === 'running' || job.status === 'applying'))
+      .map((job) => ({ ...clone(job), leaseToken: this.jobLeaseTokens.get(job.id) ?? null }));
+  }
+
   // ---- job logs ----
   async appendJobLog(userId: string, input: JobLogInsert): Promise<JobLog> {
     this.logSeq += 1;

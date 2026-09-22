@@ -25,6 +25,7 @@ Create a worker key in the Sindral UI (Settings → Worker keys) and put it in t
 | `SINDRAL_WORKER_NAME` | hostname | Display name in the UI |
 | `SINDRAL_CLAUDE_BIN` / `SINDRAL_CODEX_BIN` / `SINDRAL_GH_BIN` | `claude` / `codex` / `gh` | Binaries to use |
 | `SINDRAL_JOB_TIMEOUT_MINUTES` | `90` | Hard limit per agent run |
+| `SINDRAL_RETENTION_DAYS` | `7` | Keep inactive worktrees, temp files, results, outputs, and logs for this many days |
 | `SINDRAL_ALLOW_PAT_MERGE` | `false` | Allow internal/local workers to merge using the configured PAT; keep disabled in production |
 | `LOG_LEVEL` | `info` | pino level |
 
@@ -33,10 +34,13 @@ Create a worker key in the Sindral UI (Settings → Worker keys) and put it in t
 ```sh
 pnpm --filter @sindral/worker dev      # tsx, pretty logs
 pnpm --filter @sindral/worker start    # node dist/cli.js start
-sindral-worker clean                   # remove worktrees/tmp dirs of tasks that are not running
+sindral-worker clean --dry-run         # preview inactive retained files eligible for cleanup
+sindral-worker clean                   # remove eligible files after server lease/worker checks
 ```
 
 `SIGINT`/`SIGTERM` stop claiming, wait up to 60s for running jobs, then kill the agent processes and report those jobs as failed ("worker shutting down").
+
+Cleanup requires a previously registered worker and a reachable server. It refuses to run while that worker is online or owns an active job lease, preserves repository clones, and removes only inactive worktrees, temporary directories, results, outputs, and logs older than `SINDRAL_RETENTION_DAYS`.
 
 ## What it does on your machine
 

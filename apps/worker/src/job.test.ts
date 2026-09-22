@@ -113,6 +113,22 @@ describe('runJob', () => {
     expect(log).toContain('job completed');
   });
 
+  it('reports a canonical-path violation without writing through an escaped log directory', async () => {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'sindral-log-escape-'));
+    try {
+      await fs.symlink(outside, path.join(workdir, 'logs'));
+      const engine = fakeEngine(async () => ({ finalText: JSON.stringify({ kind: 'plan', summary: 'x', plan: '# Plan' }) }));
+      const d = dispatch();
+      const { deps: jobDeps, api } = deps(engine, docWorkspace());
+      const outcome = await runJob(d, jobDeps, new AbortController().signal);
+      expect(outcome).toMatchObject({ status: 'failed', error: expect.stringMatching(/escapes worker root/) });
+      expect(api.failed).toHaveLength(1);
+      expect(await fs.readdir(outside)).toEqual([]);
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true });
+    }
+  });
+
   it('fails with the redacted output tail when the result file is missing', async () => {
     const engine = fakeEngine(async (opts) => {
       opts.onOutput(`leaked ${GH_TOKEN}`);

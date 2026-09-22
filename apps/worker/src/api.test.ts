@@ -97,6 +97,17 @@ describe('ApiClient', () => {
     await expect(api.claim({ workerId: 'w', max: 2 })).resolves.toEqual([]);
   });
 
+  it('reads cleanup status and disconnects through worker-authenticated routes', async () => {
+    const routes: string[] = [];
+    const { api } = client(async (url) => {
+      routes.push(url);
+      return response(200, url.endsWith('cleanup-status') ? { workerOnline: false, activeJobs: [] } : { ok: true });
+    });
+    await expect(api.cleanupStatus({ workerId: 'w' })).resolves.toEqual({ workerOnline: false, activeJobs: [] });
+    await expect(api.disconnect({ workerId: 'w' })).resolves.toEqual({ ok: true });
+    expect(routes).toEqual(['http://server.test/api/worker/cleanup-status', 'http://server.test/api/worker/disconnect']);
+  });
+
   it('stops retrying when the caller aborts', async () => {
     const controller = new AbortController();
     const fetchImpl = vi.fn(async () => {

@@ -156,12 +156,72 @@ describe('WorkspaceManager.prepare', () => {
     for (const dir of [base, keep, drop, tmpKeep, tmpDrop]) await fs.mkdir(dir, { recursive: true });
     const git = fakeGit((args) => (args[0] === 'worktree' && args[1] === 'list' ? ok(`worktree ${base}\nbare\n\nworktree ${keep}\n\nworktree ${drop}\n`) : undefined));
     const manager = new WorkspaceManager(workdir, { git: git.factory });
-    const removed = await manager.clean(new Set(['ENG-1', 'DOC-1']));
-    expect(removed).toEqual(expect.arrayContaining([drop, path.dirname(drop), tmpDrop]));
-    expect(removed).not.toContain(keep);
+    const old = new Date(Date.now() - 10 * 24 * 60 * 60_000);
+    for (const dir of [path.dirname(keep), path.dirname(drop), tmpKeep, tmpDrop]) await fs.utimes(dir, old, old);
+    const report = await manager.clean({
+      activeTaskKeys: new Set(['ENG-1', 'DOC-1']),
+      activeJobIds: new Set(),
+      olderThan: new Date(Date.now() - 7 * 24 * 60 * 60_000),
+    });
+    expect(report.removed).toEqual(expect.arrayContaining([drop, path.dirname(drop), tmpDrop]));
+    expect(report.removed).not.toContain(keep);
     expect(git.find('worktree', 'remove', '--force', drop)).toHaveLength(1);
     expect(git.find('worktree', 'remove', '--force', keep)).toHaveLength(0);
     await expect(fs.stat(tmpKeep)).resolves.toBeDefined();
     await expect(fs.stat(tmpDrop)).rejects.toThrow();
+  });
+
+  it('supports retention and dry-run cleanup for job files without touching active artifacts', async () => {
+    const oldJob = '10000000-0000-4000-8000-000000000001';
+    const activeJob = '20000000-0000-4000-8000-000000000002';
+    const recentJob = '30000000-0000-4000-8000-000000000003';
+    const paths = {
+      oldResult: path.join(workdir, 'results', `${oldJob}.json`),
+      activeLog: path.join(workdir, 'logs', `${activeJob}.log`),
+      recentOutput: path.join(workdir, 'outputs', recentJob),
+    };
+    await fs.mkdir(path.dirname(paths.oldResult), { recursive: true });
+    await fs.mkdir(path.dirname(paths.activeLog), { recursive: true });
+    await fs.mkdir(paths.recentOutput, { recursive: true });
+    await fs.writeFile(paths.oldResult, '{}');
+    await fs.writeFile(paths.activeLog, 'running');
+    const old = new Date(Date.now() - 10 * 24 * 60 * 60_000);
+    await fs.utimes(paths.oldResult, old, old);
+    await fs.utimes(paths.activeLog, old, old);
+
+    const manager = new WorkspaceManager(workdir, { git: fakeGit().factory });
+    const options = {
+      activeTaskKeys: new Set<string>(),
+      activeJobIds: new Set([activeJob]),
+      olderThan: new Date(Date.now() - 7 * 24 * 60 * 60_000),
+    };
+    const preview = await manager.clean({ ...options, dryRun: true });
+    expect(preview.wouldRemove).toEqual([paths.oldResult]);
+    await expect(fs.stat(paths.oldResult)).resolves.toBeDefined();
+    expect(preview.keptActive).toContain(paths.activeLog);
+    expect(preview.keptRecent).toContain(paths.recentOutput);
+
+    const applied = await manager.clean(options);
+    expect(applied.removed).toEqual([paths.oldResult]);
+    await expect(fs.stat(paths.oldResult)).rejects.toThrow();
+    await expect(fs.stat(paths.activeLog)).resolves.toBeDefined();
+    await expect(fs.stat(paths.recentOutput)).resolves.toBeDefined();
+  });
+
+  it('rejects a symlinked workspace that resolves outside the worker root', async () => {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'sindral-outside-'));
+    try {
+      await fs.symlink(outside, path.join(workdir, 'tmp'));
+      const manager = new WorkspaceManager(workdir, { git: fakeGit().factory });
+      await expect(manager.prepare({ taskKey: 'DOC-ESCAPE', repos: [], branch: null, baseBranch: null, githubToken: null })).rejects.toThrow(/escapes worker root/);
+      const escapedTask = path.join(outside, 'DOC-ESCAPE');
+      const old = new Date(Date.now() - 10 * 24 * 60 * 60_000);
+      await fs.utimes(escapedTask, old, old);
+      const report = await manager.clean({ activeTaskKeys: new Set(), activeJobIds: new Set(), olderThan: new Date() });
+      expect(report.removed).toEqual([]);
+      await expect(fs.stat(escapedTask)).resolves.toBeDefined();
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true });
+    }
   });
 });

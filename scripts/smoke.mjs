@@ -74,10 +74,14 @@ const WH = { authorization: `Bearer ${wk.body.secret}`, 'content-type': 'applica
 const w = (p, body) => j(`${API}${p}`, { method: 'POST', headers: WH, body: JSON.stringify(body) });
 const reg = await w('/api/worker/register', { name: 'laptop', hostname: 'mac', version: 'worker/0.1.0' });
 ok(reg.status === 200 && reg.body.workerId && reg.body.protocolVersion === WORKER_PROTOCOL_VERSION, 'worker protocol negotiated and registered');
+const cleanupOnline = await w('/api/worker/cleanup-status', { workerId: reg.body.workerId });
+ok(cleanupOnline.status === 200 && cleanupOnline.body.workerOnline && cleanupOnline.body.activeJobs.length === 0, 'cleanup guard sees the online worker');
 const claim = await w('/api/worker/jobs/claim', { workerId: reg.body.workerId, max: 2 });
 ok(claim.status === 200 && claim.body.jobs.length === 1 && claim.body.jobs[0].job.payload.step.id === 'planning', 'worker claimed planning job via claim_jobs()');
 const jobDispatch = claim.body.jobs[0];
 const job = jobDispatch.job;
+const cleanupLeased = await w('/api/worker/cleanup-status', { workerId: reg.body.workerId });
+ok(cleanupLeased.body.activeJobs.some((active) => active.jobId === job.id), 'cleanup guard reports the active job lease');
 ok(claim.body.jobs[0].credentials.githubToken === null, 'no github token yet -> null credential');
 const claim2 = await w('/api/worker/jobs/claim', { workerId: reg.body.workerId, max: 2 });
 ok(claim2.body.jobs.length === 0, 'second claim returns nothing (job serialised)');
@@ -171,6 +175,9 @@ const deletedArtifactDownload = await fetch(largeArtifact.downloadUrl);
 ok([400, 404].includes(deletedArtifactDownload.status), `stored artifact removed with task (${deletedArtifactDownload.status})`);
 ok((await api(`/api/tasks/${taskId}`)).status === 404, 'deleted task is gone');
 ok((await api('/api/tasks?includeSubtasks=true')).body.tasks.length === 0, 'subtasks cascade-deleted with the parent');
+ok((await w('/api/worker/disconnect', { workerId: reg.body.workerId })).status === 200, 'worker disconnected gracefully');
+const cleanupOffline = await w('/api/worker/cleanup-status', { workerId: reg.body.workerId });
+ok(cleanupOffline.status === 200 && !cleanupOffline.body.workerOnline && cleanupOffline.body.activeJobs.length === 0, 'cleanup guard allows an offline worker without leases');
 // ---- Row level security: the anon key + a user JWT must only ever see that user's rows ----
 const rest = (tok, path) => j(`${SUPA}/rest/v1/${path}`, { headers: { apikey: ANON, authorization: `Bearer ${tok}` } });
 const tokenB = su2.body.access_token;

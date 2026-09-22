@@ -6,7 +6,7 @@ import type { RouteOptions } from '../context.js';
 export const ONLINE_WINDOW_MS = 90_000;
 
 export function withComputedStatus(worker: Worker, now: number): Worker {
-  const online = now - Date.parse(worker.lastSeenAt) <= ONLINE_WINDOW_MS;
+  const online = worker.status === 'online' && now - Date.parse(worker.lastSeenAt) <= ONLINE_WINDOW_MS;
   return { ...worker, status: online ? 'online' : 'offline' };
 }
 

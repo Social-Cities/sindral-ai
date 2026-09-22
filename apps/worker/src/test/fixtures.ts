@@ -18,6 +18,7 @@ export function testConfig(overrides: Partial<WorkerConfig> = {}): WorkerConfig 
     codexBin: 'codex',
     ghBin: 'gh',
     jobTimeoutMs: 60_000,
+    retentionMs: 7 * 24 * 60 * 60_000,
     allowPatMerge: true,
     logLevel: 'silent',
     ...overrides,

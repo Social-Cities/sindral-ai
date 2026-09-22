@@ -30,6 +30,7 @@ function harness(batches: JobDispatch[][], overrides: Partial<RunnerDeps> = {}):
     failed,
     register: vi.fn(async () => ({ workerId: randomUUID(), protocolVersion: WORKER_PROTOCOL_VERSION })),
     heartbeat: vi.fn(async () => ({ ok: true as const })),
+    disconnect: vi.fn(async () => ({ ok: true as const })),
     claim: vi.fn(async (_body: { workerId: string; max: number }, signal?: AbortSignal) => {
       api.claims++;
       const batch = batches.shift();
@@ -96,6 +97,7 @@ describe('Runner', () => {
     await run;
     expect(h.api.register).toHaveBeenCalledWith({ name: 'test-worker', hostname: 'h', version: 'worker/test', workerId: 'old-id' });
     expect(persistence.saveWorkerId).toHaveBeenCalledTimes(1);
+    expect(h.api.disconnect).toHaveBeenCalledWith({ workerId: expect.any(String) });
   });
 
   it('fails before persistence or claiming when the server reports another protocol', async () => {
@@ -103,6 +105,7 @@ describe('Runner', () => {
     const api = {
       register: vi.fn(async () => ({ workerId: randomUUID(), protocolVersion: WORKER_PROTOCOL_VERSION + 1 })),
       heartbeat: vi.fn(async () => ({ ok: true as const })),
+      disconnect: vi.fn(async () => ({ ok: true as const })),
       claim: vi.fn(async () => []),
       fail: vi.fn(async () => ({ ok: true as const })),
     };
@@ -205,6 +208,7 @@ describe('Runner', () => {
       api: {
         register: vi.fn(async () => ({ workerId: randomUUID(), protocolVersion: WORKER_PROTOCOL_VERSION })),
         heartbeat: vi.fn(async () => ({ ok: true as const })),
+        disconnect: vi.fn(async () => ({ ok: true as const })),
         claim: vi.fn(async () => {
           throw new WorkerAuthError('bad key');
         }),
@@ -218,6 +222,7 @@ describe('Runner', () => {
     const api = {
       register: vi.fn(async () => ({ workerId: randomUUID(), protocolVersion: WORKER_PROTOCOL_VERSION })),
       heartbeat: vi.fn(async () => ({ ok: true as const })),
+      disconnect: vi.fn(async () => ({ ok: true as const })),
       claim: vi.fn(async () => {
         throw new WorkerProtocolError('upgrade required');
       }),
@@ -235,6 +240,7 @@ describe('Runner', () => {
       api: {
         register: vi.fn(async () => ({ workerId: randomUUID(), protocolVersion: WORKER_PROTOCOL_VERSION })),
         heartbeat: vi.fn(async () => ({ ok: true as const })),
+        disconnect: vi.fn(async () => ({ ok: true as const })),
         claim: vi.fn(async () => {
           calls++;
           if (calls === 1) throw new Error('503');

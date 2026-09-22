@@ -57,6 +57,8 @@ export interface ApiRoutes {
   // worker
   'POST /api/worker/register': { response: { workerId: string; protocolVersion: number } };
   'POST /api/worker/heartbeat': { response: { ok: true } };
+  'POST /api/worker/disconnect': { response: { ok: true } };
+  'POST /api/worker/cleanup-status': { response: { workerOnline: boolean; activeJobs: { jobId: string; taskKey: string }[] } };
   'POST /api/worker/jobs/claim': { response: { jobs: JobDispatch[] } };
   'POST /api/worker/jobs/:id/events': { response: { ok: true } };
   'POST /api/worker/jobs/:id/complete': { response: { ok: true } };

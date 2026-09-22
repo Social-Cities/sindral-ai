@@ -20,7 +20,7 @@ export interface RunnerPersistence {
 
 export interface RunnerDeps {
   config: Pick<WorkerConfig, 'concurrency' | 'workerName'>;
-  api: Pick<ApiClient, 'register' | 'heartbeat' | 'claim' | 'fail'>;
+  api: Pick<ApiClient, 'register' | 'heartbeat' | 'disconnect' | 'claim' | 'fail'>;
   logger: Logger;
   runJob: (dispatch: JobDispatch, signal: AbortSignal) => Promise<unknown>;
   version: string;
@@ -107,6 +107,11 @@ export class Runner {
       await this.claimLoop();
     } finally {
       await this.drain();
+      try {
+        await deps.api.disconnect({ workerId: registered.workerId });
+      } catch (err) {
+        deps.logger.warn({ err: errorMessage(err) }, 'could not mark worker offline');
+      }
     }
     if (this.fatal) throw this.fatal;
   }

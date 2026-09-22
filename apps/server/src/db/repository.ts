@@ -336,6 +336,8 @@ export interface Repository {
   cancelQueuedJobs(userId: string, taskId: string): Promise<number>;
   /** Cross-user: claimed/running/applying jobs, used by the stale-job sweeper. */
   listActiveJobs(): Promise<ActiveJob[]>;
+  /** Tenant- and worker-scoped active jobs used to guard local cleanup. */
+  listActiveJobsForWorker(userId: string, workerId: string): Promise<ActiveJob[]>;
 
   // job logs
   appendJobLog(userId: string, input: JobLogInsert): Promise<JobLog>;

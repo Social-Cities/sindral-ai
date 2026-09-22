@@ -20,6 +20,7 @@ const configSchema = z.object({
   SINDRAL_CODEX_BIN: z.string().trim().min(1).default('codex'),
   SINDRAL_GH_BIN: z.string().trim().min(1).default('gh'),
   SINDRAL_JOB_TIMEOUT_MINUTES: z.coerce.number().int().min(1).max(24 * 60).default(90),
+  SINDRAL_RETENTION_DAYS: z.coerce.number().int().min(0).max(3650).default(7),
   SINDRAL_ALLOW_PAT_MERGE: z.enum(['true', 'false']).default('false'),
   LOG_LEVEL: z.enum(LOG_LEVELS).default('info'),
 });
@@ -34,6 +35,7 @@ export interface WorkerConfig {
   codexBin: string;
   ghBin: string;
   jobTimeoutMs: number;
+  retentionMs: number;
   allowPatMerge: boolean;
   logLevel: (typeof LOG_LEVELS)[number];
 }
@@ -78,6 +80,7 @@ export function loadConfig(
     codexBin: c.SINDRAL_CODEX_BIN,
     ghBin: c.SINDRAL_GH_BIN,
     jobTimeoutMs: c.SINDRAL_JOB_TIMEOUT_MINUTES * 60_000,
+    retentionMs: c.SINDRAL_RETENTION_DAYS * 24 * 60 * 60_000,
     allowPatMerge: c.SINDRAL_ALLOW_PAT_MERGE === 'true',
     logLevel: c.LOG_LEVEL,
   };

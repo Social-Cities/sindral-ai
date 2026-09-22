@@ -1071,6 +1071,13 @@ export class SupabaseRepository implements Repository {
     return rows.map((row) => ({ ...mapJob(row), leaseToken: row.lease_token }));
   }
 
+  async listActiveJobsForWorker(userId: string, workerId: string): Promise<ActiveJob[]> {
+    const rows = await run<JobRow[]>(
+      this.client.from('jobs').select('*').eq('user_id', userId).eq('worker_id', workerId).in('status', ['claimed', 'running', 'applying']),
+    );
+    return rows.map((row) => ({ ...mapJob(row), leaseToken: row.lease_token }));
+  }
+
   // ---- job logs ----
   async appendJobLog(userId: string, input: JobLogInsert): Promise<JobLog> {
     const row = await run<JobLogRow>(

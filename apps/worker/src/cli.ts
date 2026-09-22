@@ -25,6 +25,7 @@ const CONFIG_KEYS = [
   'SINDRAL_CODEX_BIN',
   'SINDRAL_GH_BIN',
   'SINDRAL_JOB_TIMEOUT_MINUTES',
+  'SINDRAL_RETENTION_DAYS',
   'SINDRAL_ALLOW_PAT_MERGE',
   'LOG_LEVEL',
 ] as const;
@@ -33,7 +34,8 @@ const USAGE = `sindral-worker ${WORKER_VERSION}
 
 Usage:
   sindral-worker [start]   Run the worker daemon (default)
-  sindral-worker clean     Remove worktrees and temp dirs of tasks that are not running
+  sindral-worker clean [--dry-run]
+                           Remove inactive retained workspaces and job artifacts
   sindral-worker --version
   sindral-worker --help
 
@@ -105,15 +107,6 @@ function filePersistence(config: WorkerConfig): RunnerPersistence {
   };
 }
 
-async function readRunningTaskKeys(config: WorkerConfig): Promise<Set<string>> {
-  try {
-    const parsed = JSON.parse(await fs.readFile(workdirPaths(config.workdir).runningFile, 'utf8')) as { jobs?: RunningJob[] };
-    return new Set((parsed.jobs ?? []).flatMap((j) => j.taskKeys ?? []));
-  } catch {
-    return new Set();
-  }
-}
-
 async function start(config: WorkerConfig, logger: Logger): Promise<number> {
   await fs.mkdir(config.workdir, { recursive: true, mode: 0o700 });
   const engines = createEngines(config);
@@ -165,12 +158,28 @@ async function start(config: WorkerConfig, logger: Logger): Promise<number> {
   }
 }
 
-async function clean(config: WorkerConfig, logger: Logger): Promise<number> {
-  const running = await readRunningTaskKeys(config);
+async function clean(config: WorkerConfig, logger: Logger, dryRun: boolean): Promise<number> {
+  const workerId = await filePersistence(config).loadWorkerId();
+  if (!workerId) throw new Error('Cannot verify active leases: start this worker once before running cleanup');
+  const api = new ApiClient({ baseUrl: config.serverUrl, workerKey: config.workerKey, logger });
+  const status = await api.cleanupStatus({ workerId });
+  if (status.workerOnline || status.activeJobs.length > 0) {
+    const detail = status.workerOnline ? 'worker is online' : `${status.activeJobs.length} active job lease(s)`;
+    process.stderr.write(`cleanup refused: ${detail}; stop the worker and wait for active leases to finish or expire\n`);
+    return 2;
+  }
   const workspaces = new WorkspaceManager(config.workdir, { logger });
-  const removed = await workspaces.clean(running);
-  for (const p of removed) process.stdout.write(`removed ${p}\n`);
-  process.stdout.write(`${removed.length} path(s) removed; ${running.size} running task(s) kept\n`);
+  const report = await workspaces.clean({
+    activeTaskKeys: new Set(status.activeJobs.map((job) => job.taskKey)),
+    activeJobIds: new Set(status.activeJobs.map((job) => job.jobId)),
+    olderThan: new Date(Date.now() - config.retentionMs),
+    dryRun,
+  });
+  const paths = dryRun ? report.wouldRemove : report.removed;
+  for (const candidate of paths) process.stdout.write(`${dryRun ? 'would remove' : 'removed'} ${candidate}\n`);
+  process.stdout.write(
+    `${paths.length} path(s) ${dryRun ? 'eligible' : 'removed'}; ${report.keptRecent.length} recent path(s) kept; retention ${Math.round(config.retentionMs / 86_400_000)} day(s)\n`,
+  );
   return 0;
 }
 
@@ -188,6 +197,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     process.stderr.write(`Unknown command: ${command}\n\n${USAGE}\n`);
     return 1;
   }
+  const commandArgs = argv.slice(1);
+  if (commandArgs.some((arg) => arg !== '--dry-run') || (command === 'start' && commandArgs.length > 0)) {
+    process.stderr.write(`Invalid arguments for ${command}\n\n${USAGE}\n`);
+    return 1;
+  }
 
   let config: WorkerConfig;
   try {
@@ -200,7 +214,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     throw err;
   }
   const logger = createLogger(config.logLevel);
-  return command === 'clean' ? clean(config, logger) : start(config, logger);
+  return command === 'clean' ? clean(config, logger, commandArgs.includes('--dry-run')) : start(config, logger);
 }
 
 const invokedDirectly = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);

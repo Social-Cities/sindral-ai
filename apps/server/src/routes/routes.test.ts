@@ -292,6 +292,23 @@ describe('worker API', () => {
     expect((await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/events`, headers, payload: { type: 'log', message: 'late', attempt: 1, leaseToken } })).statusCode).toBe(409);
   });
 
+  it('reports cleanup guards and marks a graceful worker disconnect offline', async () => {
+    const { headers, workerId } = await registeredWorker();
+    const online = await ctx.app.inject({ method: 'POST', url: '/api/worker/cleanup-status', headers, payload: { workerId } });
+    expect(online.json()).toEqual({ workerOnline: true, activeJobs: [] });
+
+    expect((await ctx.app.inject({ method: 'POST', url: '/api/worker/disconnect', headers, payload: { workerId } })).json()).toEqual({ ok: true });
+    const offline = await ctx.app.inject({ method: 'POST', url: '/api/worker/cleanup-status', headers, payload: { workerId } });
+    expect(offline.json()).toEqual({ workerOnline: false, activeJobs: [] });
+
+    const task = await createTask();
+    await taskAction(task.id, 'start');
+    const claim = await ctx.app.inject({ method: 'POST', url: '/api/worker/jobs/claim', headers, payload: { workerId } });
+    const jobId = claim.json<{ jobs: { job: { id: string } }[] }>().jobs[0]!.job.id;
+    const guarded = await ctx.app.inject({ method: 'POST', url: '/api/worker/cleanup-status', headers, payload: { workerId } });
+    expect(guarded.json()).toEqual({ workerOnline: true, activeJobs: [{ jobId, taskKey: task.key }] });
+  });
+
   it('long-polls until a job appears', async () => {
     const slow = await createTestApp({ claim: { waitMs: 1500, pollMs: 20 } });
     try {
@@ -333,6 +350,9 @@ describe('worker API', () => {
     let res = await ctx.app.inject({ method: 'GET', url: '/api/workers', headers: asA() });
     expect(res.json<{ workers: { id: string; status: string }[] }>().workers).toEqual([expect.objectContaining({ id: workerId, status: 'online' })]);
     await ctx.repo.updateWorker(ctx.userA, workerId, { lastSeenAt: new Date(Date.now() - 120_000).toISOString() });
+    res = await ctx.app.inject({ method: 'GET', url: '/api/workers', headers: asA() });
+    expect(res.json<{ workers: { status: string }[] }>().workers[0]!.status).toBe('offline');
+    await ctx.repo.updateWorker(ctx.userA, workerId, { status: 'offline', lastSeenAt: new Date().toISOString() });
     res = await ctx.app.inject({ method: 'GET', url: '/api/workers', headers: asA() });
     expect(res.json<{ workers: { status: string }[] }>().workers[0]!.status).toBe('offline');
     expect((await ctx.app.inject({ method: 'GET', url: '/api/workers', headers: asB() })).json()).toEqual({ workers: [] });

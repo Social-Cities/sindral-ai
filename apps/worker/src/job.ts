@@ -17,7 +17,7 @@ import { runMergePullRequests } from './merge.js';
 import type { run } from './proc.js';
 import { Redactor } from './redact.js';
 import { describeFailure, extractJsonCandidate, parseRawResult, readResultFile, summaryOf, validateResult } from './result.js';
-import type { GitFactory, WorkspaceManager } from './workspace.js';
+import { assertPathContained, type GitFactory, type WorkspaceManager } from './workspace.js';
 
 export const SHUTDOWN_REASON = 'worker shutting down';
 const PROGRESS_INTERVAL_MS = 60_000;
@@ -48,11 +48,12 @@ export async function runJob(dispatch: JobDispatch, deps: JobDeps, signal: Abort
   const log = deps.logger.child({ jobId: job.id, taskId: job.taskId, kind: job.kind });
   const redactor = new Redactor().add(deps.config.workerKey, credentials.githubToken, dispatch.lease.token, ...gitAuth(credentials.githubToken).secrets);
   const events = new JobEventStream(deps.api, job.id, job.attempt, dispatch.lease.token, redactor, log);
-  const local = await openLocalLog(deps.config.workdir, job.id);
+  let local = { write: (_line: string) => {}, close: async () => {} };
   const write = (line: string) => local.write(`${new Date().toISOString()} ${redactor.redact(line)}\n`);
 
   let outcome: JobOutcome;
   try {
+    local = await openLocalLog(deps.config.workdir, job.id);
     write(`job ${job.id} started (${job.kind}, attempt ${job.attempt})`);
     const result =
       job.payload.kind === 'rebase-stack'
@@ -160,7 +161,11 @@ async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx:
   const resultFile = path.join(paths.results, `${jobId}.json`);
   const outputDir = path.join(paths.outputs, jobId);
   await fsp.mkdir(paths.results, { recursive: true });
+  await fsp.mkdir(paths.outputs, { recursive: true });
+  await assertPathContained(config.workdir, paths.results);
+  await assertPathContained(config.workdir, paths.outputs);
   await fsp.mkdir(outputDir, { recursive: true });
+  await assertPathContained(config.workdir, outputDir);
   await fsp.rm(resultFile, { force: true });
 
   const prompt = buildPrompt({ step, output, context: payload.context, resultFile, outputDir, workspace });
@@ -300,6 +305,7 @@ function assertJobId(id: string): string {
 async function openLocalLog(workdir: string, jobId: string): Promise<{ write: (line: string) => void; close: () => Promise<void> }> {
   const dir = workdirPaths(workdir).logs;
   await fsp.mkdir(dir, { recursive: true });
+  await assertPathContained(workdir, dir);
   const file = path.join(dir, `${assertJobId(jobId)}.log`);
   const stream = fs.createWriteStream(file, { flags: 'a' });
   stream.on('error', () => {

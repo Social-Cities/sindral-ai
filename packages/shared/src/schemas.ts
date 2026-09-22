@@ -110,6 +110,8 @@ export const workerClaimSchema = z.object({
   max: z.number().int().min(1).max(10).default(1),
 });
 
+export const workerIdentitySchema = z.object({ workerId: z.string().uuid() });
+
 export const workerJobEventSchema = z.object({
   type: z.enum(['log', 'progress', 'message']),
   message: z.string().max(20_000),
@@ -233,4 +235,5 @@ export type SetSecretInput = z.infer<typeof setSecretSchema>;
 export type WorkerRegisterInput = z.infer<typeof workerRegisterSchema>;
 export type WorkerHeartbeatInput = z.infer<typeof workerHeartbeatSchema>;
 export type WorkerClaimInput = z.infer<typeof workerClaimSchema>;
+export type WorkerIdentityInput = z.infer<typeof workerIdentitySchema>;
 export type WorkerJobEventInput = z.infer<typeof workerJobEventSchema>;

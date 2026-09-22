@@ -16,7 +16,7 @@ import { buildPrompt } from './prompt.js';
 import { run, type RunResult } from './proc.js';
 import { readResultFile, parseRawResult, validateResult } from './result.js';
 import type { Redactor } from './redact.js';
-import { parseRepo, worktreeDir, type GitFactory, type WorkspaceManager } from './workspace.js';
+import { assertPathContained, parseRepo, worktreeDir, type GitFactory, type WorkspaceManager } from './workspace.js';
 
 const SHA_RE = /^[0-9a-f]{40}$/i;
 const CONFLICT_MARKER_RE = /^(<{7}|={7}|>{7})/m;
@@ -104,9 +104,12 @@ export async function runConflictResolution(opts: ConflictResolutionOptions): Pr
     const paths = workdirPaths(opts.config.workdir);
     await fs.mkdir(paths.results, { recursive: true });
     await fs.mkdir(paths.outputs, { recursive: true });
+    await assertPathContained(opts.config.workdir, paths.results);
+    await assertPathContained(opts.config.workdir, paths.outputs);
     const resultFile = path.join(paths.results, `${opts.dispatch.job.id}.json`);
     const outputDir = path.join(paths.outputs, opts.dispatch.job.id);
     await fs.mkdir(outputDir, { recursive: true });
+    await assertPathContained(opts.config.workdir, outputDir);
     await fs.rm(resultFile, { force: true });
 
     const step: WorkflowStep = {

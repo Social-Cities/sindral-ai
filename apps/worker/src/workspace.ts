@@ -80,6 +80,31 @@ export interface PrepareOptions {
 
 export type GitFactory = (cwd: string, auth: GitAuth) => GitRunner;
 
+export interface CleanupOptions {
+  activeTaskKeys: Set<string>;
+  activeJobIds: Set<string>;
+  /** Entries with an mtime newer than this instant are retained. */
+  olderThan: Date;
+  dryRun?: boolean;
+}
+
+export interface CleanupReport {
+  removed: string[];
+  wouldRemove: string[];
+  keptActive: string[];
+  keptRecent: string[];
+}
+
+/** Resolve both paths after creation and reject symlink escapes from root. */
+export async function assertPathContained(root: string, candidate: string): Promise<string> {
+  const [realRoot, realCandidate] = await Promise.all([fs.realpath(root), fs.realpath(candidate)]);
+  const relative = path.relative(realRoot, realCandidate);
+  if (!relative || relative.startsWith(`..${path.sep}`) || relative === '..' || path.isAbsolute(relative)) {
+    throw new Error(`Path escapes worker root: ${candidate}`);
+  }
+  return realCandidate;
+}
+
 export class WorkspaceManager {
   private readonly paths;
   private readonly log: Logger;
@@ -95,10 +120,13 @@ export class WorkspaceManager {
   }
 
   async prepare(opts: PrepareOptions): Promise<Workspace> {
+    await fs.mkdir(this.workdir, { recursive: true, mode: 0o700 });
     const taskKey = sanitizeTaskKey(opts.taskKey);
     if (opts.repos.length === 0) {
       const cwd = tmpDir(this.workdir, taskKey);
       await fs.mkdir(cwd, { recursive: true });
+      await assertPathContained(this.workdir, cwd);
+      await touch(cwd);
       return { taskKey, cwd, repos: [] };
     }
     const auth = gitAuth(opts.githubToken);
@@ -110,6 +138,7 @@ export class WorkspaceManager {
       const baseBranch = opts.baseBranch ? assertBranchName(opts.baseBranch) : await this.defaultBranch(base);
       const dir = worktreeDir(this.workdir, taskKey, repo);
       const resumed = await this.ensureWorktree({ repoDir: base, dir, branch, baseBranch, auth });
+      await touch(path.dirname(dir));
       repos.push({ repo, repoDir: base, dir, branch, baseBranch, resumed });
     }
     const first = repos[0];
@@ -121,11 +150,13 @@ export class WorkspaceManager {
   async ensureRepo(repo: RepoRef, auth: GitAuth): Promise<string> {
     const dir = repoDir(this.workdir, repo);
     await fs.mkdir(this.paths.repos, { recursive: true });
+    await assertPathContained(this.workdir, this.paths.repos);
     if (!(await exists(path.join(dir, '.git')))) {
       this.log.info({ repo: repo.full }, 'cloning repository');
       await fs.rm(dir, { recursive: true, force: true });
       await this.git(this.paths.repos, auth)(['clone', '--no-checkout', `https://github.com/${repo.full}.git`, dir]);
     }
+    if (await exists(dir)) await assertPathContained(this.paths.repos, dir);
     const git = this.git(dir, auth);
     await git(['fetch', '--prune', 'origin']);
     await git.try(['worktree', 'prune']);
@@ -159,6 +190,7 @@ export class WorkspaceManager {
 
     const existing = await this.listWorktrees(opts.repoDir);
     if (existing.includes(opts.dir) && (await exists(opts.dir))) {
+      await assertPathContained(this.paths.worktrees, opts.dir);
       const wt = this.git(opts.dir, opts.auth);
       await wt.try(['checkout', opts.branch]);
       if (resumed) {
@@ -171,34 +203,92 @@ export class WorkspaceManager {
     }
 
     await fs.rm(opts.dir, { recursive: true, force: true });
+    await fs.mkdir(this.paths.worktrees, { recursive: true });
+    await assertPathContained(this.workdir, this.paths.worktrees);
     await fs.mkdir(path.dirname(opts.dir), { recursive: true });
+    await assertPathContained(this.workdir, path.dirname(opts.dir));
     await git(['worktree', 'add', '-B', opts.branch, opts.dir, startPoint]);
+    if (await exists(opts.dir)) await assertPathContained(this.paths.worktrees, opts.dir);
     return resumed;
   }
 
-  /** Removes worktrees and tmp dirs of tasks that are not running. Returns removed paths. */
-  async clean(runningTaskKeys: Set<string>): Promise<string[]> {
-    const removed: string[] = [];
-    const running = new Set([...runningTaskKeys].map(sanitizeTaskKey));
-    const repoDirs = await listDirs(this.paths.repos);
+  /** Removes retained local artifacts only when their task/job is inactive. */
+  async clean(options: CleanupOptions): Promise<CleanupReport> {
+    const report: CleanupReport = { removed: [], wouldRemove: [], keptActive: [], keptRecent: [] };
+    const activeTasks = new Set([...options.activeTaskKeys].map(sanitizeTaskKey));
+    const cutoff = options.olderThan.getTime();
+    const remove = async (candidate: string, action?: () => Promise<unknown>) => {
+      try {
+        await assertPathContained(this.workdir, candidate);
+      } catch (err) {
+        this.log.warn({ path: candidate, err: err instanceof Error ? err.message : String(err) }, 'refusing cleanup path outside worker root');
+        return;
+      }
+      if (options.dryRun) {
+        if (!report.wouldRemove.includes(candidate)) report.wouldRemove.push(candidate);
+        return;
+      }
+      if (action) await action();
+      else await fs.rm(candidate, { recursive: true, force: true });
+      if (!report.removed.includes(candidate)) report.removed.push(candidate);
+    };
+    const retain = async (candidate: string, active: boolean): Promise<boolean> => {
+      if (active) {
+        if (!report.keptActive.includes(candidate)) report.keptActive.push(candidate);
+        return true;
+      }
+      const stat = await fs.stat(candidate).catch(() => null);
+      if (!stat || stat.mtimeMs > cutoff) {
+        if (stat && !report.keptRecent.includes(candidate)) report.keptRecent.push(candidate);
+        return true;
+      }
+      return false;
+    };
+    const safeRoot = async (candidate: string): Promise<boolean> => {
+      if (!(await exists(candidate))) return false;
+      try {
+        await assertPathContained(this.workdir, candidate);
+        return true;
+      } catch (err) {
+        this.log.warn({ path: candidate, err: err instanceof Error ? err.message : String(err) }, 'refusing cleanup root outside worker root');
+        return false;
+      }
+    };
+
+    const repoDirs = (await safeRoot(this.paths.repos)) ? await listDirs(this.paths.repos) : [];
     for (const dir of repoDirs) {
+      if (!(await safeRoot(dir))) continue;
       for (const wt of await this.listWorktrees(dir)) {
         const rel = path.relative(this.paths.worktrees, wt);
         const taskKey = rel.split(path.sep)[0];
-        if (rel.startsWith('..') || path.isAbsolute(rel) || !taskKey || running.has(taskKey)) continue;
-        await this.git(dir, gitAuth(null)).try(['worktree', 'remove', '--force', wt]);
-        removed.push(wt);
+        if (rel.startsWith('..') || path.isAbsolute(rel) || !taskKey) continue;
+        const taskDir = path.join(this.paths.worktrees, taskKey);
+        if (await retain(taskDir, activeTasks.has(taskKey))) continue;
+        await remove(wt, async () => {
+          const result = await this.git(dir, gitAuth(null)).try(['worktree', 'remove', '--force', wt]);
+          if (result.failed || result.exitCode !== 0) throw new Error(result.message || result.stderr || 'git worktree remove failed');
+        });
       }
-      await this.git(dir, gitAuth(null)).try(['worktree', 'prune']);
+      if (!options.dryRun) await this.git(dir, gitAuth(null)).try(['worktree', 'prune']);
     }
     for (const base of [this.paths.worktrees, this.paths.tmp]) {
+      if (!(await safeRoot(base))) continue;
       for (const taskDir of await listDirs(base)) {
-        if (running.has(path.basename(taskDir))) continue;
-        await fs.rm(taskDir, { recursive: true, force: true });
-        if (!removed.includes(taskDir)) removed.push(taskDir);
+        if (await retain(taskDir, activeTasks.has(path.basename(taskDir)))) continue;
+        await remove(taskDir);
       }
     }
-    return removed;
+    for (const [base, kind] of [[this.paths.results, 'file'], [this.paths.logs, 'file'], [this.paths.outputs, 'directory']] as const) {
+      if (!(await safeRoot(base))) continue;
+      for (const entry of await listEntries(base)) {
+        if ((kind === 'directory') !== entry.isDirectory()) continue;
+        const jobId = kind === 'directory' ? entry.name : entry.name.replace(/\.(json|log)$/, '');
+        const candidate = path.join(base, entry.name);
+        if (await retain(candidate, options.activeJobIds.has(jobId))) continue;
+        await remove(candidate);
+      }
+    }
+    return report;
   }
 }
 
@@ -248,4 +338,17 @@ async function listDirs(base: string): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+async function listEntries(base: string) {
+  try {
+    return await fs.readdir(base, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+}
+
+async function touch(candidate: string): Promise<void> {
+  const now = new Date();
+  await fs.utimes(candidate, now, now);
 }

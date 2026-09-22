@@ -2,6 +2,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import {
   workerClaimSchema,
   workerHeartbeatSchema,
+  workerIdentitySchema,
   workerJobCompleteSchema,
   workerJobEventSchema,
   workerJobFailSchema,
@@ -16,6 +17,7 @@ import type { RouteOptions } from '../context.js';
 import { conflict, notFound, upgradeRequired } from '../errors.js';
 import { idParamsSchema, validate } from '../validate.js';
 import { hasGitHubAppCredentials, mintGitHubInstallationToken } from '../services/githubApp.js';
+import { withComputedStatus } from './workers.js';
 
 function repositoriesForJob(job: JobDispatch['job']): string[] {
   switch (job.payload.kind) {
@@ -67,6 +69,30 @@ export const workerRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx 
     await repo.renewJobLeases(userId, worker.id, input.runningJobs);
     hub.publish(userId, { type: 'worker.updated', workerId: worker.id });
     return { ok: true as const };
+  });
+
+  app.post('/api/worker/disconnect', async (request) => {
+    const { userId } = request.worker!;
+    const { workerId } = validate(workerIdentitySchema, request.body);
+    const worker = await repo.updateWorker(userId, workerId, { status: 'offline', runningJobs: 0 });
+    if (!worker) throw notFound('Worker');
+    hub.publish(userId, { type: 'worker.updated', workerId: worker.id });
+    return { ok: true as const };
+  });
+
+  app.post('/api/worker/cleanup-status', async (request) => {
+    const { userId } = request.worker!;
+    const { workerId } = validate(workerIdentitySchema, request.body);
+    const worker = await repo.getWorker(userId, workerId);
+    if (!worker) throw notFound('Worker');
+    const now = new Date();
+    const activeJobs = [];
+    for (const job of await repo.listActiveJobsForWorker(userId, workerId)) {
+      if (job.status !== 'applying' && (!job.leaseExpiresAt || Date.parse(job.leaseExpiresAt) <= now.getTime())) continue;
+      const task = await repo.getTask(userId, job.taskId);
+      if (task) activeJobs.push({ jobId: job.id, taskKey: task.key });
+    }
+    return { workerOnline: withComputedStatus(worker, now.getTime()).status === 'online', activeJobs };
   });
 
   app.post('/api/worker/jobs/claim', async (request) => {

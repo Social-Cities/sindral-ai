@@ -17,6 +17,7 @@ describe('loadConfig', () => {
     expect(config.codexBin).toBe('codex');
     expect(config.ghBin).toBe('gh');
     expect(config.jobTimeoutMs).toBe(90 * 60_000);
+    expect(config.retentionMs).toBe(7 * 24 * 60 * 60_000);
     expect(config.allowPatMerge).toBe(false);
     expect(config.logLevel).toBe('info');
   });
@@ -37,11 +38,12 @@ describe('loadConfig', () => {
 
   it('parses numeric and named settings', () => {
     const config = loadConfig(
-      { ...base, SINDRAL_CONCURRENCY: '4', SINDRAL_JOB_TIMEOUT_MINUTES: '15', SINDRAL_WORKER_NAME: 'mac', LOG_LEVEL: 'debug', SINDRAL_CLAUDE_BIN: '/opt/claude', SINDRAL_ALLOW_PAT_MERGE: 'true' },
+      { ...base, SINDRAL_CONCURRENCY: '4', SINDRAL_JOB_TIMEOUT_MINUTES: '15', SINDRAL_RETENTION_DAYS: '30', SINDRAL_WORKER_NAME: 'mac', LOG_LEVEL: 'debug', SINDRAL_CLAUDE_BIN: '/opt/claude', SINDRAL_ALLOW_PAT_MERGE: 'true' },
       opts,
     );
     expect(config.concurrency).toBe(4);
     expect(config.jobTimeoutMs).toBe(15 * 60_000);
+    expect(config.retentionMs).toBe(30 * 24 * 60 * 60_000);
     expect(config.workerName).toBe('mac');
     expect(config.logLevel).toBe('debug');
     expect(config.claudeBin).toBe('/opt/claude');
@@ -58,6 +60,7 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...base, SINDRAL_SERVER_URL: 'not a url' }, opts)).toThrow(ConfigError);
     expect(() => loadConfig({ ...base, SINDRAL_CONCURRENCY: '9' }, opts)).toThrow(/SINDRAL_CONCURRENCY/);
     expect(() => loadConfig({ ...base, SINDRAL_CONCURRENCY: '0' }, opts)).toThrow(/SINDRAL_CONCURRENCY/);
+    expect(() => loadConfig({ ...base, SINDRAL_RETENTION_DAYS: '-1' }, opts)).toThrow(/SINDRAL_RETENTION_DAYS/);
     expect(() => loadConfig({ ...base, LOG_LEVEL: 'loud' }, opts)).toThrow(/LOG_LEVEL/);
   });
 
