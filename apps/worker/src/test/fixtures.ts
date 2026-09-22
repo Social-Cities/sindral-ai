@@ -81,13 +81,18 @@ export function job(overrides: Partial<Job> = {}): Job {
     dedupeKey: null,
     createdAt: new Date().toISOString(),
     claimedAt: null,
+    leaseExpiresAt: null,
     finishedAt: null,
     ...overrides,
   };
 }
 
 export function dispatch(jobOverrides: Partial<Job> = {}, githubToken: string | null = GH_TOKEN): JobDispatch {
-  return { job: job(jobOverrides), credentials: { githubToken, githubCredential: githubToken ? 'pat' : null } };
+  return {
+    job: job(jobOverrides),
+    lease: { token: '10000000-0000-4000-8000-000000000001', expiresAt: new Date(Date.now() + 90_000).toISOString() },
+    credentials: { githubToken, githubCredential: githubToken ? 'pat' : null },
+  };
 }
 
 export function ok(stdout = ''): RunResult {

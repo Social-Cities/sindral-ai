@@ -5,6 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp, type AppOptions } from '../app.js';
 import type { AppConfig } from '../config.js';
 import { MemoryRepository } from '../db/memory.js';
+import type { ClaimedJob } from '../db/repository.js';
 import { generateWorkerKey } from '../services/crypto.js';
 
 export const TEST_JWT_SECRET = 'test-jwt-secret-that-is-long-enough-for-hs256-0123456789';
@@ -84,7 +85,7 @@ export async function createTestApp(options: Partial<AppOptions> = {}): Promise<
 }
 
 /** Test-side stand-in for a worker: claims the next job for the user and returns it. */
-export async function claimNext(ctx: TestContext, userId: string, workerId?: string): Promise<Job | null> {
+export async function claimNext(ctx: TestContext, userId: string, workerId?: string): Promise<ClaimedJob | null> {
   const id = workerId ?? (await ctx.repo.createWorker(userId, { name: 'w', hostname: 'h', version: '1', workerKeyId: null })).id;
   const jobs = await ctx.repo.claimJobs(userId, id, 1);
   return jobs[0] ?? null;
@@ -93,7 +94,7 @@ export async function claimNext(ctx: TestContext, userId: string, workerId?: str
 export async function completeNext(ctx: TestContext, userId: string, result: AgentResult): Promise<Job> {
   const job = await claimNext(ctx, userId);
   if (!job) throw new Error('no job to claim');
-  await ctx.app.ctx.orchestrator.completeJob(userId, job.id, result);
+  await ctx.app.ctx.orchestrator.completeJob(userId, job.id, result, job.attempt, job.leaseToken);
   return job;
 }
 
@@ -112,7 +113,7 @@ export async function completeMerge(ctx: TestContext, userId: string): Promise<J
       merged: true,
       mergedAt: '2026-09-21T12:00:00.000Z',
     })),
-  });
+  }, job.attempt, job.leaseToken);
   return job;
 }
 

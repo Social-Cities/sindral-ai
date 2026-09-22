@@ -4,9 +4,11 @@ import type { AgentResult, Artifact, Job, Message, PullRequest, SecretProvider, 
 import {
   ConflictError,
   RepositoryError,
+  type ActiveJob,
   type ArtifactInsert,
   type EventInsert,
   type JobInsert,
+  type ClaimedJob,
   type JobOutcomeClaim,
   type JobLog,
   type JobLogInsert,
@@ -56,6 +58,7 @@ export class MemoryRepository implements Repository {
   private readonly artifacts = new Map<string, Owned<Artifact>>();
   private readonly artifactDedupe = new Map<string, string>();
   private readonly jobs = new Map<string, Job>();
+  private readonly jobLeaseTokens = new Map<string, string>();
   private readonly jobLogs = new Map<number, Owned<JobLog>>();
   private readonly workers = new Map<string, Worker>();
   private readonly workerKeys = new Map<string, WorkerKeyLookup>();
@@ -255,6 +258,7 @@ export class MemoryRepository implements Repository {
         dedupeKey: command.job.dedupeKey ?? null,
         createdAt: this.now(),
         claimedAt: null,
+        leaseExpiresAt: null,
         finishedAt: null,
       };
       this.jobs.set(job.id, job);
@@ -535,6 +539,7 @@ export class MemoryRepository implements Repository {
       dedupeKey: input.dedupeKey ?? null,
       createdAt: this.now(),
       claimedAt: null,
+      leaseExpiresAt: null,
       finishedAt: null,
     };
     this.jobs.set(job.id, job);
@@ -547,16 +552,18 @@ export class MemoryRepository implements Repository {
     attempt: number,
     outcomeHash: string,
     outcome: { result: AgentResult; error?: never } | { error: string; result?: never },
+    leaseToken: string,
   ): Promise<JobOutcomeClaim> {
     const job = this.jobs.get(jobId);
     if (!job || job.userId !== userId) throw new ConflictError('Job does not exist or is not owned by this user');
-    if (job.attempt !== attempt) throw new ConflictError(`Job attempt ${attempt} has been superseded`);
+    if (job.attempt !== attempt || this.jobLeaseTokens.get(jobId) !== leaseToken) throw new ConflictError('Job lease has been superseded');
     if (job.outcomeHash && job.outcomeHash !== outcomeHash) throw new ConflictError('Job outcome does not match the accepted outcome');
     if (job.status === 'completed' || job.status === 'failed') return { job: clone(job), state: 'replay', token: null };
     if (job.status === 'applying' && job.outcomeStartedAt && Date.parse(job.outcomeStartedAt) > Date.now() - 30_000) {
       return { job: clone(job), state: 'busy', token: null };
     }
     if (job.status !== 'claimed' && job.status !== 'running' && job.status !== 'applying') throw new ConflictError(`Job is ${job.status}`);
+    if (job.status !== 'applying' && (!job.leaseExpiresAt || Date.parse(job.leaseExpiresAt) <= Date.now())) throw new ConflictError('Job lease has expired');
     const token = randomUUID();
     Object.assign(job, {
       status: 'applying' as const,
@@ -590,7 +597,7 @@ export class MemoryRepository implements Repository {
   async abandonJobOutcome(userId: string, jobId: string, attempt: number, outcomeHash: string, token: string): Promise<void> {
     const job = this.jobs.get(jobId);
     if (job?.userId === userId && job.status === 'applying' && job.attempt === attempt && job.outcomeHash === outcomeHash && job.outcomeToken === token) {
-      Object.assign(job, { status: 'running', outcomeToken: null, outcomeStartedAt: null });
+      Object.assign(job, { status: 'running', outcomeToken: null, outcomeStartedAt: null, leaseExpiresAt: new Date(Date.now() + 90_000).toISOString() });
     }
   }
 
@@ -607,38 +614,55 @@ export class MemoryRepository implements Repository {
     const j = this.jobs.get(id);
     if (!j || j.userId !== userId) return null;
     Object.assign(j, clone(patch));
+    if (patch.status === 'queued') this.jobLeaseTokens.delete(id);
     return clone(j);
   }
 
-  async claimJobs(userId: string, workerId: string, max: number): Promise<Job[]> {
+  async claimJobs(userId: string, workerId: string, max: number): Promise<ClaimedJob[]> {
     const limit = Math.max(1, Math.min(max, 10));
     const busyTasks = new Set<string>();
     for (const j of this.jobs.values()) {
       if (j.userId === userId && (j.status === 'claimed' || j.status === 'running' || j.status === 'applying')) busyTasks.add(j.taskId);
     }
-    const claimed: Job[] = [];
+    const claimed: ClaimedJob[] = [];
     for (const j of this.jobs.values()) {
       if (claimed.length >= limit) break;
       if (j.userId !== userId || j.status !== 'queued' || busyTasks.has(j.taskId)) continue;
       j.status = 'claimed';
       j.workerId = workerId;
       j.claimedAt = this.now();
+      j.leaseExpiresAt = new Date(Date.now() + 90_000).toISOString();
+      const leaseToken = randomUUID();
+      this.jobLeaseTokens.set(j.id, leaseToken);
       busyTasks.add(j.taskId);
-      claimed.push(clone(j));
+      claimed.push({ ...clone(j), leaseToken });
     }
     return claimed;
   }
 
-  async renewJobLeases(userId: string, workerId: string, jobIds: string[], renewedAt: string): Promise<number> {
-    const ids = new Set(jobIds);
+  async renewJobLeases(userId: string, workerId: string, jobs: { jobId: string; leaseToken: string }[]): Promise<number> {
+    const tokens = new Map(jobs.map((job) => [job.jobId, job.leaseToken]));
     let renewed = 0;
     for (const job of this.jobs.values()) {
-      if (job.userId === userId && job.workerId === workerId && ids.has(job.id) && (job.status === 'claimed' || job.status === 'running')) {
-        job.claimedAt = renewedAt;
+      if (
+        job.userId === userId && job.workerId === workerId && tokens.get(job.id) === this.jobLeaseTokens.get(job.id) &&
+        job.leaseExpiresAt && Date.parse(job.leaseExpiresAt) > Date.now() && (job.status === 'claimed' || job.status === 'running')
+      ) {
+        job.leaseExpiresAt = new Date(Date.now() + 90_000).toISOString();
         renewed += 1;
       }
     }
     return renewed;
+  }
+
+  async activateJobLease(userId: string, jobId: string, attempt: number, leaseToken: string): Promise<boolean> {
+    const job = this.jobs.get(jobId);
+    const valid = Boolean(
+      job && job.userId === userId && job.attempt === attempt && this.jobLeaseTokens.get(jobId) === leaseToken && job.leaseExpiresAt &&
+      Date.parse(job.leaseExpiresAt) > Date.now() && (job.status === 'claimed' || job.status === 'running'),
+    );
+    if (valid) job!.status = 'running';
+    return valid;
   }
 
   async cancelQueuedJobs(userId: string, taskId: string): Promise<number> {
@@ -653,8 +677,10 @@ export class MemoryRepository implements Repository {
     return n;
   }
 
-  async listActiveJobs(): Promise<Job[]> {
-    return [...this.jobs.values()].filter((j) => j.status === 'claimed' || j.status === 'running' || j.status === 'applying').map(clone);
+  async listActiveJobs(): Promise<ActiveJob[]> {
+    return [...this.jobs.values()]
+      .filter((j) => j.status === 'claimed' || j.status === 'running' || j.status === 'applying')
+      .map((job) => ({ ...clone(job), leaseToken: this.jobLeaseTokens.get(job.id) ?? null }));
   }
 
   // ---- job logs ----

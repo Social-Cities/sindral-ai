@@ -273,6 +273,7 @@ export interface Job {
   dedupeKey: string | null;
   createdAt: string;
   claimedAt: string | null;
+  leaseExpiresAt: string | null;
   finishedAt: string | null;
 }
 
@@ -339,6 +340,7 @@ export type JobPayload = AgentJobPayload | RebaseStackJobPayload | ResolveRebase
 /** What the worker hands to the job runner: the job plus scoped credentials. */
 export interface JobDispatch {
   job: Job;
+  lease: { token: string; expiresAt: string };
   credentials: { githubToken: string | null; githubCredential: 'github-app' | 'pat' | null };
 }
 

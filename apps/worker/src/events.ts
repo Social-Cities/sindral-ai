@@ -25,6 +25,8 @@ export class JobEventStream {
   constructor(
     private readonly api: EventSink | Pick<ApiClient, 'postEvent'>,
     private readonly jobId: string,
+    private readonly attempt: number,
+    private readonly leaseToken: string,
     private readonly redactor: Redactor,
     private readonly log: Logger,
     private readonly flushIntervalMs: number = FLUSH_INTERVAL_MS,
@@ -52,7 +54,7 @@ export class JobEventStream {
   private emit(type: JobEvent['type'], message: string): void {
     if (this.closed) return;
     this.flush();
-    this.enqueue({ type, message: truncate(this.redactor.redact(message)) });
+    this.enqueue({ type, message: truncate(this.redactor.redact(message)), attempt: this.attempt, leaseToken: this.leaseToken });
   }
 
   /** Sends whatever is buffered right now. */
@@ -64,7 +66,7 @@ export class JobEventStream {
     if (this.buffer.length === 0) return;
     const lines = this.buffer;
     this.buffer = [];
-    for (const chunk of chunkLines(lines)) this.enqueue({ type: 'log', message: chunk });
+    for (const chunk of chunkLines(lines)) this.enqueue({ type: 'log', message: chunk, attempt: this.attempt, leaseToken: this.leaseToken });
   }
 
   /** Flushes and waits for in-flight deliveries. */

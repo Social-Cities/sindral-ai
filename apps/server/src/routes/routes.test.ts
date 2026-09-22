@@ -222,32 +222,37 @@ describe('worker API', () => {
 
     const empty = await ctx.app.inject({ method: 'POST', url: '/api/worker/jobs/claim', headers, payload: { workerId, max: 2 } });
     expect(empty.json()).toEqual({ jobs: [] });
-    expect((await ctx.app.inject({ method: 'POST', url: '/api/worker/heartbeat', headers, payload: { workerId, runningJobIds: [] } })).json()).toEqual({ ok: true });
-    expect((await ctx.app.inject({ method: 'POST', url: '/api/worker/heartbeat', headers, payload: { workerId: '00000000-0000-4000-8000-000000000000', runningJobIds: [] } })).statusCode).toBe(404);
+    expect((await ctx.app.inject({ method: 'POST', url: '/api/worker/heartbeat', headers, payload: { workerId, runningJobs: [] } })).json()).toEqual({ ok: true });
+    expect((await ctx.app.inject({ method: 'POST', url: '/api/worker/heartbeat', headers, payload: { workerId: '00000000-0000-4000-8000-000000000000', runningJobs: [] } })).statusCode).toBe(404);
 
     await ctx.app.ctx.secrets.set(ctx.userA, 'github', 'ghp_workertoken');
     const task = await createTask();
     await taskAction(task.id, 'start');
     const claim = await ctx.app.inject({ method: 'POST', url: '/api/worker/jobs/claim', headers, payload: { workerId } });
-    const { jobs } = claim.json<{ jobs: { job: { id: string; status: string; payload: { step: { id: string } } }; credentials: { githubToken: string | null } }[] }>();
+    const { jobs } = claim.json<{ jobs: { job: { id: string; status: string; payload: { step: { id: string } } }; lease: { token: string; expiresAt: string }; credentials: { githubToken: string | null } }[] }>();
     expect(jobs).toHaveLength(1);
     expect(jobs[0]!.job.status).toBe('claimed');
     expect(jobs[0]!.job.payload.step.id).toBe('planning');
     expect(jobs[0]!.credentials.githubToken).toBe('ghp_workertoken');
     const jobId = jobs[0]!.job.id;
+    const leaseToken = jobs[0]!.lease.token;
+    expect(leaseToken).toMatch(/^[0-9a-f-]{36}$/);
+    expect(jobs[0]!.job).not.toHaveProperty('leaseToken');
 
-    expect((await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/events`, headers, payload: { type: 'log', message: 'booting' } })).statusCode).toBe(200);
-    expect((await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/events`, headers, payload: { type: 'message', message: 'Working on it' } })).statusCode).toBe(200);
+    expect((await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/events`, headers, payload: { type: 'log', message: 'booting', attempt: 1, leaseToken } })).statusCode).toBe(200);
+    expect((await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/events`, headers, payload: { type: 'message', message: 'Working on it', attempt: 1, leaseToken } })).statusCode).toBe(200);
     expect((await ctx.repo.getJob(ctx.userA, jobId))?.status).toBe('running');
     const logs = await ctx.app.inject({ method: 'GET', url: `/api/jobs/${jobId}/logs`, headers: asA() });
     expect(logs.json<{ logs: { type: string; message: string }[] }>().logs.map((l) => l.message)).toEqual(['booting', 'Working on it']);
     expect((await ctx.repo.listMessages(ctx.userA, task.id)).map((m) => m.content)).toEqual(['Working on it']);
 
     expect((await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/complete`, headers, payload: { result: { kind: 'plan' } } })).statusCode).toBe(400);
-    const done = await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/complete`, headers, payload: { attempt: 1, result: plan('# P') } });
+    const wrongLease = await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/complete`, headers, payload: { attempt: 1, leaseToken: '20000000-0000-4000-8000-000000000002', result: plan('# P') } });
+    expect(wrongLease.statusCode).toBe(409);
+    const done = await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/complete`, headers, payload: { attempt: 1, leaseToken, result: plan('# P') } });
     expect(done.statusCode).toBe(200);
     expect((await ctx.repo.getTask(ctx.userA, task.id))?.state).toBe('plan-review');
-    expect((await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/events`, headers, payload: { type: 'log', message: 'late' } })).statusCode).toBe(409);
+    expect((await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/events`, headers, payload: { type: 'log', message: 'late', attempt: 1, leaseToken } })).statusCode).toBe(409);
   });
 
   it('long-polls until a job appears', async () => {
@@ -272,13 +277,14 @@ describe('worker API', () => {
     const task = await createTask();
     await taskAction(task.id, 'start');
     const claim = await ctx.app.inject({ method: 'POST', url: '/api/worker/jobs/claim', headers, payload: { workerId } });
-    const jobId = claim.json<{ jobs: { job: { id: string } }[] }>().jobs[0]!.job.id;
+    const claimed = claim.json<{ jobs: { job: { id: string }; lease: { token: string } }[] }>().jobs[0]!;
+    const jobId = claimed.job.id;
 
     const otherKey = await ctx.workerKeyFor(ctx.userB);
-    expect((await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/fail`, headers: { authorization: `Bearer ${otherKey}` }, payload: { attempt: 1, error: 'x' } })).statusCode).toBe(404);
+    expect((await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/fail`, headers: { authorization: `Bearer ${otherKey}` }, payload: { attempt: 1, leaseToken: claimed.lease.token, error: 'x' } })).statusCode).toBe(404);
     expect((await ctx.app.inject({ method: 'POST', url: '/api/worker/jobs/claim', headers: { authorization: `Bearer ${otherKey}` }, payload: { workerId } })).statusCode).toBe(404);
 
-    const failed = await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/fail`, headers, payload: { attempt: 1, error: 'agent crashed' } });
+    const failed = await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/fail`, headers, payload: { attempt: 1, leaseToken: claimed.lease.token, error: 'agent crashed' } });
     expect(failed.statusCode).toBe(200);
     const fresh = await ctx.repo.getTask(ctx.userA, task.id);
     expect(fresh).toMatchObject({ state: 'failure', lastError: 'agent crashed', failedStepId: 'planning' });

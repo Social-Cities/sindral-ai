@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { ApiClient, ApiRequestError, MAX_DELAY_MS, WorkerAuthError, backoffDelay } from './api.js';
 import { WORKER_KEY } from './test/fixtures.js';
 
+const LEASE_TOKEN = '10000000-0000-4000-8000-000000000001';
+
 function response(status: number, body: unknown): Response {
   return new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
@@ -48,7 +50,7 @@ describe('ApiClient', () => {
     const statuses = [500, 429, 200];
     const fetchImpl = vi.fn(async () => response(statuses.shift() ?? 200, { ok: true }));
     const { api, sleeps } = client(fetchImpl);
-    await expect(api.heartbeat({ workerId: 'w', runningJobIds: [] })).resolves.toEqual({ ok: true });
+    await expect(api.heartbeat({ workerId: 'w', runningJobs: [] })).resolves.toEqual({ ok: true });
     expect(fetchImpl).toHaveBeenCalledTimes(3);
     expect(sleeps).toEqual([backoffDelay(0, () => 0.5), backoffDelay(1, () => 0.5)]);
   });
@@ -58,7 +60,7 @@ describe('ApiClient', () => {
       throw new TypeError('fetch failed');
     });
     const { api, sleeps } = client(fetchImpl);
-    await expect(api.heartbeat({ workerId: 'w', runningJobIds: [] })).rejects.toThrow(/fetch failed/);
+    await expect(api.heartbeat({ workerId: 'w', runningJobs: [] })).rejects.toThrow(/fetch failed/);
     expect(fetchImpl).toHaveBeenCalledTimes(4);
     expect(sleeps).toHaveLength(3);
   });
@@ -66,7 +68,7 @@ describe('ApiClient', () => {
   it('does not retry other 4xx errors', async () => {
     const fetchImpl = vi.fn(async () => response(400, { error: { code: 'bad_request', message: 'nope' } }));
     const { api } = client(fetchImpl);
-    const err = await api.fail('job-1', 'x', 1).catch((e: unknown) => e);
+    const err = await api.fail('job-1', 'x', 1, LEASE_TOKEN).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ApiRequestError);
     expect((err as ApiRequestError).status).toBe(400);
     expect((err as ApiRequestError).code).toBe('bad_request');

@@ -59,7 +59,9 @@ For each agent job the worker:
 2. Builds the prompt: the step prompt with `{{context}}` interpolated, the Sindral result-file protocol, and a workspace note (repos, branch, "commit, do not push").
 3. Runs `claude -p --output-format stream-json ...` or `codex exec --json -` with the prompt on stdin, streaming output to the server as job events.
 4. Parses and validates the result file. For `pr` steps it commits leftover changes as `Sindral AI`, pushes with `--force-with-lease`, then opens a PR (`gh pr create`) or comments on the existing one with the agent's summary so GitHub reviewers see the response. For `document` steps it uploads the declared artifacts plus every text file in the output directory.
-5. Calls `complete`, or `fail` with a message containing the agent's last 40 output lines.
+5. Renews the job's 90-second capability lease every 30 seconds while it is running or locally queued, then calls `complete` or `fail` with that claim's attempt and lease token. Expired or superseded claims cannot publish events or outcomes.
+
+The lease fields are part of the worker protocol, so deploy the server and worker from the same release. A pre-lease worker cannot complete jobs claimed from a lease-enabled server; those claims expire and are safely requeued.
 
 Rebase-stack jobs rebase each subtask branch onto its base in order and stop at the first conflict (later branches depend on it).
 
@@ -68,6 +70,6 @@ Rebase-stack jobs rebase each subtask branch onto its base in order and stop at 
 - A short-lived GitHub App installation token (production) or configured fine-grained PAT (internal/local) arrives with each matching job. It is never written to `.git/config` or a remote URL: git gets it through a per-invocation `http.extraheader` config, and `gh` gets it through `GH_TOKEN` in its environment only. PAT-backed automatic merge is disabled by default.
 - Agent subprocesses never see `GH_TOKEN`, `GITHUB_TOKEN` or the worker key; they are stripped from the environment. Agents therefore cannot push or open PRs themselves; the worker does that after validating the result.
 - All commands are spawned with argv arrays (no shell). Repository names, task keys and branch names are validated before they become paths or git refs.
-- Tokens and worker keys are redacted from logs, job events and error messages, both by value and by pattern (`ghp_…`, `github_pat_…`, `sk_sindral_…`, auth headers).
+- GitHub tokens, worker keys, and per-claim lease tokens are redacted from logs, job events and error messages, both by value and by pattern (`ghp_…`, `github_pat_…`, `sk_sindral_…`, auth headers).
 - Claude runs with `--permission-mode acceptEdits` (write steps) or `plan` (read-only steps) and only the tools the step allows; `Bash` is granted only when the step has the `execute` permission. Codex runs with `--sandbox workspace-write` or `read-only`.
 - A 401 from the server means the key was revoked; the worker logs that and exits with status 2. Transient errors (network, 5xx, 429) are retried with exponential backoff and jitter.

@@ -5,6 +5,9 @@ import { silentLogger } from './logger.js';
 import { Redactor } from './redact.js';
 import { GH_TOKEN } from './test/fixtures.js';
 
+const LEASE_TOKEN = '10000000-0000-4000-8000-000000000001';
+const event = (type: JobEvent['type'], message: string): JobEvent => ({ type, message, attempt: 1, leaseToken: LEASE_TOKEN });
+
 function sink() {
   const events: JobEvent[] = [];
   return { events, postEvent: vi.fn(async (_id: string, e: JobEvent) => void events.push(e)) };
@@ -13,7 +16,7 @@ function sink() {
 describe('JobEventStream', () => {
   it('batches log lines, flushes at 50 lines and on close, and redacts', async () => {
     const api = sink();
-    const stream = new JobEventStream(api, 'job', new Redactor(), silentLogger(), 1_000_000);
+    const stream = new JobEventStream(api, 'job', 1, LEASE_TOKEN, new Redactor(), silentLogger(), 1_000_000);
     for (let i = 0; i < 60; i++) stream.line(i === 3 ? `token ${GH_TOKEN}` : `line ${i}`);
     await new Promise((r) => setImmediate(r));
     expect(api.events).toHaveLength(1);
@@ -26,16 +29,16 @@ describe('JobEventStream', () => {
 
   it('flushes on a timer', async () => {
     const api = sink();
-    const stream = new JobEventStream(api, 'job', new Redactor(), silentLogger(), 5);
+    const stream = new JobEventStream(api, 'job', 1, LEASE_TOKEN, new Redactor(), silentLogger(), 5);
     stream.line('a');
     await new Promise((r) => setTimeout(r, 20));
-    expect(api.events).toEqual([{ type: 'log', message: 'a' }]);
+    expect(api.events).toEqual([event('log', 'a')]);
     await stream.close();
   });
 
   it('sends progress immediately, after any buffered logs', async () => {
     const api = sink();
-    const stream = new JobEventStream(api, 'job', new Redactor(), silentLogger(), 1_000_000);
+    const stream = new JobEventStream(api, 'job', 1, LEASE_TOKEN, new Redactor(), silentLogger(), 1_000_000);
     stream.line('first');
     stream.progress('halfway');
     stream.message('note');
@@ -46,7 +49,7 @@ describe('JobEventStream', () => {
 
   it('swallows delivery failures', async () => {
     const api = { postEvent: vi.fn(async () => { throw new Error('offline'); }) };
-    const stream = new JobEventStream(api, 'job', new Redactor(), silentLogger(), 1_000_000);
+    const stream = new JobEventStream(api, 'job', 1, LEASE_TOKEN, new Redactor(), silentLogger(), 1_000_000);
     stream.progress('x');
     await expect(stream.close()).resolves.toBeUndefined();
   });

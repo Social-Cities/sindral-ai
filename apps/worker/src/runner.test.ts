@@ -151,6 +151,27 @@ describe('Runner', () => {
     await run;
   });
 
+  it('heartbeats lease tokens for running and locally pending claims', async () => {
+    const taskId = randomUUID();
+    const a = dispatch({ taskId });
+    const b = dispatch({ taskId });
+    const h = harness([[a, b]], { heartbeatIntervalMs: 5 });
+    const run = h.runner.start();
+    await new Promise((resolve) => setTimeout(resolve, 12));
+    expect(h.api.heartbeat).toHaveBeenCalledWith({
+      workerId: expect.any(String),
+      runningJobs: expect.arrayContaining([
+        { jobId: a.job.id, leaseToken: a.lease.token },
+        { jobId: b.job.id, leaseToken: b.lease.token },
+      ]),
+    });
+    h.release(a.job.id);
+    await tick();
+    h.release(b.job.id);
+    await h.runner.stop();
+    await run;
+  });
+
   it('on shutdown waits for the grace period, then aborts jobs and fails unstarted ones', async () => {
     const taskId = randomUUID();
     const a = dispatch({ taskId });

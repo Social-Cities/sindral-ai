@@ -32,7 +32,7 @@ export interface ApiClientOptions {
   maxAttempts?: number;
 }
 
-export type JobEvent = { type: 'log' | 'progress' | 'message'; message: string };
+export type JobEvent = { type: 'log' | 'progress' | 'message'; message: string; attempt: number; leaseToken: string };
 
 const BASE_DELAY_MS = 500;
 export const MAX_DELAY_MS = 30_000;
@@ -75,7 +75,7 @@ export class ApiClient {
     return this.post<{ workerId: string }>('/api/worker/register', body);
   }
 
-  heartbeat(body: { workerId: string; runningJobIds: string[] }): Promise<{ ok: true }> {
+  heartbeat(body: { workerId: string; runningJobs: { jobId: string; leaseToken: string }[] }): Promise<{ ok: true }> {
     return this.post<{ ok: true }>('/api/worker/heartbeat', body);
   }
 
@@ -88,12 +88,12 @@ export class ApiClient {
     return this.post<{ ok: true }>(`/api/worker/jobs/${encodeURIComponent(jobId)}/events`, event);
   }
 
-  complete(jobId: string, result: AgentResult, attempt: number): Promise<{ ok: true }> {
-    return this.post<{ ok: true }>(`/api/worker/jobs/${encodeURIComponent(jobId)}/complete`, { attempt, result });
+  complete(jobId: string, result: AgentResult, attempt: number, leaseToken: string): Promise<{ ok: true }> {
+    return this.post<{ ok: true }>(`/api/worker/jobs/${encodeURIComponent(jobId)}/complete`, { attempt, leaseToken, result });
   }
 
-  fail(jobId: string, error: string, attempt: number): Promise<{ ok: true }> {
-    return this.post<{ ok: true }>(`/api/worker/jobs/${encodeURIComponent(jobId)}/fail`, { attempt, error });
+  fail(jobId: string, error: string, attempt: number, leaseToken: string): Promise<{ ok: true }> {
+    return this.post<{ ok: true }>(`/api/worker/jobs/${encodeURIComponent(jobId)}/fail`, { attempt, leaseToken, error });
   }
 
   private async post<T>(route: string, body: unknown, opts: RequestOptions = {}): Promise<T> {

@@ -194,7 +194,11 @@ export interface TaskTransitionResult {
   replayed: boolean;
 }
 
-export type JobPatch = Partial<Pick<Job, 'status' | 'workerId' | 'attempt' | 'result' | 'error' | 'claimedAt' | 'finishedAt'>>;
+export type JobPatch = Partial<Pick<Job, 'status' | 'workerId' | 'attempt' | 'result' | 'error' | 'claimedAt' | 'leaseExpiresAt' | 'finishedAt'>>;
+
+/** Internal claim capability. Never include leaseToken in browser-facing Job responses. */
+export type ClaimedJob = Job & { leaseToken: string };
+export type ActiveJob = Job & { leaseToken: string | null };
 
 export type JobLogType = 'log' | 'progress' | 'message';
 
@@ -317,6 +321,7 @@ export interface Repository {
     attempt: number,
     outcomeHash: string,
     outcome: { result: AgentResult; error?: never } | { error: string; result?: never },
+    leaseToken: string,
   ): Promise<JobOutcomeClaim>;
   finalizeJobOutcome(userId: string, jobId: string, attempt: number, outcomeHash: string, token: string, status: 'completed' | 'failed'): Promise<Job>;
   abandonJobOutcome(userId: string, jobId: string, attempt: number, outcomeHash: string, token: string): Promise<void>;
@@ -324,11 +329,13 @@ export interface Repository {
   listJobsForTask(userId: string, taskId: string): Promise<Job[]>;
   updateJob(userId: string, id: string, patch: JobPatch): Promise<Job | null>;
   /** Atomically claim queued jobs, serialised per task (see `claim_jobs` in the migration). */
-  claimJobs(userId: string, workerId: string, max: number): Promise<Job[]>;
-  renewJobLeases(userId: string, workerId: string, jobIds: string[], renewedAt: string): Promise<number>;
+  claimJobs(userId: string, workerId: string, max: number): Promise<ClaimedJob[]>;
+  renewJobLeases(userId: string, workerId: string, jobs: { jobId: string; leaseToken: string }[]): Promise<number>;
+  /** Atomically validates an active capability and marks its job running. */
+  activateJobLease(userId: string, jobId: string, attempt: number, leaseToken: string): Promise<boolean>;
   cancelQueuedJobs(userId: string, taskId: string): Promise<number>;
   /** Cross-user: claimed/running/applying jobs, used by the stale-job sweeper. */
-  listActiveJobs(): Promise<Job[]>;
+  listActiveJobs(): Promise<ActiveJob[]>;
 
   // job logs
   appendJobLog(userId: string, input: JobLogInsert): Promise<JobLog>;

@@ -180,7 +180,7 @@ describe('full SDLC happy path', () => {
           ? { id: pullRequest.id, repository: pullRequest.repository, url: pullRequest.url, merged: true }
           : { id: pullRequest.id, repository: pullRequest.repository, url: pullRequest.url, merged: false, error: 'Branch protection rejected the merge' },
       ),
-    });
+    }, job.attempt, job.leaseToken);
 
     const failed = await reload(ctx, userId, task);
     expect(failed.state).toBe('failure');
@@ -279,7 +279,7 @@ describe('failure handling', () => {
     await completeNext(ctx, userId, plan());
     await orch().applyUserEvent(userId, task.id, 'approve');
     const job = await claimNext(ctx, userId);
-    await orch().failJob(userId, job!.id, 'npm install exploded');
+    await orch().failJob(userId, job!.id, 'npm install exploded', job!.attempt, job!.leaseToken);
     return reload(ctx, userId, task);
   }
 
@@ -337,9 +337,9 @@ describe('failure handling', () => {
     const task = await newTask();
     await orch().applyUserEvent(userId, task.id, 'start');
     const job = await claimNext(ctx, userId);
-    await expect(orch().completeJob(userId, job!.id, pr())).rejects.toMatchObject({ statusCode: 400 });
-    await expect(orch().completeJob(userId, job!.id, plan())).resolves.toBeUndefined();
-    await expect(orch().completeJob(userId, job!.id, plan('# Different result'))).rejects.toMatchObject({ statusCode: 409 });
+    await expect(orch().completeJob(userId, job!.id, pr(), job!.attempt, job!.leaseToken)).rejects.toMatchObject({ statusCode: 400 });
+    await expect(orch().completeJob(userId, job!.id, plan(), job!.attempt, job!.leaseToken)).resolves.toBeUndefined();
+    await expect(orch().completeJob(userId, job!.id, plan('# Different result'), job!.attempt, job!.leaseToken)).rejects.toMatchObject({ statusCode: 409 });
   });
 
   it('treats an identical retried worker completion as idempotent', async () => {
@@ -347,12 +347,31 @@ describe('failure handling', () => {
     await orch().applyUserEvent(userId, task.id, 'start');
     const job = await claimNext(ctx, userId);
     const result = plan('# Once');
-    await orch().completeJob(userId, job!.id, result);
+    await orch().completeJob(userId, job!.id, result, job!.attempt, job!.leaseToken);
     const eventCount = (await ctx.repo.listEvents(userId, task.id)).length;
     const messageCount = (await ctx.repo.listMessages(userId, task.id)).length;
-    await orch().completeJob(userId, job!.id, result);
+    await orch().completeJob(userId, job!.id, result, job!.attempt, job!.leaseToken);
     expect((await ctx.repo.listEvents(userId, task.id)).length).toBe(eventCount);
     expect((await ctx.repo.listMessages(userId, task.id)).length).toBe(messageCount);
+  });
+
+  it('rejects an expired or superseded lease and accepts only the reclaimed capability', async () => {
+    const task = await newTask();
+    await orch().applyUserEvent(userId, task.id, 'start');
+    const worker = await ctx.repo.createWorker(userId, { name: 'lease-worker', hostname: 'h', version: '1', workerKeyId: null });
+    const [first] = await ctx.repo.claimJobs(userId, worker.id, 1);
+    await ctx.repo.updateJob(userId, first!.id, { leaseExpiresAt: new Date(Date.now() - 1000).toISOString() });
+
+    await expect(orch().completeJob(userId, first!.id, plan(), first!.attempt, first!.leaseToken)).rejects.toMatchObject({ statusCode: 409 });
+    expect((await reload(ctx, userId, task)).state).toBe('planning');
+    expect(await orch().sweepStaleJobs()).toEqual({ requeued: 1, failed: 0 });
+
+    const [second] = await ctx.repo.claimJobs(userId, worker.id, 1);
+    expect(second!.attempt).toBe(2);
+    expect(second!.leaseToken).not.toBe(first!.leaseToken);
+    await expect(orch().completeJob(userId, second!.id, plan(), second!.attempt, first!.leaseToken)).rejects.toMatchObject({ statusCode: 409 });
+    await expect(orch().completeJob(userId, second!.id, plan(), second!.attempt, second!.leaseToken)).resolves.toBeUndefined();
+    expect((await reload(ctx, userId, task)).state).toBe('plan-review');
   });
 
   it('fences concurrent completion processing and safely resumes an abandoned outcome', async () => {
@@ -361,11 +380,11 @@ describe('failure handling', () => {
     const job = await claimNext(ctx, userId);
     const result = plan('# durable');
     const concurrent = await Promise.allSettled([
-      orch().completeJob(userId, job!.id, result, job!.attempt),
-      orch().completeJob(userId, job!.id, result, job!.attempt),
+      orch().completeJob(userId, job!.id, result, job!.attempt, job!.leaseToken),
+      orch().completeJob(userId, job!.id, result, job!.attempt, job!.leaseToken),
     ]);
     expect(concurrent.some((entry) => entry.status === 'fulfilled')).toBe(true);
-    await expect(orch().completeJob(userId, job!.id, result, job!.attempt)).resolves.toBeUndefined();
+    await expect(orch().completeJob(userId, job!.id, result, job!.attempt, job!.leaseToken)).resolves.toBeUndefined();
     expect((await ctx.repo.listMessages(userId, task.id)).filter((message) => message.externalId === `job:${job!.id}:summary`)).toHaveLength(1);
     expect((await ctx.repo.listEvents(userId, task.id)).filter((event) => event.type === 'transition')).toHaveLength(2);
 
@@ -373,12 +392,12 @@ describe('failure handling', () => {
     await orch().applyUserEvent(userId, task.id, 'start');
     const abandoned = await claimNext(ctx, userId);
     const outcomeHash = createHash('sha256').update(JSON.stringify({ result })).digest('hex');
-    const claim = await ctx.repo.beginJobOutcome(userId, abandoned!.id, abandoned!.attempt, outcomeHash, { result });
+    const claim = await ctx.repo.beginJobOutcome(userId, abandoned!.id, abandoned!.attempt, outcomeHash, { result }, abandoned!.leaseToken);
     expect(claim.state).toBe('acquired');
     await ctx.repo.abandonJobOutcome(userId, abandoned!.id, abandoned!.attempt, outcomeHash, claim.token!);
-    await expect(orch().completeJob(userId, abandoned!.id, result, abandoned!.attempt)).resolves.toBeUndefined();
+    await expect(orch().completeJob(userId, abandoned!.id, result, abandoned!.attempt, abandoned!.leaseToken)).resolves.toBeUndefined();
     expect((await ctx.repo.getJob(userId, abandoned!.id))?.status).toBe('completed');
-    await expect(ctx.repo.beginJobOutcome(ctx.userB, abandoned!.id, abandoned!.attempt, outcomeHash, { result })).rejects.toThrow(/owned/);
+    await expect(ctx.repo.beginJobOutcome(ctx.userB, abandoned!.id, abandoned!.attempt, outcomeHash, { result }, abandoned!.leaseToken)).rejects.toThrow(/owned/);
   });
 
   it('resumes after task effects commit but outcome finalization fails', async () => {
@@ -388,9 +407,9 @@ describe('failure handling', () => {
     const result = plan('# committed once');
     vi.spyOn(ctx.repo, 'finalizeJobOutcome').mockRejectedValueOnce(new Error('transient database failure'));
 
-    await expect(orch().completeJob(userId, job!.id, result, job!.attempt)).rejects.toThrow('transient database failure');
+    await expect(orch().completeJob(userId, job!.id, result, job!.attempt, job!.leaseToken)).rejects.toThrow('transient database failure');
     expect((await reload(ctx, userId, task)).state).toBe('plan-review');
-    await expect(orch().completeJob(userId, job!.id, result, job!.attempt)).resolves.toBeUndefined();
+    await expect(orch().completeJob(userId, job!.id, result, job!.attempt, job!.leaseToken)).resolves.toBeUndefined();
 
     const events = await ctx.repo.listEvents(userId, task.id);
     expect(events.filter((event) => event.type === 'transition')).toHaveLength(2);
@@ -404,7 +423,7 @@ describe('failure handling', () => {
     const job = await claimNext(ctx, userId);
     task = await orch().applyUserEvent(userId, task.id, 'fail');
     expect(task.state).toBe('failure');
-    await orch().completeJob(userId, job!.id, plan('# late'));
+    await orch().completeJob(userId, job!.id, plan('# late'), job!.attempt, job!.leaseToken);
     task = await reload(ctx, userId, task);
     expect(task.state).toBe('failure');
     expect(task.plan).toBe('# late');
@@ -526,7 +545,8 @@ describe('subtask stacks', () => {
     await ctx.repo.claimJobs(userId, 'w', 1); // c3 planning job is older; claim + ignore it so c1 is next
     const claimed = await ctx.repo.claimJobs(userId, 'w', 5);
     expect(claimed.map((j) => j.id)).toContain(c1Job.id);
-    await orch().completeJob(userId, c1Job.id, pr(10, 'sindral/sin-2'));
+    const c1Claim = claimed.find((job) => job.id === c1Job.id)!;
+    await orch().completeJob(userId, c1Claim.id, pr(10, 'sindral/sin-2'), c1Claim.attempt, c1Claim.leaseToken);
 
     const parentJobs = await ctx.repo.listJobsForTask(userId, parent.id);
     const rebase = parentJobs.find((j) => j.kind === 'rebase-stack')!;
@@ -539,13 +559,13 @@ describe('subtask stacks', () => {
     });
 
     // A plain failure still parks the sibling in failure.
-    await ctx.repo.updateJob(userId, rebase.id, { status: 'claimed', workerId: 'w' });
-    await expect(orch().completeJob(userId, rebase.id, pr())).rejects.toMatchObject({ statusCode: 400 });
-    await orch().completeJob(userId, rebase.id, {
+    const rebaseClaim = (await ctx.repo.claimJobs(userId, 'w', 10)).find((job) => job.id === rebase.id)!;
+    await expect(orch().completeJob(userId, rebaseClaim.id, pr(), rebaseClaim.attempt, rebaseClaim.leaseToken)).rejects.toMatchObject({ statusCode: 400 });
+    await orch().completeJob(userId, rebaseClaim.id, {
       kind: 'rebase',
       summary: 'rebased',
       rebased: [{ taskId: children[1]!.id, branch: 'sindral/sin-3', ok: false, error: 'conflict in schema.sql' }],
-    });
+    }, rebaseClaim.attempt, rebaseClaim.leaseToken);
     const c2 = await reload(ctx, userId, children[1]!);
     expect(c2.state).toBe('failure');
     expect(c2.lastError).toBe('conflict in schema.sql');
@@ -572,8 +592,8 @@ describe('subtask stacks', () => {
         stack: [{ taskId: sibling.id, branch: sibling.branch!, baseBranch: sibling.baseBranch! }],
       },
     });
-    await ctx.repo.updateJob(userId, rebase.id, { status: 'claimed', workerId: 'w' });
-    await orch().completeJob(userId, rebase.id, {
+    const rebaseClaim = (await ctx.repo.claimJobs(userId, 'w', 10)).find((job) => job.id === rebase.id)!;
+    await orch().completeJob(userId, rebaseClaim.id, {
       kind: 'rebase',
       summary: 'conflict',
       rebased: [
@@ -591,7 +611,7 @@ describe('subtask stacks', () => {
           },
         },
       ],
-    });
+    }, rebaseClaim.attempt, rebaseClaim.leaseToken);
 
     const resolver = (await ctx.repo.listJobsForTask(userId, sibling.id)).find((job) => job.kind === 'resolve-rebase-conflict');
     expect(resolver?.payload).toMatchObject({
@@ -604,8 +624,8 @@ describe('subtask stacks', () => {
     });
     expect((await reload(ctx, userId, sibling)).state).toBe('conflict-resolution');
 
-    await ctx.repo.updateJob(userId, resolver!.id, { status: 'claimed', workerId: 'w' });
-    await orch().completeJob(userId, resolver!.id, {
+    const resolverClaim = (await ctx.repo.claimJobs(userId, 'w', 10)).find((job) => job.id === resolver!.id)!;
+    await orch().completeJob(userId, resolverClaim.id, {
       kind: 'conflict-resolution',
       summary: 'Needs a human',
       taskId: sibling.id,
@@ -615,7 +635,7 @@ describe('subtask stacks', () => {
       resolvedPaths: [],
       checks: [],
       error: 'Ambiguous intent',
-    });
+    }, resolverClaim.attempt, resolverClaim.leaseToken);
     const failedSibling = await reload(ctx, userId, sibling);
     expect(failedSibling.state).toBe('failure');
     expect(failedSibling.lastError).toBe('Ambiguous intent');
@@ -682,7 +702,7 @@ describe('stale job sweeper', () => {
     const [job] = await ctx.repo.claimJobs(userId, worker.id, 1);
     const result = { kind: 'plan' as const, summary: 'Recovered plan', plan: 'Durable plan' };
     const hash = createHash('sha256').update(JSON.stringify({ result })).digest('hex');
-    const claim = await ctx.repo.beginJobOutcome(userId, job!.id, job!.attempt, hash, { result });
+    const claim = await ctx.repo.beginJobOutcome(userId, job!.id, job!.attempt, hash, { result }, job!.leaseToken);
 
     expect(claim.state).toBe('acquired');
     expect(await orch().sweepStaleJobs(new Date(Date.now() + 31_000))).toEqual({ requeued: 0, failed: 0 });
@@ -691,24 +711,23 @@ describe('stale job sweeper', () => {
     expect((await ctx.repo.listMessages(userId, task.id)).filter((message) => message.content === result.summary)).toHaveLength(1);
   });
 
-  it('requeues jobs from lost workers and fails them after the last attempt', async () => {
+  it('requeues expired leases and fails them after the last attempt', async () => {
     const task = await newTask();
     await orch().applyUserEvent(userId, task.id, 'start');
     const worker = await ctx.repo.createWorker(userId, { name: 'w', hostname: 'h', version: '1', workerKeyId: null });
     const [job] = await ctx.repo.claimJobs(userId, worker.id, 1);
     const old = new Date(Date.now() - 20 * 60_000).toISOString();
 
-    // worker still alive → untouched
-    await ctx.repo.updateJob(userId, job!.id, { claimedAt: old });
+    // An unexpired renewable lease is untouched.
     expect(await orch().sweepStaleJobs()).toEqual({ requeued: 0, failed: 0 });
 
-    await ctx.repo.updateWorker(userId, worker.id, { lastSeenAt: old });
+    await ctx.repo.updateJob(userId, job!.id, { leaseExpiresAt: old });
     expect(await orch().sweepStaleJobs()).toEqual({ requeued: 1, failed: 0 });
     let fresh = await ctx.repo.getJob(userId, job!.id);
-    expect(fresh).toMatchObject({ status: 'queued', attempt: 2, workerId: null, claimedAt: null });
+    expect(fresh).toMatchObject({ status: 'queued', attempt: 2, workerId: null, claimedAt: null, leaseExpiresAt: null });
 
     await ctx.repo.claimJobs(userId, worker.id, 1);
-    await ctx.repo.updateJob(userId, job!.id, { claimedAt: old, attempt: 3 });
+    await ctx.repo.updateJob(userId, job!.id, { leaseExpiresAt: old, attempt: 3 });
     expect(await orch().sweepStaleJobs()).toEqual({ requeued: 0, failed: 1 });
     fresh = await ctx.repo.getJob(userId, job!.id);
     expect(fresh?.status).toBe('failed');

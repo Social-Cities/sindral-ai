@@ -9,14 +9,14 @@
 | GitHub | HMAC-SHA256 (`X-Hub-Signature-256`) | `/api/webhooks/github` only |
 | Server | Supabase service-role key (never shipped to clients) | Postgres |
 
-Every repository call is scoped by the authenticated user id. Supabase RLS is enabled on every table (owner-only `select` for the UI; no client policies at all for `user_secrets`, `worker_keys`, or operational writes). Server-side functions (`claim_jobs`, `next_task_number`, `apply_task_transition`, and the job-outcome/webhook-delivery lease functions) are `security definer` and revoked from `anon`/`authenticated`. Each privileged orchestration function fixes an empty `search_path`; transition and outcome functions also verify ownership plus task version or job attempt before recording idempotent state. The global webhook-delivery ledger contains hashes and responses but no user content, and is accessible only to the service role.
+Every repository call is scoped by the authenticated user id. Supabase RLS is enabled on every table (owner-only `select` for the UI; no client policies at all for `user_secrets`, `worker_keys`, or operational writes). Browser reads of `jobs` are also column-scoped so worker lease and outcome capability tokens remain service-role-only even through direct PostgREST queries. Server-side functions (`claim_jobs`, `renew_job_leases`, `activate_job_lease`, `next_task_number`, `apply_task_transition`, and the job-outcome/webhook-delivery lease functions) are `security definer` and revoked from `anon`/`authenticated`. Each privileged orchestration function fixes an empty `search_path`; transition and outcome functions also verify ownership plus task version or an unexpired per-claim lease token before recording state. The global webhook-delivery ledger contains hashes and responses but no user content, and is accessible only to the service role.
 
 ## Secrets
 
 - Provider tokens (GitHub, Linear, Jira) are encrypted with AES-256-GCM under `SECRETS_ENCRYPTION_KEY`; only a 4-character hint is ever returned to the UI.
 - Worker keys are shown once at creation and stored hashed. Revocation is immediate.
 - Production uses short-lived GitHub App installation tokens minted per job, restricted to that job's repositories, and selected from a Sindral-user-to-installation mapping. Internal deployments may use an encrypted, repository-scoped fine-grained PAT; PAT-backed merge is disabled unless the worker explicitly sets `SINDRAL_ALLOW_PAT_MERGE=true`. Tokens are used for `git`/`gh` via an HTTP extra header / `GH_TOKEN`, never written to `.git/config`, never passed to the agent subprocess, and redacted from logs.
-- Logs redact `authorization` headers and token fields.
+- Logs redact `authorization` headers, provider tokens, worker keys, and job lease capabilities.
 - GitHub feedback references persist only the public PR/comment URLs, comment identifier, and comment kind. Worker replies carry a job-specific hidden marker so retries can detect an already-posted response before creating another external side effect.
 
 ## OWASP Top 10 mapping

@@ -74,16 +74,17 @@ const reg = await w('/api/worker/register', { name: 'laptop', hostname: 'mac', v
 ok(reg.status === 200 && reg.body.workerId, 'worker registered');
 const claim = await w('/api/worker/jobs/claim', { workerId: reg.body.workerId, max: 2 });
 ok(claim.status === 200 && claim.body.jobs.length === 1 && claim.body.jobs[0].job.payload.step.id === 'planning', 'worker claimed planning job via claim_jobs()');
-const job = claim.body.jobs[0].job;
+const jobDispatch = claim.body.jobs[0];
+const job = jobDispatch.job;
 ok(claim.body.jobs[0].credentials.githubToken === null, 'no github token yet -> null credential');
 const claim2 = await w('/api/worker/jobs/claim', { workerId: reg.body.workerId, max: 2 });
 ok(claim2.body.jobs.length === 0, 'second claim returns nothing (job serialised)');
-await w(`/api/worker/jobs/${job.id}/events`, { type: 'log', message: 'hello from agent' });
+await w(`/api/worker/jobs/${job.id}/events`, { type: 'log', message: 'hello from agent', attempt: job.attempt, leaseToken: jobDispatch.lease.token });
 
 // complete planning with subtasks
-const stale = await w(`/api/worker/jobs/${job.id}/complete`, { attempt: job.attempt + 5, result: { kind: 'plan', summary: 'x', plan: 'x' } });
+const stale = await w(`/api/worker/jobs/${job.id}/complete`, { attempt: job.attempt + 5, leaseToken: jobDispatch.lease.token, result: { kind: 'plan', summary: 'x', plan: 'x' } });
 ok(stale.status === 409 || stale.status === 400, `stale attempt token rejected (${stale.status})`);
-const comp = await w(`/api/worker/jobs/${job.id}/complete`, { attempt: job.attempt, result: { kind: 'plan', summary: 'Plan ready.', plan: '# Plan\n\n- do it', subtasks: [{ title: 'Part 1', goal: 'db' }, { title: 'Part 2', goal: 'api' }] } });
+const comp = await w(`/api/worker/jobs/${job.id}/complete`, { attempt: job.attempt, leaseToken: jobDispatch.lease.token, result: { kind: 'plan', summary: 'Plan ready.', plan: '# Plan\n\n- do it', subtasks: [{ title: 'Part 1', goal: 'db' }, { title: 'Part 2', goal: 'api' }] } });
 ok(comp.status === 200, `planning job completed (${comp.status} ${JSON.stringify(comp.body).slice(0, 120)})`);
 let t = (await api(`/api/tasks/${taskId}`)).body.task;
 ok(t.state === 'plan-review' && t.plan.includes('# Plan') && t.subtasks.length === 2, `plan-review with ${t.subtasks.length} subtasks`);
@@ -94,7 +95,7 @@ const fb = await api(`/api/tasks/${taskId}/messages`, { method: 'POST', body: JS
 ok(fb.status === 201 && fb.body.task.state === 'planning-feedback', 'chat feedback -> planning-feedback');
 const c3 = await w('/api/worker/jobs/claim', { workerId: reg.body.workerId, max: 1 });
 ok(c3.body.jobs.length === 1 && c3.body.jobs[0].job.payload.context.feedback.includes('split step 2'), 'revision job carries user feedback in context');
-await w(`/api/worker/jobs/${c3.body.jobs[0].job.id}/complete`, { attempt: c3.body.jobs[0].job.attempt, result: { kind: 'plan', summary: 'Revised.', plan: '# Plan v2' } });
+await w(`/api/worker/jobs/${c3.body.jobs[0].job.id}/complete`, { attempt: c3.body.jobs[0].job.attempt, leaseToken: c3.body.jobs[0].lease.token, result: { kind: 'plan', summary: 'Revised.', plan: '# Plan v2' } });
 t = (await api(`/api/tasks/${taskId}`)).body.task; ok(t.state === 'plan-review' && t.plan === '# Plan v2', 'back to plan-review with revised plan');
 
 // approve -> subtask 1 starts instead of parent implement
@@ -127,6 +128,7 @@ const documentJob = documentClaim.body.jobs[0].job;
 const largeContent = `# Research brief\n\n${'private artifact content '.repeat(3200)}`;
 const documentComplete = await w(`/api/worker/jobs/${documentJob.id}/complete`, {
   attempt: documentJob.attempt,
+  leaseToken: documentClaim.body.jobs[0].lease.token,
   result: {
     kind: 'document',
     summary: 'Research brief ready.',

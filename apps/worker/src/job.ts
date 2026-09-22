@@ -46,8 +46,8 @@ export type JobOutcome = { status: 'completed'; result: AgentResult } | { status
 export async function runJob(dispatch: JobDispatch, deps: JobDeps, signal: AbortSignal): Promise<JobOutcome> {
   const { job, credentials } = dispatch;
   const log = deps.logger.child({ jobId: job.id, taskId: job.taskId, kind: job.kind });
-  const redactor = new Redactor().add(deps.config.workerKey, credentials.githubToken, ...gitAuth(credentials.githubToken).secrets);
-  const events = new JobEventStream(deps.api, job.id, redactor, log);
+  const redactor = new Redactor().add(deps.config.workerKey, credentials.githubToken, dispatch.lease.token, ...gitAuth(credentials.githubToken).secrets);
+  const events = new JobEventStream(deps.api, job.id, job.attempt, dispatch.lease.token, redactor, log);
   const local = await openLocalLog(deps.config.workdir, job.id);
   const write = (line: string) => local.write(`${new Date().toISOString()} ${redactor.redact(line)}\n`);
 
@@ -104,7 +104,7 @@ export async function runJob(dispatch: JobDispatch, deps: JobDeps, signal: Abort
                 },
               })
             : await runAgentJob(dispatch, job.payload, { ...deps, redactor, events, write, signal });
-    await deps.api.complete(job.id, result, job.attempt);
+    await deps.api.complete(job.id, result, job.attempt, dispatch.lease.token);
     write('job completed');
     outcome = { status: 'completed', result };
   } catch (err) {
@@ -112,7 +112,7 @@ export async function runJob(dispatch: JobDispatch, deps: JobDeps, signal: Abort
     log.error({ err: message }, 'job failed');
     write(`job failed: ${message}`);
     try {
-      await deps.api.fail(job.id, message.slice(0, 20_000), job.attempt);
+      await deps.api.fail(job.id, message.slice(0, 20_000), job.attempt, dispatch.lease.token);
     } catch (failErr) {
       log.error({ err: redactor.redactError(failErr) }, 'could not report job failure');
     }

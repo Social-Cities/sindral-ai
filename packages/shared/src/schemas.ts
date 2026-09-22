@@ -102,7 +102,7 @@ export const workerRegisterSchema = z.object({
 
 export const workerHeartbeatSchema = z.object({
   workerId: z.string().uuid(),
-  runningJobIds: z.array(z.string().uuid()).max(100),
+  runningJobs: z.array(z.object({ jobId: z.string().uuid(), leaseToken: z.string().uuid() })).max(100),
 });
 
 export const workerClaimSchema = z.object({
@@ -113,6 +113,8 @@ export const workerClaimSchema = z.object({
 export const workerJobEventSchema = z.object({
   type: z.enum(['log', 'progress', 'message']),
   message: z.string().max(20_000),
+  attempt: z.number().int().positive(),
+  leaseToken: z.string().uuid(),
 });
 
 const artifactSchema = z.object({
@@ -216,8 +218,8 @@ export const agentResultSchema = z.discriminatedUnion('kind', [
   }),
 ]);
 
-export const workerJobCompleteSchema = z.object({ attempt: z.number().int().positive().optional(), result: agentResultSchema });
-export const workerJobFailSchema = z.object({ attempt: z.number().int().positive().optional(), error: z.string().trim().min(1).max(20_000) });
+export const workerJobCompleteSchema = z.object({ attempt: z.number().int().positive(), leaseToken: z.string().uuid(), result: agentResultSchema });
+export const workerJobFailSchema = z.object({ attempt: z.number().int().positive(), leaseToken: z.string().uuid(), error: z.string().trim().min(1).max(20_000) });
 
 /** Loose schema for what the agent writes to the result file (kind may be missing; the worker fills it). */
 export const rawAgentResultFileSchema = z.object({ kind: z.string().optional() }).passthrough();

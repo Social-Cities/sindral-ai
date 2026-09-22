@@ -10,13 +10,13 @@ insert into public.tasks (id, user_id, key, title, state)
 values ('c0000000-0000-4000-8000-000000000003', '30000000-0000-4000-8000-000000000003', 'OUTCOME-1', 'Outcome task', 'planning');
 insert into public.workers (id, user_id, name, hostname, version)
 values ('50000000-0000-4000-8000-000000000005', '30000000-0000-4000-8000-000000000003', 'worker', 'host', '1');
-insert into public.jobs (id, user_id, task_id, kind, step_id, status, worker_id, payload, claimed_at)
+insert into public.jobs (id, user_id, task_id, kind, step_id, status, worker_id, payload, claimed_at, lease_token, lease_expires_at)
 values (
   '60000000-0000-4000-8000-000000000006',
   '30000000-0000-4000-8000-000000000003',
   'c0000000-0000-4000-8000-000000000003',
   'agent', 'planning', 'claimed', '50000000-0000-4000-8000-000000000005',
-  '{"kind":"agent"}'::jsonb, now()
+  '{"kind":"agent"}'::jsonb, now(), '80000000-0000-4000-8000-000000000008', now() + interval '90 seconds'
 );
 
 create temporary table outcome_claim as
@@ -24,6 +24,7 @@ select public.begin_job_outcome(
   '30000000-0000-4000-8000-000000000003',
   '60000000-0000-4000-8000-000000000006',
   1,
+  '80000000-0000-4000-8000-000000000008',
   repeat('a', 64),
   '{"kind":"plan","summary":"done","plan":"# Plan"}'::jsonb,
   null
@@ -51,6 +52,7 @@ select is(
 select is(
   public.begin_job_outcome(
     '30000000-0000-4000-8000-000000000003', '60000000-0000-4000-8000-000000000006', 1,
+    '80000000-0000-4000-8000-000000000008',
     repeat('a', 64), '{"kind":"plan"}'::jsonb, null
   )->>'state',
   'busy',
@@ -59,6 +61,7 @@ select is(
 select throws_ok(
   $$select public.begin_job_outcome(
     '30000000-0000-4000-8000-000000000003', '60000000-0000-4000-8000-000000000006', 1,
+    '80000000-0000-4000-8000-000000000008',
     repeat('b', 64), '{"kind":"plan"}'::jsonb, null
   )$$,
   '22023', 'Job outcome does not match the accepted outcome', 'different outcome is rejected'
@@ -74,6 +77,7 @@ select is(
 select is(
   public.begin_job_outcome(
     '30000000-0000-4000-8000-000000000003', '60000000-0000-4000-8000-000000000006', 1,
+    '80000000-0000-4000-8000-000000000008',
     repeat('a', 64), '{"kind":"plan"}'::jsonb, null
   )->>'state',
   'replay',
@@ -82,6 +86,7 @@ select is(
 select throws_ok(
   $$select public.begin_job_outcome(
     '40000000-0000-4000-8000-000000000004', '60000000-0000-4000-8000-000000000006', 1,
+    '80000000-0000-4000-8000-000000000008',
     repeat('a', 64), '{"kind":"plan"}'::jsonb, null
   )$$,
   '42501', 'Job does not exist or is not owned by this user', 'cross-tenant outcome is rejected'
@@ -95,8 +100,8 @@ values ('c0000000-0000-4000-8000-000000000003', '30000000-0000-4000-8000-0000000
 on conflict (task_id, dedupe_key) do nothing;
 select is((select count(*) from public.task_events where dedupe_key = 'effect:event'), 1::bigint, 'event effects deduplicate');
 
-select ok(not has_function_privilege('authenticated', 'public.begin_job_outcome(uuid,uuid,integer,text,jsonb,text)', 'EXECUTE'), 'browser role cannot begin outcomes');
-select ok(has_function_privilege('service_role', 'public.begin_job_outcome(uuid,uuid,integer,text,jsonb,text)', 'EXECUTE'), 'service role can begin outcomes');
+select ok(not has_function_privilege('authenticated', 'public.begin_job_outcome(uuid,uuid,integer,uuid,text,jsonb,text)', 'EXECUTE'), 'browser role cannot begin outcomes');
+select ok(has_function_privilege('service_role', 'public.begin_job_outcome(uuid,uuid,integer,uuid,text,jsonb,text)', 'EXECUTE'), 'service role can begin outcomes');
 select ok(not has_function_privilege('authenticated', 'public.finalize_job_outcome(uuid,uuid,integer,text,uuid,text)', 'EXECUTE'), 'browser role cannot finalize outcomes');
 select ok(has_function_privilege('service_role', 'public.finalize_job_outcome(uuid,uuid,integer,text,uuid,text)', 'EXECUTE'), 'service role can finalize outcomes');
 

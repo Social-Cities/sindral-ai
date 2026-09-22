@@ -45,14 +45,13 @@ export const workerRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx 
   app.post('/api/worker/heartbeat', async (request) => {
     const { userId } = request.worker!;
     const input = validate(workerHeartbeatSchema, request.body);
-    const now = new Date().toISOString();
     const worker = await repo.updateWorker(userId, input.workerId, {
       status: 'online',
-      runningJobs: input.runningJobIds.length,
-      lastSeenAt: now,
+      runningJobs: input.runningJobs.length,
+      lastSeenAt: new Date().toISOString(),
     });
     if (!worker) throw notFound('Worker');
-    await repo.renewJobLeases(userId, worker.id, input.runningJobIds, now);
+    await repo.renewJobLeases(userId, worker.id, input.runningJobs);
     hub.publish(userId, { type: 'worker.updated', workerId: worker.id });
     return { ok: true as const };
   });
@@ -80,12 +79,14 @@ export const workerRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx 
     const useGitHubApp = hasGitHubAppCredentials(ctx.config, userId);
     const github = useGitHubApp ? null : await ctx.secrets.get(userId, 'github');
     const dispatches: JobDispatch[] = [];
-    for (const job of jobs) {
+    for (const claimed of jobs) {
+      const { leaseToken, ...job } = claimed;
       const appToken = useGitHubApp
         ? await mintGitHubInstallationToken(ctx.config, userId, repositoriesForJob(job), ctx.fetch)
         : null;
       dispatches.push({
         job,
+        lease: { token: leaseToken, expiresAt: job.leaseExpiresAt! },
         credentials: {
           githubToken: appToken ?? github?.token ?? null,
           githubCredential: appToken ? 'github-app' : github?.token ? 'pat' : null,
@@ -102,8 +103,8 @@ export const workerRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx 
     const input = validate(workerJobEventSchema, request.body);
     const job = await repo.getJob(userId, id);
     if (!job) throw notFound('Job');
+    if (!(await repo.activateJobLease(userId, id, input.attempt, input.leaseToken))) throw conflict('Job lease has expired or been superseded');
     if (job.status !== 'claimed' && job.status !== 'running') throw conflict(`Job is ${job.status}`);
-    if (job.status === 'claimed') await repo.updateJob(userId, id, { status: 'running' });
     await repo.appendJobLog(userId, { jobId: id, type: input.type, message: input.message });
     if (input.type === 'message') {
       await repo.createMessage(userId, { taskId: job.taskId, role: 'agent', content: input.message, source: 'worker' });
@@ -115,16 +116,16 @@ export const workerRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx 
   app.post('/api/worker/jobs/:id/complete', async (request) => {
     const { userId } = request.worker!;
     const { id } = validate(idParamsSchema, request.params);
-    const { attempt, result } = validate(workerJobCompleteSchema, request.body);
-    await orchestrator.completeJob(userId, id, result, attempt);
+    const { attempt, leaseToken, result } = validate(workerJobCompleteSchema, request.body);
+    await orchestrator.completeJob(userId, id, result, attempt, leaseToken);
     return { ok: true as const };
   });
 
   app.post('/api/worker/jobs/:id/fail', async (request) => {
     const { userId } = request.worker!;
     const { id } = validate(idParamsSchema, request.params);
-    const { attempt, error } = validate(workerJobFailSchema, request.body);
-    await orchestrator.failJob(userId, id, error, attempt);
+    const { attempt, leaseToken, error } = validate(workerJobFailSchema, request.body);
+    await orchestrator.failJob(userId, id, error, attempt, leaseToken);
     return { ok: true as const };
   });
 };

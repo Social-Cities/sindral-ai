@@ -54,8 +54,6 @@ export interface OrchestratorDeps {
 export const REVIEW_ARTIFACT = 'adversarial-review.md';
 export const VERIFY_ARTIFACT = 'verify-report.md';
 export const CONFLICT_PROMPT_VERSION = 'rebase-conflict-v1';
-export const STALE_JOB_AFTER_MS = 15 * 60_000;
-export const WORKER_LOST_AFTER_MS = 5 * 60_000;
 export const OUTCOME_LEASE_MS = 30_000;
 export const MAX_JOB_ATTEMPTS = 3;
 const MIN_SUBTASKS = 2;
@@ -426,11 +424,10 @@ export class Orchestrator {
 
   // ---------------------------------------------------------------- worker results
 
-  async completeJob(userId: string, jobId: string, result: AgentResult, expectedAttempt?: number): Promise<void> {
+  async completeJob(userId: string, jobId: string, result: AgentResult, expectedAttempt: number, leaseToken: string): Promise<void> {
     const job = await this.repo.getJob(userId, jobId);
     if (!job) throw notFound('Job');
-    if (expectedAttempt === undefined && job.attempt > 1) throw conflict('Job attempt number is required after a retry');
-    if (expectedAttempt !== undefined && job.attempt !== expectedAttempt) throw conflict(`Job attempt ${expectedAttempt} has been superseded`);
+    if (job.attempt !== expectedAttempt) throw conflict(`Job attempt ${expectedAttempt} has been superseded`);
     const expectedKind =
       job.kind === 'rebase-stack'
         ? 'rebase'
@@ -445,9 +442,9 @@ export class Orchestrator {
 
     const task = await this.repo.getTask(userId, job.taskId);
     if (!task) throw notFound('Task');
-    const attempt = expectedAttempt ?? job.attempt;
+    const attempt = expectedAttempt;
     const outcomeHash = this.jobOutcomeHash({ result });
-    const claim = await this.beginJobOutcome(userId, job.id, attempt, outcomeHash, { result });
+    const claim = await this.beginJobOutcome(userId, job.id, attempt, outcomeHash, { result }, leaseToken);
     if (claim.state === 'replay') return;
     if (claim.state === 'busy' || !claim.token) throw serviceUnavailable('Job outcome is already being applied; retry shortly');
     try {
@@ -496,16 +493,15 @@ export class Orchestrator {
     }
   }
 
-  async failJob(userId: string, jobId: string, error: string, expectedAttempt?: number): Promise<void> {
+  async failJob(userId: string, jobId: string, error: string, expectedAttempt: number, leaseToken: string): Promise<void> {
     const job = await this.repo.getJob(userId, jobId);
     if (!job) throw notFound('Job');
-    if (expectedAttempt === undefined && job.attempt > 1) throw conflict('Job attempt number is required after a retry');
-    if (expectedAttempt !== undefined && job.attempt !== expectedAttempt) throw conflict(`Job attempt ${expectedAttempt} has been superseded`);
+    if (job.attempt !== expectedAttempt) throw conflict(`Job attempt ${expectedAttempt} has been superseded`);
     const task = await this.repo.getTask(userId, job.taskId);
     if (!task) throw notFound('Task');
-    const attempt = expectedAttempt ?? job.attempt;
+    const attempt = expectedAttempt;
     const outcomeHash = this.jobOutcomeHash({ error });
-    const claim = await this.beginJobOutcome(userId, job.id, attempt, outcomeHash, { error });
+    const claim = await this.beginJobOutcome(userId, job.id, attempt, outcomeHash, { error }, leaseToken);
     if (claim.state === 'replay') return;
     if (claim.state === 'busy' || !claim.token) throw serviceUnavailable('Job outcome is already being applied; retry shortly');
     try {
@@ -566,9 +562,10 @@ export class Orchestrator {
     attempt: number,
     outcomeHash: string,
     outcome: { result: AgentResult; error?: never } | { error: string; result?: never },
+    leaseToken: string,
   ): Promise<JobOutcomeClaim> {
     try {
-      return await this.repo.beginJobOutcome(userId, jobId, attempt, outcomeHash, outcome);
+      return await this.repo.beginJobOutcome(userId, jobId, attempt, outcomeHash, outcome, leaseToken);
     } catch (error) {
       if (error instanceof ConflictError) throw conflict(error.message);
       throw error;
@@ -1101,30 +1098,26 @@ export class Orchestrator {
 
   /** Requeue (or fail) jobs whose worker disappeared. Runs periodically from the app. */
   async sweepStaleJobs(now: Date = this.now()): Promise<{ requeued: number; failed: number }> {
-    const cutoff = now.getTime() - STALE_JOB_AFTER_MS;
-    const lostCutoff = now.getTime() - WORKER_LOST_AFTER_MS;
     let requeued = 0;
     let failed = 0;
     for (const job of await this.repo.listActiveJobs()) {
       if (job.status === 'applying') {
         const outcomeStartedAt = job.outcomeStartedAt ? Date.parse(job.outcomeStartedAt) : 0;
         if (outcomeStartedAt > now.getTime() - OUTCOME_LEASE_MS) continue;
-        if (!job.outcomeHash || !job.outcomeToken || (!job.result && !job.error)) {
+        if (!job.outcomeHash || !job.outcomeToken || !job.leaseToken || (!job.result && !job.error)) {
           this.log.error({ jobId: job.id }, 'cannot recover job with incomplete outcome state');
           continue;
         }
         await this.repo.abandonJobOutcome(job.userId, job.id, job.attempt, job.outcomeHash, job.outcomeToken);
-        if (job.result) await this.completeJob(job.userId, job.id, job.result, job.attempt);
-        else await this.failJob(job.userId, job.id, job.error!, job.attempt);
+        if (job.result) await this.completeJob(job.userId, job.id, job.result, job.attempt, job.leaseToken);
+        else await this.failJob(job.userId, job.id, job.error!, job.attempt, job.leaseToken);
         this.log.warn({ jobId: job.id, attempt: job.attempt }, 'resumed abandoned job outcome');
         continue;
       }
-      const claimedAt = job.claimedAt ? Date.parse(job.claimedAt) : 0;
-      if (claimedAt > cutoff) continue;
-      const worker = job.workerId ? await this.repo.getWorker(job.userId, job.workerId) : null;
-      if (worker && Date.parse(worker.lastSeenAt) > lostCutoff) continue;
+      const leaseExpiresAt = job.leaseExpiresAt ? Date.parse(job.leaseExpiresAt) : 0;
+      if (leaseExpiresAt > now.getTime()) continue;
       if (job.attempt < MAX_JOB_ATTEMPTS) {
-        await this.repo.updateJob(job.userId, job.id, { status: 'queued', workerId: null, claimedAt: null, attempt: job.attempt + 1 });
+        await this.repo.updateJob(job.userId, job.id, { status: 'queued', workerId: null, claimedAt: null, leaseExpiresAt: null, attempt: job.attempt + 1 });
         requeued += 1;
         this.log.warn({ jobId: job.id, attempt: job.attempt + 1 }, 'requeued job from lost worker');
       } else {

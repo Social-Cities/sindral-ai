@@ -55,7 +55,7 @@ export function taskKeysOf(dispatch: JobDispatch): string[] {
  * hands them over together.
  */
 export class Runner {
-  private readonly active = new Map<string, { job: RunningJob; controller: AbortController; done: Promise<void> }>();
+  private readonly active = new Map<string, { job: RunningJob; leaseToken: string; controller: AbortController; done: Promise<void> }>();
   private pending: JobDispatch[] = [];
   private stopping = false;
   private stopped: Promise<void> | null = null;
@@ -182,7 +182,7 @@ export class Runner {
         this.wakeSlot?.();
       }
     })();
-    this.active.set(job.id, { job: running, controller, done });
+    this.active.set(job.id, { job: running, leaseToken: dispatch.lease.token, controller, done });
     void this.persistRunning();
   }
 
@@ -204,7 +204,11 @@ export class Runner {
   private async heartbeat(): Promise<void> {
     if (!this.workerId || this.stopping) return;
     try {
-      await this.deps.api.heartbeat({ workerId: this.workerId, runningJobIds: [...this.active.keys()] });
+      const runningJobs = [
+        ...[...this.active].map(([jobId, active]) => ({ jobId, leaseToken: active.leaseToken })),
+        ...this.pending.map((dispatch) => ({ jobId: dispatch.job.id, leaseToken: dispatch.lease.token })),
+      ];
+      await this.deps.api.heartbeat({ workerId: this.workerId, runningJobs });
     } catch (err) {
       if (err instanceof WorkerAuthError) {
         this.fatal = err;
@@ -224,7 +228,7 @@ export class Runner {
     this.pending = [];
     await Promise.all(
       unstarted.map((d) =>
-        this.deps.api.fail(d.job.id, reason, d.job.attempt).catch((err) => this.deps.logger.warn({ jobId: d.job.id, err: errorMessage(err) }, 'could not fail unstarted job')),
+        this.deps.api.fail(d.job.id, reason, d.job.attempt, d.lease.token).catch((err) => this.deps.logger.warn({ jobId: d.job.id, err: errorMessage(err) }, 'could not fail unstarted job')),
       ),
     );
 

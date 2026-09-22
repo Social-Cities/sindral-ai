@@ -28,9 +28,11 @@ import { ARTIFACT_CONTENT_TYPES, MAX_ARTIFACT_BYTES } from '@sindral/shared';
 import {
   ConflictError,
   RepositoryError,
+  type ActiveJob,
   type ArtifactInsert,
   type EventInsert,
   type JobInsert,
+  type ClaimedJob,
   type JobOutcomeClaim,
   type JobLog,
   type JobLogInsert,
@@ -183,6 +185,8 @@ interface JobRow {
   dedupe_key: string | null;
   created_at: string;
   claimed_at: string | null;
+  lease_token: string | null;
+  lease_expires_at: string | null;
   finished_at: string | null;
 }
 interface JobLogRow {
@@ -360,8 +364,14 @@ const mapJob = (r: JobRow): Job => ({
   dedupeKey: r.dedupe_key,
   createdAt: r.created_at,
   claimedAt: r.claimed_at,
+  leaseExpiresAt: r.lease_expires_at,
   finishedAt: r.finished_at,
 });
+
+const mapClaimedJob = (r: JobRow): ClaimedJob => {
+  if (!r.lease_token || !r.lease_expires_at) throw new RepositoryError('Claimed job is missing its lease capability');
+  return { ...mapJob(r), leaseToken: r.lease_token };
+};
 
 const mapJobLog = (r: JobLogRow): JobLog => ({ id: r.id, jobId: r.job_id, type: r.type, message: r.message, createdAt: r.created_at });
 
@@ -425,7 +435,9 @@ function jobPatchToRow(patch: JobPatch): Record<string, unknown> {
   if (patch.result !== undefined) row.result = patch.result;
   if (patch.error !== undefined) row.error = patch.error;
   if (patch.claimedAt !== undefined) row.claimed_at = patch.claimedAt;
+  if (patch.leaseExpiresAt !== undefined) row.lease_expires_at = patch.leaseExpiresAt;
   if (patch.finishedAt !== undefined) row.finished_at = patch.finishedAt;
+  if (patch.status === 'queued') row.lease_token = null;
   return row;
 }
 
@@ -954,6 +966,7 @@ export class SupabaseRepository implements Repository {
     attempt: number,
     outcomeHash: string,
     outcome: { result: AgentResult; error?: never } | { error: string; result?: never },
+    leaseToken: string,
   ): Promise<JobOutcomeClaim> {
     try {
       const response = await run<{ state: JobOutcomeClaim['state']; token: string | null; job: JobRow }>(
@@ -961,6 +974,7 @@ export class SupabaseRepository implements Repository {
           p_user_id: userId,
           p_job_id: jobId,
           p_attempt: attempt,
+          p_lease_token: leaseToken,
           p_outcome_hash: outcomeHash,
           p_result: outcome.result ?? null,
           p_error: outcome.error ?? null,
@@ -1020,24 +1034,23 @@ export class SupabaseRepository implements Repository {
     return row ? mapJob(row) : null;
   }
 
-  async claimJobs(userId: string, workerId: string, max: number): Promise<Job[]> {
+  async claimJobs(userId: string, workerId: string, max: number): Promise<ClaimedJob[]> {
     const rows = await run<JobRow[]>(this.client.rpc('claim_jobs', { p_user_id: userId, p_worker_id: workerId, p_max: max }));
-    return rows.map(mapJob);
+    return rows.map(mapClaimedJob);
   }
 
-  async renewJobLeases(userId: string, workerId: string, jobIds: string[], renewedAt: string): Promise<number> {
-    if (jobIds.length === 0) return 0;
-    const rows = await run<{ id: string }[]>(
-      this.client
-        .from('jobs')
-        .update({ claimed_at: renewedAt })
-        .eq('user_id', userId)
-        .eq('worker_id', workerId)
-        .in('id', jobIds)
-        .in('status', ['claimed', 'running'])
-        .select('id'),
-    );
-    return rows.length;
+  async renewJobLeases(userId: string, workerId: string, jobs: { jobId: string; leaseToken: string }[]): Promise<number> {
+    if (jobs.length === 0) return 0;
+    return Number(await run<number>(this.client.rpc('renew_job_leases', { p_user_id: userId, p_worker_id: workerId, p_leases: jobs })));
+  }
+
+  async activateJobLease(userId: string, jobId: string, attempt: number, leaseToken: string): Promise<boolean> {
+    return Boolean(await run<boolean>(this.client.rpc('activate_job_lease', {
+      p_user_id: userId,
+      p_job_id: jobId,
+      p_attempt: attempt,
+      p_lease_token: leaseToken,
+    })));
   }
 
   async cancelQueuedJobs(userId: string, taskId: string): Promise<number> {
@@ -1053,9 +1066,9 @@ export class SupabaseRepository implements Repository {
     return rows.length;
   }
 
-  async listActiveJobs(): Promise<Job[]> {
+  async listActiveJobs(): Promise<ActiveJob[]> {
     const rows = await run<JobRow[]>(this.client.from('jobs').select('*').in('status', ['claimed', 'running', 'applying']));
-    return rows.map(mapJob);
+    return rows.map((row) => ({ ...mapJob(row), leaseToken: row.lease_token }));
   }
 
   // ---- job logs ----
