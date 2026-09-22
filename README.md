@@ -85,7 +85,7 @@ Operational procedures live in [`docs/operations`](docs/operations/deployment.md
 | `pnpm build` | production builds |
 | `pnpm bundle:check` | enforce compressed route, vendor, CSS, and total web bundle budgets |
 | `pnpm db:reset` | recreate the local database from migrations |
-| `pnpm db:test` | run pgTAP transaction, idempotency, and RLS tests against local Supabase |
+| `pnpm db:test` | run pgTAP transaction, idempotency, lease, storage, and full tenant-isolation tests against local Supabase |
 | `pnpm db:lint` | lint the local Postgres schema |
 | `pnpm smoke` | live end-to-end check against a running server + Supabase (see `scripts/smoke.mjs`) |
 
