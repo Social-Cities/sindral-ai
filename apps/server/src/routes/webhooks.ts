@@ -91,6 +91,7 @@ export const webhookRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx
     const eventName = headerValue(request, 'x-github-event');
     const deliveryId = headerValue(request, 'x-github-delivery');
     if (!eventName || !deliveryId) throw badRequest('Missing GitHub event or delivery identifier');
+    request.log.info({ deliveryId, eventName }, 'processing GitHub webhook');
     const payloadHash = createHash('sha256').update(raw, 'utf8').digest('hex');
     let delivery;
     try {

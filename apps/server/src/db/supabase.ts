@@ -25,6 +25,7 @@ import type {
   GitHubFeedbackKind,
 } from '@sindral/shared';
 import { ARTIFACT_CONTENT_TYPES, MAX_ARTIFACT_BYTES } from '@sindral/shared';
+import type { OperationalSnapshot } from '../metrics.js';
 import {
   ConflictError,
   RepositoryError,
@@ -66,7 +67,7 @@ export function createSupabaseClient(url: string, serviceRoleKey: string): Supab
   });
 }
 
-export const EXPECTED_SCHEMA_VERSION = '20260922174000';
+export const EXPECTED_SCHEMA_VERSION = '20260922175000';
 
 // ---- row shapes (snake_case, as stored) ----
 interface ProfileRow {
@@ -459,6 +460,21 @@ export class SupabaseRepository implements Repository {
   private artifactBucketReady: Promise<void> | null = null;
 
   constructor(private readonly client: SupabaseClient) {}
+
+  async getOperationalSnapshot(): Promise<OperationalSnapshot> {
+    const snapshot = await run<{
+      taskStates?: Record<string, number>;
+      jobStatuses?: Record<string, number>;
+      workerCount?: number;
+      oldestWorkerHeartbeatAgeSeconds?: number;
+    }>(this.client.rpc('sindral_operational_snapshot'));
+    return {
+      taskStates: snapshot.taskStates ?? {},
+      jobStatuses: snapshot.jobStatuses ?? {},
+      workerCount: Number(snapshot.workerCount ?? 0),
+      oldestWorkerHeartbeatAgeSeconds: Number(snapshot.oldestWorkerHeartbeatAgeSeconds ?? 0),
+    };
+  }
 
   /** Fail startup before listening when Postgres is unreachable or migrations lag the server. */
   async assertCompatibleSchema(): Promise<void> {

@@ -56,9 +56,11 @@ describe('config', () => {
       SUPABASE_URL: 'https://project.supabase.co',
       WEB_ORIGIN: 'https://app.example.com',
       GITHUB_WEBHOOK_SECRET: 'x'.repeat(32),
+      METRICS_TOKEN: 'm'.repeat(32),
     })).not.toThrow();
     expect(() => parseConfig({ ...valid, SINDRAL_ENV: 'production' })).toThrow(/SUPABASE_URL must use HTTPS/);
     expect(() => parseConfig({ ...valid, SINDRAL_ENV: 'production', SUPABASE_URL: 'https://project.supabase.co' })).toThrow(/WEB_ORIGIN must use HTTPS/);
     expect(() => parseConfig({ ...valid, SINDRAL_ENV: 'production', SUPABASE_URL: 'https://project.supabase.co', WEB_ORIGIN: 'https://app.example.com' })).toThrow(/GITHUB_WEBHOOK_SECRET/);
+    expect(() => parseConfig({ ...valid, SINDRAL_ENV: 'production', SUPABASE_URL: 'https://project.supabase.co', WEB_ORIGIN: 'https://app.example.com', GITHUB_WEBHOOK_SECRET: 'x'.repeat(32) })).toThrow(/METRICS_TOKEN/);
   });
 });

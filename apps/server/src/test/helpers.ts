@@ -25,6 +25,7 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     githubAppId: undefined,
     githubAppPrivateKey: undefined,
     githubAppInstallations: {},
+    metricsToken: 'test-metrics-token-that-is-long-enough',
     jobDispatchEnabled: true,
     autoMergeEnabled: true,
     logLevel: 'silent',

@@ -9,8 +9,10 @@ import type { AppContext, ClaimOptions } from './context.js';
 import { ConflictError, type Repository } from './db/repository.js';
 import { HttpError } from './errors.js';
 import { Hub } from './realtime/hub.js';
+import { Metrics } from './metrics.js';
 import { eventRoutes } from './routes/events.js';
 import { healthRoutes } from './routes/health.js';
+import { metricsRoutes } from './routes/metrics.js';
 import { settingsRoutes } from './routes/settings.js';
 import { jsonNotFound, registerStatic, spaNotFound, webDistExists } from './routes/static.js';
 import { taskRoutes } from './routes/tasks.js';
@@ -30,6 +32,7 @@ export interface AppOptions {
   config: AppConfig;
   repo: Repository;
   hub?: Hub;
+  metrics?: Metrics;
   fetch?: FetchLike;
   logger?: FastifyServerOptions['logger'];
   userVerifier?: UserTokenVerifier;
@@ -54,6 +57,7 @@ const REDACT_PATHS = [
 
 export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const { config, repo } = options;
+  const metrics = options.metrics ?? new Metrics();
   const app = Fastify({
     logger: options.logger ?? { level: config.logLevel, redact: { paths: REDACT_PATHS, censor: '[redacted]' } },
     bodyLimit: 16 * 1024 * 1024,
@@ -89,12 +93,19 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.setErrorHandler((error: unknown, request, reply) => {
     if (error instanceof HttpError) {
+      if (error.code === 'VALIDATION_ERROR') metrics.inc('sindral_validation_failures_total', { surface: request.url.startsWith('/api/worker') ? 'worker' : 'api' });
+      if (error.code === 'CONFLICT' && request.url.includes('/actions')) metrics.inc('sindral_transition_conflicts_total', { reason: 'stale-or-concurrent' });
+      if (request.url.startsWith('/api/webhooks/')) metrics.inc('sindral_webhook_failures_total', { code: error.code });
       return reply.code(error.statusCode).send({ error: { code: error.code, message: error.message, ...(error.details !== undefined ? { details: error.details } : {}) } });
     }
     if (error instanceof TransitionError) {
+      if (request.url.startsWith('/api/webhooks/')) metrics.inc('sindral_webhook_failures_total', { code: 'INVALID_TRANSITION' });
+      metrics.inc('sindral_transition_conflicts_total', { reason: error.code });
       return reply.code(409).send({ error: { code: 'INVALID_TRANSITION', message: error.message, details: { reason: error.code } } });
     }
     if (error instanceof ConflictError) {
+      if (request.url.startsWith('/api/webhooks/')) metrics.inc('sindral_webhook_failures_total', { code: 'CONFLICT' });
+      metrics.inc('sindral_transition_conflicts_total', { reason: 'repository' });
       return reply.code(409).send({ error: { code: 'CONFLICT', message: error.message } });
     }
     const fastifyError = error as Partial<FastifyError>;
@@ -103,6 +114,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       const code = status === 429 ? 'RATE_LIMITED' : status === 404 ? 'NOT_FOUND' : (fastifyError.code ?? 'BAD_REQUEST');
       return reply.code(status).send({ error: { code, message: fastifyError.message ?? 'Bad request' } });
     }
+    if (request.url.startsWith('/api/webhooks/')) metrics.inc('sindral_webhook_failures_total', { code: 'INTERNAL_ERROR' });
     request.log.error({ err: error }, 'unhandled error');
     return reply.code(500).send({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } });
   });
@@ -111,11 +123,12 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const fetchImpl = options.fetch ?? fetch;
   const workflows = new WorkflowService(repo);
   const secrets = new SecretService(repo, config.secretsEncryptionKey);
-  const orchestrator = new Orchestrator({ repo, hub, workflows, log: app.log, autoMergeEnabled: config.autoMergeEnabled });
+  const orchestrator = new Orchestrator({ repo, hub, workflows, log: app.log, metrics, autoMergeEnabled: config.autoMergeEnabled });
   const ctx: AppContext = {
     config,
     repo,
     hub,
+    metrics,
     log: app.log,
     fetch: fetchImpl,
     userVerifier: options.userVerifier ?? createUserTokenVerifier({ supabaseUrl: config.supabaseUrl, jwtSecret: config.supabaseJwtSecret }),
@@ -129,6 +142,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   app.decorate('ctx', ctx);
 
   await app.register(healthRoutes);
+  await app.register(metricsRoutes, { ctx });
   await app.register(taskRoutes, { ctx });
   await app.register(workflowRoutes, { ctx });
   await app.register(workerListRoutes, { ctx });

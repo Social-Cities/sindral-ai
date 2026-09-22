@@ -3,6 +3,7 @@ import type { AppConfig } from './config.js';
 import type { UserTokenVerifier } from './auth/user.js';
 import type { Repository } from './db/repository.js';
 import type { Hub } from './realtime/hub.js';
+import type { Metrics } from './metrics.js';
 import type { FetchLike } from './services/github.js';
 import type { Orchestrator } from './services/orchestrator.js';
 import type { SecretService } from './services/secrets.js';
@@ -20,6 +21,7 @@ export interface AppContext {
   config: AppConfig;
   repo: Repository;
   hub: Hub;
+  metrics: Metrics;
   log: FastifyBaseLogger;
   fetch: FetchLike;
   userVerifier: UserTokenVerifier;

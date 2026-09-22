@@ -136,6 +136,7 @@ export const workerRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx 
           githubCredential: appToken ? 'github-app' : github?.token ? 'pat' : null,
         },
       });
+      ctx.metrics.observe('sindral_job_claim_latency_seconds', Math.max(0, (Date.now() - Date.parse(job.createdAt)) / 1000), { kind: job.kind });
     }
     for (const job of jobs) hub.publish(userId, { type: 'task.updated', taskId: job.taskId });
     return { jobs: dispatches };

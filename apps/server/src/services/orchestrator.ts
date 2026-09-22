@@ -29,6 +29,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import { ConflictError, type JobOutcomeClaim, type Repository } from '../db/repository.js';
 import { badRequest, conflict, notFound, serviceUnavailable } from '../errors.js';
 import type { Hub } from '../realtime/hub.js';
+import type { Metrics } from '../metrics.js';
 import { parsePrUrl } from './github.js';
 import { toWorkflow, type WorkflowService } from './workflows.js';
 
@@ -50,6 +51,7 @@ export interface OrchestratorDeps {
   hub: Hub;
   workflows: WorkflowService;
   log: FastifyBaseLogger;
+  metrics?: Metrics;
   autoMergeEnabled?: boolean;
   now?: () => Date;
 }
@@ -96,6 +98,7 @@ export class Orchestrator {
   private readonly hub: Hub;
   private readonly workflows: WorkflowService;
   private readonly log: FastifyBaseLogger;
+  private readonly metrics: Metrics | undefined;
   private readonly now: () => Date;
   private readonly autoMergeEnabled: boolean;
 
@@ -104,6 +107,7 @@ export class Orchestrator {
     this.hub = deps.hub;
     this.workflows = deps.workflows;
     this.log = deps.log;
+    this.metrics = deps.metrics;
     this.autoMergeEnabled = deps.autoMergeEnabled ?? true;
     this.now = deps.now ?? (() => new Date());
   }
@@ -482,7 +486,7 @@ export class Orchestrator {
             idempotencyKey: transitionKey,
           });
         } else {
-          this.log.warn({ jobId: job.id, taskId: task.id }, 'job result arrived for a task that has moved on; stored without transition');
+          this.log.warn({ userId, jobId: job.id, taskId: task.id }, 'job result arrived for a task that has moved on; stored without transition');
           await this.repo.createEvent(userId, {
             taskId: task.id,
             type: 'stale-result',
@@ -495,6 +499,8 @@ export class Orchestrator {
         this.hub.publish(userId, { type: 'task.updated', taskId: task.id });
       }
       await this.repo.finalizeJobOutcome(userId, job.id, attempt, outcomeHash, claim.token, 'completed');
+      this.recordResultMetrics(result);
+      if (job.claimedAt) this.metrics?.observe('sindral_job_duration_seconds', Math.max(0, (this.now().getTime() - Date.parse(job.claimedAt)) / 1000), { kind: job.kind, outcome: 'completed' });
     } catch (error) {
       await this.repo.abandonJobOutcome(userId, job.id, attempt, outcomeHash, claim.token);
       throw error;
@@ -515,6 +521,9 @@ export class Orchestrator {
     try {
       await this.failTask(userId, task, claim.job, error, attempt);
       await this.repo.finalizeJobOutcome(userId, job.id, attempt, outcomeHash, claim.token, 'failed');
+      if (job.kind === 'merge-pull-requests') this.metrics?.inc('sindral_merge_failures_total');
+      if (job.kind === 'resolve-rebase-conflict') this.metrics?.inc('sindral_conflict_resolution_total', { outcome: 'escalated' });
+      if (job.claimedAt) this.metrics?.observe('sindral_job_duration_seconds', Math.max(0, (this.now().getTime() - Date.parse(job.claimedAt)) / 1000), { kind: job.kind, outcome: 'failed' });
     } catch (cause) {
       await this.repo.abandonJobOutcome(userId, job.id, attempt, outcomeHash, claim.token);
       throw cause;
@@ -562,6 +571,16 @@ export class Orchestrator {
 
   private jobOutcomeHash(outcome: { result: AgentResult } | { error: string }): string {
     return createHash('sha256').update(JSON.stringify(outcome)).digest('hex');
+  }
+
+  private recordResultMetrics(result: AgentResult): void {
+    if (result.kind === 'rebase' && result.rebased.some((entry) => entry.conflict)) this.metrics?.inc('sindral_rebase_conflicts_total');
+    if (result.kind === 'conflict-resolution') {
+      this.metrics?.inc('sindral_conflict_resolution_total', { outcome: result.resolved ? 'resolved' : 'escalated' });
+      if (result.checks.some((check) => !check.ok)) this.metrics?.inc('sindral_validation_failures_total', { surface: 'conflict-resolution' });
+    }
+    if (result.kind === 'merge' && !result.complete) this.metrics?.inc('sindral_merge_failures_total');
+    if (result.kind === 'verdict' && result.verdict === 'NO_GO') this.metrics?.inc('sindral_validation_failures_total', { surface: 'verification' });
   }
 
   private async beginJobOutcome(
@@ -1128,21 +1147,23 @@ export class Orchestrator {
         const outcomeStartedAt = job.outcomeStartedAt ? Date.parse(job.outcomeStartedAt) : 0;
         if (outcomeStartedAt > now.getTime() - OUTCOME_LEASE_MS) continue;
         if (!job.outcomeHash || !job.outcomeToken || !job.leaseToken || (!job.result && !job.error)) {
-          this.log.error({ jobId: job.id }, 'cannot recover job with incomplete outcome state');
+          this.log.error({ userId: job.userId, taskId: job.taskId, jobId: job.id }, 'cannot recover job with incomplete outcome state');
           continue;
         }
         await this.repo.abandonJobOutcome(job.userId, job.id, job.attempt, job.outcomeHash, job.outcomeToken);
         if (job.result) await this.completeJob(job.userId, job.id, job.result, job.attempt, job.leaseToken);
         else await this.failJob(job.userId, job.id, job.error!, job.attempt, job.leaseToken);
-        this.log.warn({ jobId: job.id, attempt: job.attempt }, 'resumed abandoned job outcome');
+        this.log.warn({ userId: job.userId, taskId: job.taskId, jobId: job.id, attempt: job.attempt }, 'resumed abandoned job outcome');
         continue;
       }
       const leaseExpiresAt = job.leaseExpiresAt ? Date.parse(job.leaseExpiresAt) : 0;
       if (leaseExpiresAt > now.getTime()) continue;
+      this.metrics?.inc('sindral_lease_expiries_total', { kind: job.kind });
       if (job.attempt < MAX_JOB_ATTEMPTS) {
         await this.repo.updateJob(job.userId, job.id, { status: 'queued', workerId: null, claimedAt: null, leaseExpiresAt: null, attempt: job.attempt + 1 });
         requeued += 1;
-        this.log.warn({ jobId: job.id, attempt: job.attempt + 1 }, 'requeued job from lost worker');
+        this.metrics?.inc('sindral_job_retries_total', { kind: job.kind });
+        this.log.warn({ userId: job.userId, taskId: job.taskId, jobId: job.id, attempt: job.attempt + 1 }, 'requeued job from lost worker');
       } else {
         const error = 'Worker stopped responding and the job exhausted its retries';
         await this.repo.updateJob(job.userId, job.id, { status: 'failed', error, finishedAt: now.toISOString() });

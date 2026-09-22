@@ -15,7 +15,7 @@ Before shifting traffic:
 
 1. Back up the database and record the restore point.
 2. Apply `supabase/migrations` from the same commit.
-3. Start one container with `SINDRAL_JOB_DISPATCH_ENABLED=false` and `SINDRAL_AUTO_MERGE_ENABLED=false`.
+3. Start one container with `SINDRAL_JOB_DISPATCH_ENABLED=false`, `SINDRAL_AUTO_MERGE_ENABLED=false`, and a secret-manager-backed `METRICS_TOKEN`.
 4. Confirm `/api/health`, startup schema compatibility, sign-in, read access, and webhook delivery.
 5. Enable dispatch for an internal sandbox user. Keep automatic merge disabled and inspect the proposed merge evidence.
 6. Enable automatic merge only for allow-listed sandbox repositories, then invited beta repositories.

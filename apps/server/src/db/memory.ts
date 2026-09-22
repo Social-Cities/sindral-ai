@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { ARTIFACT_CONTENT_TYPES, MAX_ARTIFACT_BYTES } from '@sindral/shared';
 import type { AgentResult, Artifact, Job, JobKind, Message, PullRequest, SecretProvider, Task, TaskEvent, TaskRepository, Worker, WorkerKey, WorkflowRecord } from '@sindral/shared';
+import type { OperationalSnapshot } from '../metrics.js';
 import {
   ConflictError,
   RepositoryError,
@@ -809,5 +810,19 @@ export class MemoryRepository implements Repository {
 
   async deleteSecret(userId: string, provider: SecretProvider): Promise<boolean> {
     return this.secrets.delete(this.secretKey(userId, provider));
+  }
+
+  async getOperationalSnapshot(now = new Date()): Promise<OperationalSnapshot> {
+    const taskStates: Record<string, number> = {};
+    const jobStatuses: Record<string, number> = {};
+    for (const task of this.tasks.values()) taskStates[task.state] = (taskStates[task.state] ?? 0) + 1;
+    for (const job of this.jobs.values()) jobStatuses[job.status] = (jobStatuses[job.status] ?? 0) + 1;
+    const ages = [...this.workers.values()].map((worker) => Math.max(0, (now.getTime() - Date.parse(worker.lastSeenAt)) / 1000));
+    return {
+      taskStates,
+      jobStatuses,
+      workerCount: this.workers.size,
+      oldestWorkerHeartbeatAgeSeconds: ages.length > 0 ? Math.max(...ages) : 0,
+    };
   }
 }

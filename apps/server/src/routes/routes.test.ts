@@ -289,6 +289,9 @@ describe('worker API', () => {
     const done = await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/complete`, headers, payload: { attempt: 1, leaseToken, result: plan('# P') } });
     expect(done.statusCode).toBe(200);
     expect((await ctx.repo.getTask(ctx.userA, task.id))?.state).toBe('plan-review');
+    const metrics = await ctx.app.inject({ method: 'GET', url: '/api/metrics', headers: { authorization: `Bearer ${ctx.config.metricsToken}` } });
+    expect(metrics.body).toContain('sindral_job_claim_latency_seconds_count{kind="agent"} 1');
+    expect(metrics.body).toContain('sindral_job_duration_seconds_count{kind="agent",outcome="completed"} 1');
     expect((await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${jobId}/events`, headers, payload: { type: 'log', message: 'late', attempt: 1, leaseToken } })).statusCode).toBe(409);
   });
 
@@ -451,6 +454,22 @@ describe('server-sent events', () => {
     const denied = await ctx.app.inject({ method: 'GET', url: '/api/health', headers: { origin: 'https://evil.example' } });
     expect(denied.headers['access-control-allow-origin']).toBeUndefined();
     expect(denied.headers['content-security-policy']).toContain("default-src 'self'");
+  });
+});
+
+describe('operational metrics', () => {
+  it('requires its dedicated bearer token and exposes aggregate state only', async () => {
+    expect((await ctx.app.inject({ method: 'GET', url: '/api/metrics' })).statusCode).toBe(401);
+    await ctx.app.inject({ method: 'POST', url: '/api/tasks', headers: asA(), payload: { title: '' } });
+    await ctx.app.ctx.orchestrator.createTask(ctx.userA, { title: 'metric task', description: '', repos: [] });
+    const response = await ctx.app.inject({ method: 'GET', url: '/api/metrics', headers: { authorization: `Bearer ${ctx.config.metricsToken}` } });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toContain('text/plain');
+    expect(response.body).toContain('# TYPE sindral_tasks gauge');
+    expect(response.body).toContain('sindral_tasks{state="todo"} 1');
+    expect(response.body).toContain('sindral_validation_failures_total{surface="api"} 1');
+    expect(response.body).toContain('sindral_workers 0');
+    expect(response.body).not.toContain(ctx.userA);
   });
 });
 

@@ -31,6 +31,7 @@ const envSchema = z.object({
   GITHUB_APP_ID: optionalString,
   GITHUB_APP_PRIVATE_KEY: optionalString,
   GITHUB_APP_INSTALLATIONS: optionalString,
+  METRICS_TOKEN: optionalString,
   SINDRAL_JOB_DISPATCH_ENABLED: booleanString('true'),
   SINDRAL_AUTO_MERGE_ENABLED: booleanString('false'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
@@ -53,6 +54,7 @@ export interface AppConfig {
   githubAppId: string | undefined;
   githubAppPrivateKey: string | undefined;
   githubAppInstallations: Record<string, number>;
+  metricsToken: string | undefined;
   jobDispatchEnabled: boolean;
   autoMergeEnabled: boolean;
   logLevel: LogLevel;
@@ -80,6 +82,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): AppConfig {
     if (!e.GITHUB_WEBHOOK_SECRET || e.GITHUB_WEBHOOK_SECRET.length < 32) {
       throw new ConfigError('GITHUB_WEBHOOK_SECRET must contain at least 32 characters in production');
     }
+    if (!e.METRICS_TOKEN || e.METRICS_TOKEN.length < 32) throw new ConfigError('METRICS_TOKEN must contain at least 32 characters in production');
   }
   const githubAppValues = [e.GITHUB_APP_ID, e.GITHUB_APP_PRIVATE_KEY, e.GITHUB_APP_INSTALLATIONS];
   if (githubAppValues.some((value) => value !== undefined) && githubAppValues.some((value) => value === undefined)) {
@@ -107,6 +110,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): AppConfig {
     githubAppId: e.GITHUB_APP_ID,
     githubAppPrivateKey: e.GITHUB_APP_PRIVATE_KEY?.replaceAll('\\n', '\n'),
     githubAppInstallations,
+    metricsToken: e.METRICS_TOKEN,
     jobDispatchEnabled: e.SINDRAL_JOB_DISPATCH_ENABLED,
     autoMergeEnabled: e.SINDRAL_AUTO_MERGE_ENABLED,
     logLevel: e.LOG_LEVEL,

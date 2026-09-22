@@ -70,7 +70,9 @@ Run the server behind TLS. Use a hosted Supabase project, apply migrations with 
 
 Production merge is deliberately opt-in: set `SINDRAL_AUTO_MERGE_ENABLED=true` only after validating the GitHub App and repository allow-list. `SINDRAL_JOB_DISPATCH_ENABLED=false` is the emergency stop for new worker leases; queued jobs and read/review access remain intact until it is re-enabled. Disabling automatic merge also prevents already-queued merge jobs from being leased.
 
-Operational procedures live in [`docs/operations`](docs/operations/deployment.md): deployment and staged rollout, backup/restore, incident response, secret rotation, retention/deletion, and worker upgrades.
+Prometheus metrics are available at `/api/metrics` with `Authorization: Bearer <METRICS_TOKEN>`. The token is mandatory in production; the endpoint exposes aggregate states and operational outcomes, never user/task identifiers or content.
+
+Operational procedures live in [`docs/operations`](docs/operations/deployment.md): deployment and staged rollout, monitoring/alerts, backup/restore, incident response, secret rotation, retention/deletion, and worker upgrades.
 
 ## Scripts
 

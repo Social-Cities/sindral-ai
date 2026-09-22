@@ -20,6 +20,7 @@ import type {
   WorkflowRecord,
   GitHubFeedbackReference,
 } from '@sindral/shared';
+import type { OperationalSnapshot } from '../metrics.js';
 
 /** Raised when a unique constraint is violated (task key, message external id, ...). Mapped to 409. */
 export class ConflictError extends Error {
@@ -260,6 +261,8 @@ export interface SecretUpsert {
  * cross-user lookups are explicitly named so they stand out in review.
  */
 export interface Repository {
+  /** Cross-tenant aggregate only; contains no identifiers or user content. */
+  getOperationalSnapshot(now?: Date): Promise<OperationalSnapshot>;
   // profiles
   ensureProfile(userId: string, displayNameHint: string | null): Promise<Profile>;
   nextTaskNumber(userId: string): Promise<number>;
