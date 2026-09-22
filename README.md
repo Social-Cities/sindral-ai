@@ -80,6 +80,7 @@ Operational procedures live in [`docs/operations`](docs/operations/deployment.md
 |---|---|
 | `pnpm typecheck` | strict TypeScript in every package |
 | `pnpm test` | vitest in every package |
+| `pnpm test:e2e` | Playwright browser journeys against the built portal and deterministic boundary fixtures |
 | `pnpm lint` | eslint (typescript-eslint) |
 | `pnpm build` | production builds |
 | `pnpm bundle:check` | enforce compressed route, vendor, CSS, and total web bundle budgets |

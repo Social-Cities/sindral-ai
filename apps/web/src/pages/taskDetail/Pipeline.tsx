@@ -24,10 +24,11 @@ export function Pipeline({ task, workflow }: PipelineProps) {
   if (offPath) {
     const style = getStateStyle(task.state);
     const failedStep = workflow ? getStep(workflow, task.failedStepId ?? task.currentStepId) : null;
+    const offPathLabel = task.state === 'failure' ? '⚠ Failed' : task.state === 'conflict-resolution' ? '◐ Resolving Conflict' : '◐ Troubleshoot';
     return (
       <div className="flex items-center gap-2 mt-4" data-testid="pipeline-offpath">
         <span className="text-xs px-2 py-1 rounded font-mono font-medium" style={{ background: '#f8711815', color: style.color, border: '1px solid #fb923c20' }}>
-          {task.state === 'failure' ? '⚠ Failed' : '◐ Troubleshoot'}
+          {offPathLabel}
         </span>
         <span className="text-xs text-muted-foreground">
           — task is off the main flow{failedStep ? ` (failed at ${failedStep.label})` : ''}

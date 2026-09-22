@@ -13,9 +13,10 @@
     "dev:server": "pnpm --filter @sindral/server dev",
     "dev:web": "pnpm --filter @sindral/web dev",
     "dev:worker": "pnpm --filter @sindral/worker dev",
-    "typecheck": "pnpm -r run typecheck",
+    "typecheck": "pnpm -r run typecheck && tsc -p tsconfig.e2e.json --noEmit",
     "test": "pnpm -r run test",
-    "lint": "pnpm -r run lint",
+    "test:e2e": "playwright test",
+    "lint": "pnpm -r run lint && eslint e2e",
     "db:start": "supabase start",
     "db:reset": "supabase db reset",
     "db:migrate": "supabase db push",
@@ -24,13 +25,14 @@
     "smoke": "node scripts/smoke.mjs"
   },
   "devDependencies": {
-    "@types/node": "^24.3.0",
-    "typescript": "^5.9.2",
-    "vitest": "^3.2.4",
-    "eslint": "^9.35.0",
-    "typescript-eslint": "^8.43.0",
     "@eslint/js": "^9.35.0",
-    "globals": "^16.3.0"
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^24.3.0",
+    "eslint": "^9.35.0",
+    "globals": "^16.3.0",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.43.0",
+    "vitest": "^3.2.4"
   },
   "type": "module"
 }

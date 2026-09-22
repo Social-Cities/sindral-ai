@@ -20,6 +20,8 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: pnpm bundle:check
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e
       - run: pnpm audit --audit-level high
       - name: Verify generated files are not tracked
         run: git diff --exit-code -- . ':(exclude)pnpm-lock.yaml'
