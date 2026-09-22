@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { OUTPUT_DIR_ENV, RESULT_FILE_ENV, type AgentJobPayload, type AgentResult, type JobDispatch, type PrResult } from '@sindral/shared';
+import { OUTPUT_DIR_ENV, RESULT_FILE_ENV, type AgentJobPayload, type AgentResult, type GitHubFeedbackReference, type JobDispatch, type PrResult } from '@sindral/shared';
 import type { ApiClient } from './api.js';
 import { collectOutputArtifacts, mergeArtifacts } from './artifacts.js';
 import { runConflictResolution } from './conflict.js';
@@ -216,7 +216,17 @@ async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx:
     const summary = summaryOf(raw);
     if (!summary) throw new Error(describeFailure(`the result has no summary${exitNote}`, run.tail, ctx.redactor));
     if (workspace.repos.length === 0) throw new Error('A "pr" step requires at least one repository on the task');
-    candidate = await publishPr({ ...ctx, workspace, taskKey, taskTitle: payload.context.task_title, summary, token: credentials.githubToken, redactor: ctx.redactor });
+    candidate = await publishPr({
+      ...ctx,
+      workspace,
+      taskKey,
+      taskTitle: payload.context.task_title,
+      summary,
+      token: credentials.githubToken,
+      redactor: ctx.redactor,
+      jobId: dispatch.job.id,
+      githubFeedback: payload.context.github_feedback,
+    });
   } else if (raw.kind === 'document') {
     const collected = await collectOutputArtifacts(outputDir);
     candidate = { ...raw, artifacts: mergeArtifacts(raw['artifacts'], collected) };
@@ -233,6 +243,8 @@ interface PublishOptions extends AgentJobContext {
   taskTitle: string;
   summary: string;
   token: string | null;
+  jobId: string;
+  githubFeedback?: GitHubFeedbackReference;
 }
 
 async function publishPr(opts: PublishOptions): Promise<Record<string, unknown>> {
@@ -257,6 +269,8 @@ async function publishPr(opts: PublishOptions): Promise<Record<string, unknown>>
       taskKey: opts.taskKey,
       taskTitle: opts.taskTitle,
       summary: opts.summary,
+      jobId: opts.jobId,
+      githubFeedback: opts.githubFeedback,
     });
     opts.write(`${repo.repo.full}: ${pr.created ? 'opened' : 'commented on'} ${pr.url}`);
     opts.events.message(`${pr.created ? 'Opened' : 'Updated'} pull request ${pr.url}`);

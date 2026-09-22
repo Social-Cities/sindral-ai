@@ -409,6 +409,7 @@ export class MemoryRepository implements Repository {
       content: input.content,
       source: input.source,
       externalId,
+      githubFeedback: input.githubFeedback ? clone(input.githubFeedback) : null,
       createdAt: this.now(),
     };
     this.messages.set(message.id, message);

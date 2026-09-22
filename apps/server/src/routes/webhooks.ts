@@ -22,6 +22,7 @@ interface GitHubUser {
 interface GitHubComment {
   id?: number | string;
   body?: string;
+  html_url?: string;
   user?: GitHubUser;
 }
 interface GitHubWebhookPayload {
@@ -116,7 +117,8 @@ export const webhookRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx
       if (!extracted) return finish(202, { ok: true, ignored: 'unsupported event' });
       const { prUrl, comment } = extracted;
       const body = comment.body ?? '';
-      if (comment.user?.type === 'Bot' || body.includes(SINDRAL_MARKER) || comment.id === undefined || body.trim() === '') {
+      const commentId = comment.id === undefined ? '' : String(comment.id);
+      if (comment.user?.type === 'Bot' || body.includes(SINDRAL_MARKER) || !/^[1-9][0-9]*$/.test(commentId) || body.trim() === '') {
         return finish(202, { ok: true, ignored: 'bot or marker comment' });
       }
 
@@ -125,9 +127,17 @@ export const webhookRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx
 
       const login = comment.user?.login ?? 'someone';
       const content = `@${login} on GitHub:\n\n${body}`;
+      const feedbackKind = eventName === 'pull_request_review_comment' ? 'review_comment' : 'issue_comment';
+      const fallbackCommentUrl = `${prUrl}#${feedbackKind === 'review_comment' ? 'discussion_r' : 'issuecomment-'}${commentId}`;
+      const commentUrl = comment.html_url?.startsWith(`${prUrl}#`) ? comment.html_url : fallbackCommentUrl;
       const workflow = await ctx.orchestrator.resolveWorkflow(task.userId, task);
       const triggers = workflow ? chatTriggersFeedback(task, workflow) : false;
-      const { message } = await ctx.orchestrator.postUserMessage(task.userId, task.id, content, 'github', String(comment.id));
+      const { message } = await ctx.orchestrator.postUserMessage(task.userId, task.id, content, 'github', commentId, {
+        kind: feedbackKind,
+        commentId,
+        commentUrl,
+        prUrl,
+      });
       return finish(200, { ok: true, duplicate: message === null, feedback: triggers });
     } catch (error) {
       await ctx.repo.abandonWebhookDelivery(deliveryId, payloadHash, delivery.token);

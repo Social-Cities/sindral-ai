@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(10);
+select plan(12);
 
 create temporary table webhook_claim as
 select public.begin_webhook_delivery('delivery-1', 'issue_comment', repeat('a', 64)) as value;
@@ -54,6 +54,32 @@ select is(
 select ok(not has_table_privilege('authenticated', 'public.webhook_deliveries', 'SELECT'), 'browser role cannot read delivery records');
 select ok(not has_function_privilege('authenticated', 'public.begin_webhook_delivery(text,text,text)', 'EXECUTE'), 'browser role cannot claim deliveries');
 select ok(has_function_privilege('service_role', 'public.begin_webhook_delivery(text,text,text)', 'EXECUTE'), 'service role can claim deliveries');
+
+insert into auth.users (id, email) values ('80000000-0000-4000-8000-000000000008', 'github-feedback@example.test');
+insert into public.tasks (id, user_id, key, title, state)
+values ('90000000-0000-4000-8000-000000000009', '80000000-0000-4000-8000-000000000008', 'GH-1', 'GitHub feedback', 'in-review');
+insert into public.task_messages (
+  task_id, user_id, role, source, content, external_id, github_feedback_kind, github_comment_url, github_pr_url
+) values (
+  '90000000-0000-4000-8000-000000000009', '80000000-0000-4000-8000-000000000008', 'user', 'github', 'feedback', '777',
+  'review_comment', 'https://github.com/acme/app/pull/1#discussion_r777', 'https://github.com/acme/app/pull/1'
+);
+select is(
+  (select github_feedback_kind from public.task_messages where external_id = '777'),
+  'review_comment',
+  'GitHub feedback references persist with messages'
+);
+select throws_ok(
+  $$insert into public.task_messages (
+    task_id, user_id, role, source, content, external_id, github_feedback_kind, github_pr_url
+  ) values (
+    '90000000-0000-4000-8000-000000000009', '80000000-0000-4000-8000-000000000008', 'user', 'web', 'invalid', '778',
+    'issue_comment', 'https://github.com/acme/app/pull/1'
+  )$$,
+  '23514',
+  null,
+  'non-GitHub messages cannot carry GitHub feedback references'
+);
 
 select * from finish();
 rollback;

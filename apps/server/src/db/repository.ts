@@ -18,6 +18,7 @@ import type {
   WorkerKey,
   Workflow,
   WorkflowRecord,
+  GitHubFeedbackReference,
 } from '@sindral/shared';
 
 /** Raised when a unique constraint is violated (task key, message external id, ...). Mapped to 409. */
@@ -124,6 +125,7 @@ export interface MessageInsert {
   content: string;
   source: MessageSource;
   externalId?: string | null;
+  githubFeedback?: GitHubFeedbackReference | null;
 }
 
 export interface EventInsert {

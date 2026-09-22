@@ -66,6 +66,47 @@ describe('ensurePr', () => {
     expect(calls.some((c) => c[1] === 'create')).toBe(false);
   });
 
+  it('replies directly to an originating review comment', async () => {
+    const jobId = '10000000-0000-4000-8000-000000000001';
+    const feedback = {
+      kind: 'review_comment' as const,
+      commentId: '777',
+      commentUrl: 'https://github.com/acme/widgets/pull/3#discussion_r777',
+      prUrl: 'https://github.com/acme/widgets/pull/3',
+    };
+    const { gh, calls } = fakeGh((args) => (args[1] === 'list' ? ok('[{"url":"https://github.com/acme/widgets/pull/3"}]') : undefined));
+
+    await ensurePr({ ...base, gh, jobId, githubFeedback: feedback });
+
+    const reply = calls.find((args) => args.includes('repos/acme/widgets/pulls/3/comments/777/replies'));
+    expect(reply).toEqual(expect.arrayContaining(['api', '--method', 'POST']));
+    expect(reply?.find((arg) => arg.startsWith('body='))).toContain(`<!-- sindral:job:${jobId} -->`);
+    expect(calls.some((args) => args[1] === 'comment')).toBe(false);
+  });
+
+  it('links ordinary feedback in a PR-level response and skips an existing job marker', async () => {
+    const jobId = '20000000-0000-4000-8000-000000000002';
+    const feedback = {
+      kind: 'issue_comment' as const,
+      commentId: '888',
+      commentUrl: 'https://github.com/acme/widgets/pull/3#issuecomment-888',
+      prUrl: 'https://github.com/acme/widgets/pull/3',
+    };
+    const first = fakeGh((args) => (args[1] === 'list' ? ok('[{"url":"https://github.com/acme/widgets/pull/3"}]') : undefined));
+    await ensurePr({ ...base, gh: first.gh, jobId, githubFeedback: feedback });
+    const body = first.calls.find((args) => args[1] === 'comment')?.at(-1) ?? '';
+    expect(body).toContain(feedback.commentUrl);
+    expect(body).toContain(`<!-- sindral:job:${jobId} -->`);
+
+    const retry = fakeGh((args) => {
+      if (args[1] === 'list') return ok('[{"url":"https://github.com/acme/widgets/pull/3"}]');
+      if (args[0] === 'api') return ok('12345\n');
+      return undefined;
+    });
+    await ensurePr({ ...base, gh: retry.gh, jobId, githubFeedback: feedback });
+    expect(retry.calls.some((args) => args[1] === 'comment' || args.includes('--method'))).toBe(false);
+  });
+
   it('surfaces gh failures', async () => {
     const { gh } = fakeGh((args) => (args[1] === 'list' ? failed('gh: not logged in') : undefined));
     await expect(ensurePr({ ...base, gh })).rejects.toThrow(/gh pr list failed.*not logged in/);

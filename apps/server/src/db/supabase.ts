@@ -21,6 +21,7 @@ import type {
   WorkerStatus,
   Workflow,
   WorkflowRecord,
+  GitHubFeedbackKind,
 } from '@sindral/shared';
 import {
   ConflictError,
@@ -134,6 +135,9 @@ interface MessageRow {
   source: MessageSource;
   content: string;
   external_id: string | null;
+  github_feedback_kind: GitHubFeedbackKind | null;
+  github_comment_url: string | null;
+  github_pr_url: string | null;
   created_at: string;
 }
 interface EventRow {
@@ -304,6 +308,10 @@ const mapMessage = (r: MessageRow): Message => ({
   content: r.content,
   source: r.source,
   externalId: r.external_id,
+  githubFeedback:
+    r.github_feedback_kind && r.external_id && r.github_pr_url
+      ? { kind: r.github_feedback_kind, commentId: r.external_id, commentUrl: r.github_comment_url, prUrl: r.github_pr_url }
+      : null,
   createdAt: r.created_at,
 });
 
@@ -716,7 +724,17 @@ export class SupabaseRepository implements Repository {
       const row = await run<MessageRow>(
         this.client
           .from('task_messages')
-          .insert({ task_id: input.taskId, user_id: userId, role: input.role, source: input.source, content: input.content, external_id: input.externalId ?? null })
+          .insert({
+            task_id: input.taskId,
+            user_id: userId,
+            role: input.role,
+            source: input.source,
+            content: input.content,
+            external_id: input.externalId ?? null,
+            github_feedback_kind: input.githubFeedback?.kind ?? null,
+            github_comment_url: input.githubFeedback?.commentUrl ?? null,
+            github_pr_url: input.githubFeedback?.prUrl ?? null,
+          })
           .select('*')
           .single(),
       );

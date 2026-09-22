@@ -13,6 +13,7 @@ import {
   type CreateTaskInput,
   type Job,
   type JobContext,
+  type GitHubFeedbackReference,
   type Message,
   type MessageSource,
   type ResolveRebaseConflictJobPayload,
@@ -222,9 +223,17 @@ export class Orchestrator {
     content: string,
     source: MessageSource,
     externalId?: string,
+    githubFeedback?: GitHubFeedbackReference,
   ): Promise<{ message: Message | null; task: Task }> {
     let task = await this.getTask(userId, taskId);
-    const message = await this.repo.createMessage(userId, { taskId, role: 'user', content, source, externalId: externalId ?? null });
+    const message = await this.repo.createMessage(userId, {
+      taskId,
+      role: 'user',
+      content,
+      source,
+      externalId: externalId ?? null,
+      githubFeedback: githubFeedback ?? null,
+    });
     const workflow = await this.resolveWorkflow(userId, task);
     if (workflow && chatTriggersFeedback(task, workflow)) {
       task = await this.applyEvent(userId, task, 'feedback', {
@@ -375,7 +384,11 @@ export class Orchestrator {
 
   async buildJobContext(userId: string, task: Task, feedbackOverride?: string): Promise<JobContext> {
     const [messages, artifacts] = await Promise.all([this.repo.listMessages(userId, task.id), this.repo.listArtifacts(userId, task.id)]);
-    const feedback = feedbackOverride ?? feedbackSinceLastAgentMessage(messages);
+    const pendingMessages = messagesSinceLastAgentMessage(messages);
+    const feedback = feedbackOverride ?? pendingMessages.filter((message) => message.role === 'user').map((message) => message.content).join('\n\n');
+    const githubFeedback = [...pendingMessages]
+      .reverse()
+      .find((message) => message.role === 'user' && message.source === 'github' && message.githubFeedback)?.githubFeedback;
     const latest = (name: string): string => {
       const matching = artifacts.filter((a) => a.name === name);
       return matching[matching.length - 1]?.content ?? '';
@@ -407,6 +420,7 @@ export class Orchestrator {
       review: latest(REVIEW_ARTIFACT),
       verify_report: latest(VERIFY_ARTIFACT),
       error: task.lastError ?? '',
+      ...(githubFeedback ? { github_feedback: githubFeedback } : {}),
     };
   }
 
@@ -1127,15 +1141,18 @@ export class Orchestrator {
 
 /** User messages posted after the most recent agent message, joined with blank lines. */
 export function feedbackSinceLastAgentMessage(messages: Message[]): string {
+  return messagesSinceLastAgentMessage(messages)
+    .filter((m) => m.role === 'user')
+    .map((m) => m.content)
+    .join('\n\n');
+}
+
+function messagesSinceLastAgentMessage(messages: Message[]): Message[] {
   let lastAgent = -1;
   messages.forEach((m, i) => {
     if (m.role === 'agent') lastAgent = i;
   });
-  return messages
-    .slice(lastAgent + 1)
-    .filter((m) => m.role === 'user')
-    .map((m) => m.content)
-    .join('\n\n');
+  return messages.slice(lastAgent + 1);
 }
 
 function lastAgentSummary(messages: Message[]): string {

@@ -1,4 +1,5 @@
 import type { GitRunner } from './git.js';
+import type { GitHubFeedbackReference } from '@sindral/shared';
 import { run, type RunOptions, type RunResult } from './proc.js';
 import type { RepoRef } from './workspace.js';
 
@@ -36,8 +37,9 @@ export function prBody(opts: { taskKey: string; summary: string; taskUrl?: strin
   ].join('\n');
 }
 
-export function prComment(summary: string): string {
-  return `${SINDRAL_MARKER}\n${summary.trim() || '_No summary provided._'}`;
+export function prComment(summary: string, jobId?: string, sourceUrl?: string | null): string {
+  const marker = jobId ? `<!-- sindral:job:${jobId} -->` : SINDRAL_MARKER;
+  return [marker, summary.trim() || '_No summary provided._', ...(sourceUrl ? ['', `In response to ${sourceUrl}`] : [])].join('\n');
 }
 
 export function commitMessage(taskKey: string, summary: string): string {
@@ -76,6 +78,8 @@ export interface EnsurePrOptions {
   taskKey: string;
   taskTitle: string;
   summary: string;
+  jobId?: string;
+  githubFeedback?: GitHubFeedbackReference;
 }
 
 export interface EnsurePrResult {
@@ -102,8 +106,7 @@ export async function findOpenPr(gh: GhRunner, cwd: string, repo: RepoRef, branc
 export async function ensurePr(opts: EnsurePrOptions): Promise<EnsurePrResult> {
   const existing = await findOpenPr(opts.gh, opts.cwd, opts.repo, opts.branch);
   if (existing) {
-    const comment = await opts.gh(['pr', 'comment', existing, '--repo', opts.repo.full, '--body', prComment(opts.summary)], { cwd: opts.cwd });
-    if (comment.failed || comment.exitCode !== 0) fail('gh pr comment', comment);
+    await postPrUpdate(opts, existing);
     return { url: existing, created: false };
   }
   const created = await opts.gh(
@@ -132,6 +135,32 @@ export async function ensurePr(opts: EnsurePrOptions): Promise<EnsurePrResult> {
     return { url: found, created: true };
   }
   return { url, created: true };
+}
+
+async function postPrUpdate(opts: EnsurePrOptions, prUrl: string): Promise<void> {
+  const number = Number(/\/pull\/(\d+)(?:$|[?#])/.exec(prUrl)?.[1]);
+  if (!Number.isInteger(number) || number <= 0) throw new Error(`Pull request URL has no valid number: ${prUrl}`);
+  const marker = opts.jobId ? `<!-- sindral:job:${opts.jobId} -->` : SINDRAL_MARKER;
+  const directReply = opts.githubFeedback?.kind === 'review_comment' && opts.githubFeedback.prUrl === prUrl;
+  const listPath = directReply
+    ? `repos/${opts.repo.full}/pulls/${number}/comments`
+    : `repos/${opts.repo.full}/issues/${number}/comments`;
+  if (opts.jobId) {
+    const existing = await opts.gh(['api', listPath, '--paginate', '--jq', `.[] | select(.body | contains("${marker}")) | .id`], { cwd: opts.cwd });
+    if (existing.failed || existing.exitCode !== 0) fail('gh api comment lookup', existing);
+    if (existing.stdout.trim()) return;
+  }
+  const body = prComment(opts.summary, opts.jobId, opts.githubFeedback?.commentUrl);
+  if (directReply) {
+    const reply = await opts.gh(
+      ['api', '--method', 'POST', `repos/${opts.repo.full}/pulls/${number}/comments/${opts.githubFeedback!.commentId}/replies`, '-f', `body=${body}`],
+      { cwd: opts.cwd },
+    );
+    if (reply.failed || reply.exitCode !== 0) fail('gh api review comment reply', reply);
+    return;
+  }
+  const comment = await opts.gh(['pr', 'comment', prUrl, '--repo', opts.repo.full, '--body', body], { cwd: opts.cwd });
+  if (comment.failed || comment.exitCode !== 0) fail('gh pr comment', comment);
 }
 
 export function extractPrUrl(output: string): string | null {

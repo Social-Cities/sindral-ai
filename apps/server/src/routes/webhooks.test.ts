@@ -20,7 +20,7 @@ function comment(overrides: Record<string, unknown> = {}, user: Record<string, u
   return {
     action: 'created',
     issue: { pull_request: { html_url: 'https://github.com/acme/app/pull/1' }, html_url: 'https://github.com/acme/app/pull/1' },
-    comment: { id: 555, body: 'Please rename this function', user, ...overrides },
+    comment: { id: 555, body: 'Please rename this function', html_url: 'https://github.com/acme/app/pull/1#issuecomment-555', user, ...overrides },
   };
 }
 
@@ -93,6 +93,12 @@ describe('GitHub webhook', () => {
     expect(fresh?.state).toBe('implement-feedback');
     const job = (await ctx.repo.listJobsForTask(ctx.userA, task.id)).find((j) => j.status === 'queued')!;
     expect((job.payload as { context: { feedback: string } }).context.feedback).toContain('Please rename this function');
+    expect((job.payload as { context: { github_feedback: unknown } }).context.github_feedback).toEqual({
+      kind: 'issue_comment',
+      commentId: '555',
+      commentUrl: 'https://github.com/acme/app/pull/1#issuecomment-555',
+      prUrl: 'https://github.com/acme/app/pull/1',
+    });
 
     const dup = await post(comment());
     expect(dup.statusCode).toBe(200);
@@ -117,11 +123,12 @@ describe('GitHub webhook', () => {
 
   it('handles review comments and ignores bots, sindral markers and non-PR comments', async () => {
     const task = await taskInReview();
-    const reviewComment = { action: 'created', pull_request: { html_url: 'https://github.com/acme/app/pull/1' }, comment: { id: 777, body: 'nit', user: { login: 'bob', type: 'User' } } };
+    const reviewComment = { action: 'created', pull_request: { html_url: 'https://github.com/acme/app/pull/1' }, comment: { id: 777, body: 'nit', html_url: 'https://github.com/acme/app/pull/1#discussion_r777', user: { login: 'bob', type: 'User' } } };
     expect((await post(reviewComment, { event: 'pull_request_review_comment' })).statusCode).toBe(200);
 
     expect((await post(comment({ id: 1 }, { login: 'bot[bot]', type: 'Bot' }))).statusCode).toBe(202);
     expect((await post(comment({ id: 2, body: 'Summary <!-- sindral --> hidden' }))).statusCode).toBe(202);
+    expect((await post(comment({ id: '../replies', body: 'invalid id' }))).statusCode).toBe(202);
     expect((await post({ action: 'created', issue: { html_url: 'x' }, comment: { id: 3, body: 'issue', user: { login: 'a' } } })).statusCode).toBe(202);
     expect((await post(comment({ id: 4 }), { event: 'push' })).statusCode).toBe(202);
     expect((await post({ ...comment({ id: 5 }), action: 'edited' })).statusCode).toBe(202);

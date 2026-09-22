@@ -107,6 +107,14 @@ export interface WorkflowRecord extends Workflow {
 
 export type MessageRole = 'user' | 'agent' | 'system';
 export type MessageSource = 'web' | 'github' | 'worker';
+export type GitHubFeedbackKind = 'issue_comment' | 'review_comment';
+
+export interface GitHubFeedbackReference {
+  kind: GitHubFeedbackKind;
+  commentId: string;
+  commentUrl: string | null;
+  prUrl: string;
+}
 
 export interface Message {
   id: string;
@@ -116,6 +124,7 @@ export interface Message {
   source: MessageSource;
   /** e.g. GitHub comment id, used for idempotent ingestion. */
   externalId?: string | null;
+  githubFeedback?: GitHubFeedbackReference | null;
   createdAt: string;
 }
 
@@ -225,6 +234,7 @@ export interface JobContext {
   review: string;
   verify_report: string;
   error: string;
+  github_feedback?: GitHubFeedbackReference;
 }
 
 export interface Job {

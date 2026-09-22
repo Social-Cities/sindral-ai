@@ -17,6 +17,7 @@ Every repository call is scoped by the authenticated user id. Supabase RLS is en
 - Worker keys are shown once at creation and stored hashed. Revocation is immediate.
 - Production uses short-lived GitHub App installation tokens minted per job, restricted to that job's repositories, and selected from a Sindral-user-to-installation mapping. Internal deployments may use an encrypted, repository-scoped fine-grained PAT; PAT-backed merge is disabled unless the worker explicitly sets `SINDRAL_ALLOW_PAT_MERGE=true`. Tokens are used for `git`/`gh` via an HTTP extra header / `GH_TOKEN`, never written to `.git/config`, never passed to the agent subprocess, and redacted from logs.
 - Logs redact `authorization` headers and token fields.
+- GitHub feedback references persist only the public PR/comment URLs, comment identifier, and comment kind. Worker replies carry a job-specific hidden marker so retries can detect an already-posted response before creating another external side effect.
 
 ## OWASP Top 10 mapping
 
