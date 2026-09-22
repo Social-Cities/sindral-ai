@@ -90,7 +90,7 @@ describe('TaskDetail', () => {
         pinnedWorkflow: snapshotWorkflow(FULL_SDLC_WORKFLOW),
       }),
     );
-    expect(await screen.findByRole('button', { name: 'Accept & merge' })).toHaveClass('bg-[#059669]');
+    expect(await screen.findByRole('button', { name: 'Accept & merge' })).toHaveClass('bg-[#047857]');
     const link = screen.getByRole('link', { name: 'View PR ↗' });
     expect(link).toHaveAttribute('href', 'https://github.com/acme/app/pull/7');
     expect(link).toHaveAttribute('rel', 'noreferrer noopener');

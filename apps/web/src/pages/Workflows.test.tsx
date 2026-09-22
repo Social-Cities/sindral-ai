@@ -26,6 +26,8 @@ describe('Workflows editor', () => {
       tasks: [makeTask({ state: 'implement', currentStepId: 'implement', pinnedWorkflow: FULL_SDLC_WORKFLOW })],
     });
     vi.mocked(api.updateWorkflow).mockReset();
+    vi.mocked(api.deleteWorkflow).mockReset();
+    vi.mocked(api.deleteWorkflow).mockResolvedValue({ ok: true });
   });
 
   it('renders the graph, disables Save when unchanged, and shows pinned counts', async () => {
@@ -79,5 +81,15 @@ describe('Workflows editor', () => {
     expect(body.name).toBe('Full SDLC v2');
     expect('id' in body).toBe(false);
     expect(await screen.findByRole('button', { name: 'Saved ✓' })).toBeDisabled();
+  });
+
+  it('warns about pinned tasks before deleting a workflow without affecting their snapshot', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.listWorkflows).mockResolvedValue({ workflows: [workflowRecord(), workflowRecord(FULL_SDLC_WORKFLOW, { id: 'wf-copy', name: 'Copy', isDefault: false })] });
+    renderWithProviders(<Workflows />, { route: '/workflows' });
+    await user.click(await screen.findByRole('button', { name: 'Delete workflow Full SDLC' }));
+    expect(screen.getByRole('dialog', { name: 'Delete workflow?' })).toHaveTextContent("Deleting it won't affect pinned tasks");
+    await user.click(screen.getByRole('button', { name: /^Delete workflow$/ }));
+    await waitFor(() => expect(api.deleteWorkflow).toHaveBeenCalledWith('wf-default'));
   });
 });

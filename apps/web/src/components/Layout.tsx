@@ -63,20 +63,20 @@ export function Layout({ children, liveStatus }: LayoutProps) {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      <header className="shrink-0 flex items-center justify-between px-6 h-13 border-b border-border">
+      <header className="shrink-0 flex items-center justify-between px-3 sm:px-6 h-13 border-b border-border gap-2">
         <Link to="/" className="flex items-center gap-2.5 group" aria-label="Sindral AI home">
           <Logo />
-          <span className="text-sm font-semibold tracking-tight text-foreground">Sindral AI</span>
+          <span className="hidden sm:inline text-sm font-semibold tracking-tight text-foreground">Sindral AI</span>
         </Link>
 
-        <nav className="flex items-center gap-0.5" aria-label="Primary">
+        <nav className="flex items-center gap-0.5 overflow-x-auto" aria-label="Primary">
           {NAV.map(({ to, label, end }) => (
             <NavLink
               key={to}
               to={to}
               end={end}
               className={({ isActive }) =>
-                `px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                `px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
                   isActive ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-secondary-foreground hover:bg-secondary/40'
                 }`
               }

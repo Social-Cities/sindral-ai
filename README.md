@@ -72,7 +72,7 @@ Production merge is deliberately opt-in: set `SINDRAL_AUTO_MERGE_ENABLED=true` o
 
 Prometheus metrics are available at `/api/metrics` with `Authorization: Bearer <METRICS_TOKEN>`. The token is mandatory in production; the endpoint exposes aggregate states and operational outcomes, never user/task identifiers or content.
 
-Operational procedures live in [`docs/operations`](docs/operations/deployment.md): deployment and staged rollout, monitoring/alerts, backup/restore, incident response, secret rotation, retention/deletion, and worker upgrades.
+Operational procedures live in [`docs/operations`](docs/operations/deployment.md): deployment and staged rollout, monitoring/alerts, backup/restore, incident response, secret rotation, retention/deletion, and worker upgrades. [`docs/TRACEABILITY.md`](docs/TRACEABILITY.md) maps every product/design requirement to its automated evidence or explicit release gate.
 
 ## Scripts
 

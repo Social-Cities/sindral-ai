@@ -81,8 +81,8 @@ export function Tasks() {
   const filterLabel = bucketFilter ? bucketFilter.replace('-', ' ') : statusFilter === 'all' ? 'All statuses' : getStateStyle(statusFilter).label;
 
   return (
-    <div className="h-full flex">
-      <aside className="w-60 shrink-0 flex flex-col border-r border-border bg-muted">
+    <div className="h-full flex flex-col md:flex-row">
+      <aside className="w-full md:w-60 shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-border bg-muted">
         <div className="p-4 space-y-3">
           <div className="relative">
             <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
@@ -145,7 +145,7 @@ export function Tasks() {
           )}
         </div>
 
-        <div className="px-4 pb-2">
+        <div className="px-4 pb-2 hidden md:block">
           <p className="text-xs text-muted-foreground">
             {visibleCount} task{visibleCount === 1 ? '' : 's'}
           </p>
@@ -153,7 +153,7 @@ export function Tasks() {
         {!BUCKETS.includes(bucketFilter as Bucket) && bucketFilter && <p className="px-4 text-[10px] text-[#f87171]">Unknown bucket filter.</p>}
       </aside>
 
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6">
         {tasksQuery.isLoading ? (
           <PageLoader />
         ) : tasksQuery.isError ? (

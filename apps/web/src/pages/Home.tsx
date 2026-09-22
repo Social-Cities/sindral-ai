@@ -177,7 +177,7 @@ export function Home() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="max-w-5xl mx-auto px-8 py-12">
+      <div className="max-w-5xl mx-auto px-4 sm:px-8 py-6 sm:py-12">
         <div className="mb-10">
           <h1 className="text-2xl font-semibold text-foreground tracking-tight">
             {greeting}, {name}.
@@ -185,8 +185,8 @@ export function Home() {
           <p className="text-sm text-muted-foreground mt-1">What would you like to work on today?</p>
         </div>
 
-        <div className="grid grid-cols-3 gap-8">
-          <div className="col-span-2 space-y-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
+          <div className="lg:col-span-2 space-y-6">
             {/* Task creation card */}
             <div className="rounded-lg overflow-hidden bg-card border border-border">
               <div className="flex border-b border-border" role="tablist" aria-label="Task source">
@@ -411,7 +411,7 @@ export function WorkerPanel({ workers, loading }: { workers: Worker[]; loading: 
       ) : online.length === 0 ? (
         <p className="text-xs text-muted-foreground leading-relaxed">
           No worker connected —{' '}
-          <Link to="/settings" className="text-accent hover:text-accent/70">
+          <Link to="/settings" className="text-accent underline underline-offset-2 hover:text-accent/70">
             see Settings
           </Link>
           {workers.length > 0 && <span className="block mt-1">{workers.length} registered, all offline.</span>}

@@ -15,7 +15,8 @@
   --color-secondary: #13132a;
   --color-secondary-foreground: #8b92a8;
   --color-muted: #0a0a18;
-  --color-muted-foreground: #52596b;
+  /* Raised from the prototype's #52596b so 10–12px labels meet WCAG AA on dark surfaces. */
+  --color-muted-foreground: #7b849a;
   --color-accent: #818cf8;
   --color-accent-foreground: #ffffff;
   --color-border: #1c1c30;
@@ -30,6 +31,22 @@ body {
   color: var(--color-foreground);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+:where(a, button, input, select, textarea):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-ring) 70%, transparent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 * {

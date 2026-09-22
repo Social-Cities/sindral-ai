@@ -193,9 +193,9 @@ export function Workflows() {
   if (workflowsQuery.isLoading) return <PageLoader label="Loading workflows…" />;
 
   return (
-    <div className="h-full flex">
+    <div className="h-full flex overflow-x-auto">
       {/* Workflows list sidebar */}
-      <aside className="w-52 shrink-0 flex flex-col border-r border-border bg-muted">
+      <aside className="w-44 sm:w-52 shrink-0 flex flex-col border-r border-border bg-muted">
         <div className="px-4 pt-4 pb-3 flex items-center justify-between border-b border-border">
           <span className="label-caps">Workflows</span>
           <button
@@ -312,7 +312,7 @@ export function Workflows() {
       </aside>
 
       {/* Canvas */}
-      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+      <div className="flex-1 flex flex-col overflow-hidden min-w-[34rem]">
         {draft && selectedRecord ? (
           <>
             <div className="shrink-0 flex items-center justify-between px-5 py-3 border-b border-border gap-3">
@@ -378,7 +378,7 @@ export function Workflows() {
       </div>
 
       {/* Step config panel */}
-      <aside className="w-72 shrink-0 flex flex-col border-l border-border bg-muted">
+      <aside className="w-64 sm:w-72 shrink-0 flex flex-col border-l border-border bg-muted">
         <div className="shrink-0 px-5 py-3 flex items-center justify-between border-b border-border">
           <span className="label-caps">{selectedStep ? 'Step config' : 'Select a step'}</span>
           {selectedStep && (

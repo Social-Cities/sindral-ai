@@ -96,7 +96,7 @@ export function TaskDetail() {
   return (
     <div className="h-full flex flex-col">
       {/* Top bar */}
-      <div className="shrink-0 flex items-center justify-between px-5 h-11 border-b border-border gap-4">
+      <div className="shrink-0 flex flex-wrap items-center justify-between px-3 sm:px-5 min-h-11 py-2 border-b border-border gap-2 sm:gap-4">
         <Link to="/tasks" className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-secondary-foreground transition-colors shrink-0">
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
             <path d="M8 2L4 6L8 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
@@ -134,11 +134,11 @@ export function TaskDetail() {
         </div>
       </div>
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
         {/* Left tab rail */}
-        <aside className="w-44 shrink-0 flex flex-col py-4 px-3 gap-1 border-r border-border bg-muted">
-          <p className="label-caps px-2 mb-2">View</p>
-          <div role="tablist" aria-orientation="vertical" className="flex flex-col gap-1">
+        <aside className="w-full md:w-44 shrink-0 flex md:flex-col py-2 md:py-4 px-2 md:px-3 gap-1 border-b md:border-b-0 md:border-r border-border bg-muted overflow-x-auto md:overflow-visible">
+          <p className="label-caps px-2 mb-2 hidden md:block">View</p>
+          <div role="tablist" className="flex md:flex-col gap-1 shrink-0">
             {tabs.map((t) => (
               <button
                 key={t}
@@ -146,7 +146,7 @@ export function TaskDetail() {
                 type="button"
                 aria-selected={tab === t}
                 onClick={() => setTab(t)}
-                className={`text-left px-3 py-2 rounded-md text-xs font-medium transition-colors border ${
+                className={`text-left px-3 py-2 rounded-md text-xs font-medium transition-colors border whitespace-nowrap ${
                   tab === t ? 'text-foreground bg-secondary border-border' : 'text-muted-foreground hover:text-secondary-foreground border-transparent'
                 }`}
               >
@@ -157,7 +157,7 @@ export function TaskDetail() {
             ))}
           </div>
 
-          <div className="mt-auto pt-4 border-t border-border">
+          <div className="mt-auto pt-4 border-t border-border hidden md:block">
             <p className="label-caps px-2 mb-2">Info</p>
             <div className="px-2 space-y-2.5">
               <div>
@@ -210,7 +210,7 @@ export function TaskDetail() {
 
         {/* Right content */}
         <div className="flex-1 overflow-hidden flex flex-col min-w-0">
-          <div className="shrink-0 px-6 pt-5 pb-4 border-b border-border">
+          <div className="shrink-0 px-4 sm:px-6 pt-4 sm:pt-5 pb-4 border-b border-border">
             <h1 className="text-lg font-semibold text-foreground tracking-tight leading-snug">{task.title}</h1>
             <Pipeline task={task} workflow={workflow} />
           </div>

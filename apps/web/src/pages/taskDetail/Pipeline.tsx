@@ -42,7 +42,7 @@ export function Pipeline({ task, workflow }: PipelineProps) {
   }
 
   return (
-    <ol className="flex items-center gap-0 mt-4 overflow-x-auto pb-1" aria-label="Pipeline">
+    <ol className="flex items-center gap-0 mt-4 overflow-x-auto pb-1" aria-label="Pipeline" tabIndex={0}>
       {path.map((step, i) => {
         const isCurrent = i === currentIdx && task.state !== 'done';
         const isPast = i < currentIdx || (task.state === 'done' && i <= currentIdx);
@@ -53,7 +53,7 @@ export function Pipeline({ task, workflow }: PipelineProps) {
               style={{
                 background: isCurrent ? '#7c3aed15' : isPast ? '#0d0d1c' : 'transparent',
                 border: isCurrent ? '1px solid #7c3aed40' : isPast ? '1px solid #1c1c30' : '1px solid transparent',
-                color: isCurrent ? '#a78bfa' : isPast ? '#8b92a8' : '#2a2a44',
+                color: isCurrent ? '#a78bfa' : isPast ? '#8b92a8' : '#7b849a',
               }}
             >
               {isPast && (
