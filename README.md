@@ -68,6 +68,8 @@ cd apps/server && node dist/index.js
 
 Run the server behind TLS. Use a hosted Supabase project, apply migrations with `supabase db push`, and set `WEB_ORIGIN` to the public origin of the UI. Configure Supabase Auth providers (email/password or GitHub OAuth) in the Supabase dashboard.
 
+Production merge is deliberately opt-in: set `SINDRAL_AUTO_MERGE_ENABLED=true` only after validating the GitHub App and repository allow-list. `SINDRAL_JOB_DISPATCH_ENABLED=false` is the emergency stop for new worker leases; queued jobs and read/review access remain intact until it is re-enabled. Disabling automatic merge also prevents already-queued merge jobs from being leased.
+
 ## Scripts
 
 | Command | What it does |

@@ -111,7 +111,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const fetchImpl = options.fetch ?? fetch;
   const workflows = new WorkflowService(repo);
   const secrets = new SecretService(repo, config.secretsEncryptionKey);
-  const orchestrator = new Orchestrator({ repo, hub, workflows, log: app.log });
+  const orchestrator = new Orchestrator({ repo, hub, workflows, log: app.log, autoMergeEnabled: config.autoMergeEnabled });
   const ctx: AppContext = {
     config,
     repo,

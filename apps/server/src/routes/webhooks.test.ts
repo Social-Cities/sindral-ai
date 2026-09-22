@@ -164,6 +164,46 @@ describe('GitHub webhook', () => {
     expect((await ctx.repo.listEvents(ctx.userA, task.id)).length).toBe(eventCount);
   });
 
+  it('completes an in-review task from externally confirmed merges without dispatching merge work', async () => {
+    const task = await taskInReview();
+    const jobsBefore = await ctx.repo.listJobsForTask(ctx.userA, task.id);
+    const response = await post({
+      action: 'closed',
+      pull_request: {
+        html_url: 'https://github.com/acme/app/pull/1',
+        state: 'closed',
+        merged: true,
+        merged_at: '2026-09-21T12:00:00Z',
+      },
+    }, { event: 'pull_request' });
+
+    expect(response.statusCode).toBe(200);
+    expect((await ctx.repo.getTask(ctx.userA, task.id))?.state).toBe('done');
+    const jobsAfter = await ctx.repo.listJobsForTask(ctx.userA, task.id);
+    expect(jobsAfter).toHaveLength(jobsBefore.length);
+    expect(jobsAfter.some((job) => job.kind === 'merge-pull-requests')).toBe(false);
+  });
+
+  it('recovers task completion when PR state was stored before webhook orchestration retried', async () => {
+    const task = await taskInReview();
+    const pullRequest = (await ctx.repo.listPullRequests(ctx.userA, task.id))[0]!;
+    await ctx.repo.upsertPullRequest(ctx.userA, task.id, {
+      taskRepositoryId: pullRequest.taskRepositoryId,
+      repository: pullRequest.repository,
+      url: pullRequest.url,
+      number: pullRequest.number,
+      branch: pullRequest.branch,
+      baseBranch: pullRequest.baseBranch,
+      headSha: pullRequest.headSha,
+      status: 'merged',
+      mergedAt: '2026-09-21T12:00:00Z',
+    });
+
+    const reconciled = await ctx.app.ctx.orchestrator.reconcilePullRequest(pullRequest.url, 'merged', '2026-09-21T12:00:00Z');
+    expect(reconciled).toBe(true);
+    expect((await ctx.repo.getTask(ctx.userA, task.id))?.state).toBe('done');
+  });
+
   it('rejects malformed json with 400', async () => {
     const body = '{not json';
     const res = await ctx.app.inject({ method: 'POST', url: '/api/webhooks/github', headers: { 'content-type': 'application/json', 'x-hub-signature-256': sign(body) }, payload: body });

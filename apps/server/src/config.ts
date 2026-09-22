@@ -13,6 +13,7 @@ const optionalString = z.preprocess(
   (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
   z.string().min(1).optional(),
 );
+const booleanString = (defaultValue: 'true' | 'false') => z.enum(['true', 'false']).default(defaultValue).transform((value) => value === 'true');
 
 const envSchema = z.object({
   SUPABASE_URL: z.string().url(),
@@ -29,6 +30,8 @@ const envSchema = z.object({
   GITHUB_APP_ID: optionalString,
   GITHUB_APP_PRIVATE_KEY: optionalString,
   GITHUB_APP_INSTALLATIONS: optionalString,
+  SINDRAL_JOB_DISPATCH_ENABLED: booleanString('true'),
+  SINDRAL_AUTO_MERGE_ENABLED: booleanString('false'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   WEB_DIST_DIR: optionalString,
 });
@@ -48,6 +51,8 @@ export interface AppConfig {
   githubAppId: string | undefined;
   githubAppPrivateKey: string | undefined;
   githubAppInstallations: Record<string, number>;
+  jobDispatchEnabled: boolean;
+  autoMergeEnabled: boolean;
   logLevel: LogLevel;
   webDistDir: string;
 }
@@ -93,6 +98,8 @@ export function parseConfig(env: NodeJS.ProcessEnv): AppConfig {
     githubAppId: e.GITHUB_APP_ID,
     githubAppPrivateKey: e.GITHUB_APP_PRIVATE_KEY?.replaceAll('\\n', '\n'),
     githubAppInstallations,
+    jobDispatchEnabled: e.SINDRAL_JOB_DISPATCH_ENABLED,
+    autoMergeEnabled: e.SINDRAL_AUTO_MERGE_ENABLED,
     logLevel: e.LOG_LEVEL,
     webDistDir: e.WEB_DIST_DIR ?? path.resolve(SERVER_PACKAGE_DIR, '..', 'web', 'dist'),
   };

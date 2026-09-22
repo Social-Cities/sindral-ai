@@ -326,6 +326,23 @@ describe('worker API', () => {
     }
   });
 
+  it('keeps queued work untouched while worker dispatch is disabled', async () => {
+    const paused = await createTestApp({ config: testConfig({ jobDispatchEnabled: false }) });
+    try {
+      const task = await paused.app.ctx.orchestrator.createTask(paused.userA, { title: 'paused', description: '', repos: [] });
+      await paused.app.ctx.orchestrator.applyUserEvent(paused.userA, task.id, 'start');
+      const key = await paused.workerKeyFor(paused.userA);
+      const headers = { authorization: `Bearer ${key}`, [WORKER_PROTOCOL_HEADER]: String(WORKER_PROTOCOL_VERSION) };
+      const registered = await paused.app.inject({ method: 'POST', url: '/api/worker/register', headers, payload: { name: 'w', hostname: 'h', version: '1' } });
+      const { workerId } = registered.json<{ workerId: string }>();
+      const claim = await paused.app.inject({ method: 'POST', url: '/api/worker/jobs/claim', headers, payload: { workerId } });
+      expect(claim.json()).toEqual({ jobs: [] });
+      expect((await paused.repo.listJobsForTask(paused.userA, task.id))[0]?.status).toBe('queued');
+    } finally {
+      await paused.app.close();
+    }
+  });
+
   it('fails a job and cannot touch another user’s jobs', async () => {
     const { headers, workerId } = await registeredWorker();
     const task = await createTask();
@@ -473,5 +490,28 @@ describe('end to end through HTTP', () => {
     await completeMerge(ctx, ctx.userA);
     expect((await ctx.repo.getTask(ctx.userA, task.id))?.state).toBe('done');
     void review;
+  });
+
+  it('rejects automatic merge before changing state when the kill switch is off', async () => {
+    const guarded = await createTestApp({ config: testConfig({ autoMergeEnabled: false }) });
+    try {
+      const fast = (await guarded.app.ctx.workflows.list(guarded.userA)).find((workflow) => workflow.name === 'Fast Track')!;
+      let task = await guarded.app.ctx.orchestrator.createTask(guarded.userA, { title: 'guarded merge', description: '', repos: ['acme/app'], workflowId: fast.id });
+      task = await guarded.app.ctx.orchestrator.applyUserEvent(guarded.userA, task.id, 'start');
+      await completeNext(guarded, guarded.userA, pr(8));
+      await completeNext(guarded, guarded.userA, verdict(true));
+      task = (await guarded.repo.getTask(guarded.userA, task.id))!;
+      const response = await guarded.app.inject({
+        method: 'POST',
+        url: `/api/tasks/${task.id}/actions`,
+        headers: { authorization: `Bearer ${guarded.tokenA}`, 'idempotency-key': 'merge-kill-switch-test' },
+        payload: { event: 'accept', expectedVersion: task.version },
+      });
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toMatchObject({ error: { code: 'SERVICE_UNAVAILABLE' } });
+      expect((await guarded.repo.getTask(guarded.userA, task.id))?.state).toBe('in-review');
+    } finally {
+      await guarded.app.close();
+    }
   });
 });

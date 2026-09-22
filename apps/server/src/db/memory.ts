@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { ARTIFACT_CONTENT_TYPES, MAX_ARTIFACT_BYTES } from '@sindral/shared';
-import type { AgentResult, Artifact, Job, Message, PullRequest, SecretProvider, Task, TaskEvent, TaskRepository, Worker, WorkerKey, WorkflowRecord } from '@sindral/shared';
+import type { AgentResult, Artifact, Job, JobKind, Message, PullRequest, SecretProvider, Task, TaskEvent, TaskRepository, Worker, WorkerKey, WorkflowRecord } from '@sindral/shared';
 import {
   ConflictError,
   RepositoryError,
@@ -618,7 +618,7 @@ export class MemoryRepository implements Repository {
     return clone(j);
   }
 
-  async claimJobs(userId: string, workerId: string, max: number): Promise<ClaimedJob[]> {
+  async claimJobs(userId: string, workerId: string, max: number, allowedKinds?: JobKind[]): Promise<ClaimedJob[]> {
     const limit = Math.max(1, Math.min(max, 10));
     const busyTasks = new Set<string>();
     for (const j of this.jobs.values()) {
@@ -627,7 +627,7 @@ export class MemoryRepository implements Repository {
     const claimed: ClaimedJob[] = [];
     for (const j of this.jobs.values()) {
       if (claimed.length >= limit) break;
-      if (j.userId !== userId || j.status !== 'queued' || busyTasks.has(j.taskId)) continue;
+      if (j.userId !== userId || j.status !== 'queued' || busyTasks.has(j.taskId) || (allowedKinds && !allowedKinds.includes(j.kind))) continue;
       j.status = 'claimed';
       j.workerId = workerId;
       j.claimedAt = this.now();

@@ -20,6 +20,12 @@ describe('config', () => {
     expect(config.secretsEncryptionKey).toHaveLength(32);
     expect(config.webDistDir.endsWith('/apps/web/dist')).toBe(true);
     expect(config.githubAppInstallations).toEqual({});
+    expect(config.jobDispatchEnabled).toBe(true);
+    expect(config.autoMergeEnabled).toBe(false);
+    expect(parseConfig({ ...valid, SINDRAL_JOB_DISPATCH_ENABLED: 'false', SINDRAL_AUTO_MERGE_ENABLED: 'true' })).toMatchObject({
+      jobDispatchEnabled: false,
+      autoMergeEnabled: true,
+    });
     expect(parseConfig({ ...valid, WEB_DIST_DIR: '/srv/web' }).webDistDir).toBe('/srv/web');
     expect(
       parseConfig({
@@ -41,5 +47,6 @@ describe('config', () => {
     }
     expect(() => parseConfig({ ...valid, GITHUB_APP_ID: '1' })).toThrow(/configured together/);
     expect(() => parseConfig({ ...valid, GITHUB_APP_ID: '1', GITHUB_APP_PRIVATE_KEY: 'key', GITHUB_APP_INSTALLATIONS: '[]' })).toThrow(/JSON object/);
+    expect(() => parseConfig({ ...valid, SINDRAL_JOB_DISPATCH_ENABLED: 'yes' })).toThrow(ConfigError);
   });
 });

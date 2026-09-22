@@ -329,7 +329,7 @@ export interface Repository {
   listJobsForTask(userId: string, taskId: string): Promise<Job[]>;
   updateJob(userId: string, id: string, patch: JobPatch): Promise<Job | null>;
   /** Atomically claim queued jobs, serialised per task (see `claim_jobs` in the migration). */
-  claimJobs(userId: string, workerId: string, max: number): Promise<ClaimedJob[]>;
+  claimJobs(userId: string, workerId: string, max: number, allowedKinds?: JobKind[]): Promise<ClaimedJob[]>;
   renewJobLeases(userId: string, workerId: string, jobs: { jobId: string; leaseToken: string }[]): Promise<number>;
   /** Atomically validates an active capability and marks its job running. */
   activateJobLease(userId: string, jobId: string, attempt: number, leaseToken: string): Promise<boolean>;

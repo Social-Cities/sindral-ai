@@ -10,6 +10,7 @@ import {
   WORKER_PROTOCOL_HEADER,
   WORKER_PROTOCOL_VERSION,
   type JobDispatch,
+  type JobKind,
 } from '@sindral/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { requireWorker } from '../auth/worker.js';
@@ -30,6 +31,8 @@ function repositoriesForJob(job: JobDispatch['job']): string[] {
       return job.payload.pullRequests.map((pullRequest) => pullRequest.repository);
   }
 }
+
+const NON_MERGE_JOB_KINDS: JobKind[] = ['agent', 'rebase-stack', 'resolve-rebase-conflict'];
 
 export const workerRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx }) => {
   app.addHook('onRequest', requireWorker(ctx.repo));
@@ -101,17 +104,19 @@ export const workerRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx 
     const worker = await repo.getWorker(userId, input.workerId);
     if (!worker) throw notFound('Worker');
     await repo.updateWorker(userId, worker.id, { lastSeenAt: new Date().toISOString(), status: 'online' });
+    if (!ctx.config.jobDispatchEnabled) return { jobs: [] as JobDispatch[] };
 
     let disconnected = false;
     request.raw.once('close', () => {
       disconnected = true;
     });
     const deadline = Date.now() + ctx.claim.waitMs;
-    let jobs = await repo.claimJobs(userId, worker.id, input.max);
+    const allowedKinds = ctx.config.autoMergeEnabled ? undefined : NON_MERGE_JOB_KINDS;
+    let jobs = await repo.claimJobs(userId, worker.id, input.max, allowedKinds);
     while (jobs.length === 0 && !disconnected && Date.now() < deadline) {
       await sleep(Math.min(ctx.claim.pollMs, Math.max(0, deadline - Date.now())));
       if (disconnected) break;
-      jobs = await repo.claimJobs(userId, worker.id, input.max);
+      jobs = await repo.claimJobs(userId, worker.id, input.max, allowedKinds);
     }
     if (jobs.length === 0) return { jobs: [] as JobDispatch[] };
 

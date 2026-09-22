@@ -24,6 +24,8 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     githubAppId: undefined,
     githubAppPrivateKey: undefined,
     githubAppInstallations: {},
+    jobDispatchEnabled: true,
+    autoMergeEnabled: true,
     logLevel: 'silent',
     webDistDir: '/nonexistent',
     ...overrides,

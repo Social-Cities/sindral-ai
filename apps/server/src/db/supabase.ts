@@ -1034,8 +1034,13 @@ export class SupabaseRepository implements Repository {
     return row ? mapJob(row) : null;
   }
 
-  async claimJobs(userId: string, workerId: string, max: number): Promise<ClaimedJob[]> {
-    const rows = await run<JobRow[]>(this.client.rpc('claim_jobs', { p_user_id: userId, p_worker_id: workerId, p_max: max }));
+  async claimJobs(userId: string, workerId: string, max: number, allowedKinds?: JobKind[]): Promise<ClaimedJob[]> {
+    const rows = await run<JobRow[]>(this.client.rpc('claim_jobs', {
+      p_user_id: userId,
+      p_worker_id: workerId,
+      p_max: max,
+      p_allowed_kinds: allowedKinds ?? null,
+    }));
     return rows.map(mapClaimedJob);
   }
 

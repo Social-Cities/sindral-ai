@@ -41,6 +41,8 @@ interface ApplyOptions {
   /** Replaces the chat-derived feedback in the dispatched job context (used for verify NO_GO). */
   feedbackOverride?: string;
   detail?: Record<string, unknown>;
+  /** GitHub already confirmed every PR merged, so no merge side effect is needed. */
+  confirmedExternalMerge?: boolean;
 }
 
 export interface OrchestratorDeps {
@@ -48,6 +50,7 @@ export interface OrchestratorDeps {
   hub: Hub;
   workflows: WorkflowService;
   log: FastifyBaseLogger;
+  autoMergeEnabled?: boolean;
   now?: () => Date;
 }
 
@@ -94,12 +97,14 @@ export class Orchestrator {
   private readonly workflows: WorkflowService;
   private readonly log: FastifyBaseLogger;
   private readonly now: () => Date;
+  private readonly autoMergeEnabled: boolean;
 
   constructor(deps: OrchestratorDeps) {
     this.repo = deps.repo;
     this.hub = deps.hub;
     this.workflows = deps.workflows;
     this.log = deps.log;
+    this.autoMergeEnabled = deps.autoMergeEnabled ?? true;
     this.now = deps.now ?? (() => new Date());
   }
 
@@ -268,7 +273,9 @@ export class Orchestrator {
       if (effect.type === 'dispatch') {
         const step = getStep(workflow, effect.stepId);
         if (!step) throw new TransitionError(`Unknown step ${effect.stepId}`, 'NO_STEP');
-        if (step.output === 'merge') queuedJob = await this.buildMergeJob(userId, task, step.id);
+        if (step.output === 'merge') {
+          if (!options.confirmedExternalMerge) queuedJob = await this.buildMergeJob(userId, task, step.id);
+        }
         else if (step.output === 'pr' && task.parentTaskId === null && (await this.repo.listSubtasks(userId, task.id)).length > 0) {
           parentDispatchStepId = step.id;
         } else queuedJob = await this.buildAgentJob(userId, task, step, options.feedbackOverride);
@@ -353,6 +360,7 @@ export class Orchestrator {
   }
 
   private async buildMergeJob(userId: string, task: Task, stepId: string): Promise<Parameters<Repository['createJob']>[1]> {
+    if (!this.autoMergeEnabled) throw serviceUnavailable('Automatic merge is disabled by the server operator');
     const [repositories, pullRequests] = await Promise.all([
       this.repo.listTaskRepositories(userId, task.id),
       this.repo.listPullRequests(userId, task.id),
@@ -1065,29 +1073,44 @@ export class Orchestrator {
   async reconcilePullRequest(url: string, status: 'open' | 'merged' | 'closed', mergedAt: string | null): Promise<boolean> {
     const pullRequest = await this.repo.findPullRequestByUrl(url);
     if (!pullRequest) return false;
-    if (pullRequest.status === status && pullRequest.mergedAt === mergedAt) return true;
-    await this.repo.upsertPullRequest(pullRequest.userId, pullRequest.taskId, {
-      taskRepositoryId: pullRequest.taskRepositoryId,
-      repository: pullRequest.repository,
-      url: pullRequest.url,
-      number: pullRequest.number,
-      branch: pullRequest.branch,
-      baseBranch: pullRequest.baseBranch,
-      headSha: pullRequest.headSha,
-      status,
-      mergedAt,
-    });
-    await this.repo.createEvent(pullRequest.userId, {
-      taskId: pullRequest.taskId,
-      type: 'pull-request-reconciled',
-      detail: { pullRequestId: pullRequest.id, repository: pullRequest.repository, url, status, mergedAt },
-    });
-    const task = await this.repo.getTask(pullRequest.userId, pullRequest.taskId);
-    if (task?.state === 'merge' && status === 'merged') {
+    if (pullRequest.status !== status || pullRequest.mergedAt !== mergedAt) {
+      await this.repo.upsertPullRequest(pullRequest.userId, pullRequest.taskId, {
+        taskRepositoryId: pullRequest.taskRepositoryId,
+        repository: pullRequest.repository,
+        url: pullRequest.url,
+        number: pullRequest.number,
+        branch: pullRequest.branch,
+        baseBranch: pullRequest.baseBranch,
+        headSha: pullRequest.headSha,
+        status,
+        mergedAt,
+      });
+      await this.repo.createEvent(pullRequest.userId, {
+        taskId: pullRequest.taskId,
+        type: 'pull-request-reconciled',
+        detail: { pullRequestId: pullRequest.id, repository: pullRequest.repository, url, status, mergedAt },
+      });
+    }
+    let task = await this.repo.getTask(pullRequest.userId, pullRequest.taskId);
+    if (task && (task.state === 'in-review' || task.state === 'merge') && status === 'merged') {
       const all = await this.repo.listPullRequests(pullRequest.userId, pullRequest.taskId);
       if (all.length > 0 && all.every((item) => item.status === 'merged')) {
         await this.repo.cancelQueuedJobs(pullRequest.userId, pullRequest.taskId);
-        await this.applyEvent(pullRequest.userId, task, 'complete', { actor: 'system', detail: { reason: 'github-webhook' } });
+        if (task.state === 'in-review') {
+          task = await this.applyEvent(pullRequest.userId, task, 'accept', {
+            actor: 'system',
+            detail: { reason: 'github-webhook' },
+            idempotencyKey: `github-pr:${pullRequest.id}:all-merged:accept`,
+            confirmedExternalMerge: true,
+          });
+        }
+        if (task.state === 'merge') {
+          await this.applyEvent(pullRequest.userId, task, 'complete', {
+            actor: 'system',
+            detail: { reason: 'github-webhook' },
+            idempotencyKey: `github-pr:${pullRequest.id}:all-merged:complete`,
+          });
+        }
       }
     }
     this.hub.publish(pullRequest.userId, { type: 'task.updated', taskId: pullRequest.taskId });
