@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { adfToText } from './tickets.js';
+import { adfToText, MAX_TICKET_RESPONSE_BYTES } from './tickets.js';
 import { createTestApp, type TestContext } from '../test/helpers.js';
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -74,6 +74,55 @@ describe('ticket import', () => {
     expect((await importTicket('https://github.com/acme/app/issues/3')).statusCode).toBe(400);
     fetchMock.mockRejectedValueOnce(new Error('ECONNRESET'));
     expect((await importTicket('https://github.com/acme/app/issues/3')).statusCode).toBe(502);
+  });
+
+  it('refuses redirects and requires a JSON response', async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError('fetch failed: redirect mode is set to error'));
+    expect((await importTicket('https://github.com/acme/app/issues/3')).statusCode).toBe(502);
+    expect(fetchMock.mock.calls[0]![1]).toMatchObject({ redirect: 'error' });
+
+    fetchMock.mockResolvedValueOnce(new Response('<html>login</html>', { status: 200, headers: { 'content-type': 'text/html' } }));
+    const contentType = await importTicket('https://github.com/acme/app/issues/3');
+    expect(contentType.statusCode).toBe(502);
+    expect(contentType.json().error.code).toBe('TICKET_RESPONSE_INVALID');
+
+    fetchMock.mockResolvedValueOnce(new Response('{broken', { status: 200, headers: { 'content-type': 'application/json' } }));
+    const malformed = await importTicket('https://github.com/acme/app/issues/3');
+    expect(malformed.statusCode).toBe(502);
+    expect(malformed.json().error.code).toBe('TICKET_RESPONSE_INVALID');
+  });
+
+  it('rejects declared and streamed responses over one MiB', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response('{}', { status: 200, headers: { 'content-type': 'application/json', 'content-length': String(MAX_TICKET_RESPONSE_BYTES + 1) } }),
+    );
+    const declared = await importTicket('https://github.com/acme/app/issues/3');
+    expect(declared.statusCode).toBe(502);
+    expect(declared.json().error.code).toBe('TICKET_RESPONSE_TOO_LARGE');
+
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(MAX_TICKET_RESPONSE_BYTES));
+        controller.enqueue(new Uint8Array(1));
+        controller.close();
+      },
+    });
+    fetchMock.mockResolvedValueOnce(new Response(body, { status: 200, headers: { 'content-type': 'application/problem+json' } }));
+    const streamed = await importTicket('https://github.com/acme/app/issues/3');
+    expect(streamed.statusCode).toBe(502);
+    expect(streamed.json().error.code).toBe('TICKET_RESPONSE_TOO_LARGE');
+  });
+
+  it('normalizes response-stream failures', async () => {
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.error(new Error('connection reset during body'));
+      },
+    });
+    fetchMock.mockResolvedValueOnce(new Response(body, { status: 200, headers: { 'content-type': 'application/json' } }));
+    const response = await importTicket('https://github.com/acme/app/issues/3');
+    expect(response.statusCode).toBe(502);
+    expect(response.json().error.code).toBe('TICKET_FETCH_FAILED');
   });
 });
 

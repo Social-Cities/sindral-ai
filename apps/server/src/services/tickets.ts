@@ -4,6 +4,48 @@ import type { FetchLike } from './github.js';
 import type { SecretService } from './secrets.js';
 
 const REQUEST_TIMEOUT_MS = 10_000;
+export const MAX_TICKET_RESPONSE_BYTES = 1024 * 1024;
+
+async function readJsonResponse(res: Response, provider: string): Promise<unknown> {
+  const contentType = (res.headers.get('content-type') ?? '').split(';', 1)[0]!.trim().toLowerCase();
+  if (contentType !== 'application/json' && !contentType.endsWith('+json')) {
+    throw new HttpError(502, 'TICKET_RESPONSE_INVALID', `${provider} returned an unexpected content type`);
+  }
+  const declaredLength = Number(res.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_TICKET_RESPONSE_BYTES) {
+    throw new HttpError(502, 'TICKET_RESPONSE_TOO_LARGE', `${provider} returned too much data`);
+  }
+  if (!res.body) throw new HttpError(502, 'TICKET_RESPONSE_INVALID', `${provider} returned an empty response`);
+
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_TICKET_RESPONSE_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw new HttpError(502, 'TICKET_RESPONSE_TOO_LARGE', `${provider} returned too much data`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+  } catch {
+    throw new HttpError(502, 'TICKET_RESPONSE_INVALID', `${provider} returned malformed JSON`);
+  }
+}
 
 /** Best-effort Atlassian Document Format → plain text. */
 export function adfToText(node: unknown): string {
@@ -33,14 +75,19 @@ export function adfToText(node: unknown): string {
 async function request(fetchImpl: FetchLike, url: string, init: RequestInit, provider: string): Promise<unknown> {
   let res: Response;
   try {
-    res = await fetchImpl(url, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+    res = await fetchImpl(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   } catch {
     throw new HttpError(502, 'TICKET_FETCH_FAILED', `Could not reach ${provider}`);
   }
   if (res.status === 401 || res.status === 403) throw new HttpError(400, 'TICKET_AUTH_FAILED', `${provider} rejected the configured credentials`);
   if (res.status === 404) throw new HttpError(404, 'TICKET_NOT_FOUND', `Ticket not found on ${provider}`);
   if (!res.ok) throw new HttpError(502, 'TICKET_FETCH_FAILED', `${provider} responded with ${res.status}`);
-  return res.json();
+  try {
+    return await readJsonResponse(res, provider);
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw new HttpError(502, 'TICKET_FETCH_FAILED', `Could not read ${provider} response`);
+  }
 }
 
 export class TicketService {

@@ -30,7 +30,7 @@ Every repository call is scoped by the authenticated user id. Supabase RLS is en
 - **A07 Identification & auth failures** – Supabase Auth, JWT verification (JWKS or HS256), constant-time comparisons, key revocation.
 - **A08 Integrity failures** – webhook HMAC plus delivery-ID/payload-hash replay fencing, worker results validated with schemas and fenced by durable outcome hashes/leases before effects are applied, tasks pinned to workflow snapshots.
 - **A09 Logging failures** – structured pino logs, task event audit trail, job logs.
-- **A10 SSRF** – ticket import only fetches exact allow-listed provider hosts parsed from the URL; GitHub diff fetch only for `github.com/<owner>/<repo>/pull/<n>`.
+- **A10 SSRF** – ticket import only fetches exact allow-listed provider hosts parsed from the URL, refuses redirects, requires JSON, and streams through a one-MiB response cap; GitHub diff fetch only for `github.com/<owner>/<repo>/pull/<n>`.
 
 ## Agent sandboxing
 
