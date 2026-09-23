@@ -2,7 +2,7 @@
 
 Sindral AI is a software-development portal that takes a task (a Jira/Linear/GitHub ticket, an uploaded markdown plan, or free text) and drives it through the full SDLC with AI agents: planning, human plan review, implementation, adversarial review, verification, human review and merge. Agents run on **your own machine** through a lightweight worker; the central server orchestrates state, stores everything in Supabase and serves the web UI.
 
-See [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) for the architecture and [docs/SECURITY.md](docs/SECURITY.md) for the threat model.
+Start with the end-to-end [setup and deployment guide](docs/SETUP_AND_DEPLOYMENT.md). See [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) for the architecture and [docs/SECURITY.md](docs/SECURITY.md) for the threat model.
 
 ## Repository layout
 
@@ -94,7 +94,11 @@ subtask flow, worker job claiming and fencing, tenant isolation, webhook HMAC, a
 row-level security. Run it after schema or orchestrator changes:
 
 ```bash
-SMOKE_ANON_KEY=<anon key> SMOKE_WEBHOOK_SECRET=<GITHUB_WEBHOOK_SECRET> pnpm smoke
+SMOKE_SUPABASE=http://127.0.0.1:55321 \
+SMOKE_API=http://127.0.0.1:8787 \
+SMOKE_ANON_KEY=<publishable-or-anon-key> \
+SMOKE_WEBHOOK_SECRET=<GITHUB_WEBHOOK_SECRET> \
+pnpm smoke
 ```
 
 ## Workflows
