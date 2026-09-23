@@ -20,16 +20,18 @@ vi.mock('@/lib/supabase', () => {
   };
 });
 
-// jsdom lacks these.
-if (!window.HTMLElement.prototype.scrollIntoView) {
-  window.HTMLElement.prototype.scrollIntoView = () => undefined;
-}
-if (!window.matchMedia) {
-  window.matchMedia = () =>
-    ({ matches: false, media: '', onchange: null, addListener: () => undefined, removeListener: () => undefined, addEventListener: () => undefined, removeEventListener: () => undefined, dispatchEvent: () => false }) as MediaQueryList;
+if (typeof window !== 'undefined') {
+  // jsdom lacks these.
+  if (!window.HTMLElement.prototype.scrollIntoView) {
+    window.HTMLElement.prototype.scrollIntoView = () => undefined;
+  }
+  if (!window.matchMedia) {
+    window.matchMedia = () =>
+      ({ matches: false, media: '', onchange: null, addListener: () => undefined, removeListener: () => undefined, addEventListener: () => undefined, removeEventListener: () => undefined, dispatchEvent: () => false }) as MediaQueryList;
+  }
 }
 
 afterEach(() => {
-  cleanup();
+  if (typeof window !== 'undefined') cleanup();
   vi.clearAllMocks();
 });

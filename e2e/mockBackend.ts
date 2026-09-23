@@ -146,7 +146,7 @@ export async function installMockBackend(page: Page, options: MockBackendOptions
     updated_at: NOW,
   };
 
-  await page.route('http://127.0.0.1:54321/auth/v1/**', async (route) => {
+  await page.route('http://127.0.0.1:55321/auth/v1/**', async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname.endsWith('/token') && route.request().method() === 'POST') {
       await json(route, { access_token: accessToken, token_type: 'bearer', expires_in: 3600, expires_at: 4_102_444_800, refresh_token: 'refresh-token', user });

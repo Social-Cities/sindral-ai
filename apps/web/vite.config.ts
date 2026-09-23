@@ -4,6 +4,9 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
+  // pnpm runs Vite from apps/web, while the documented shared environment file
+  // lives at the repository root.
+  envDir: fileURLToPath(new URL('../..', import.meta.url)),
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },

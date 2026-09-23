@@ -1,6 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 
-const url = import.meta.env.VITE_SUPABASE_URL ?? 'http://127.0.0.1:54321';
+export const DEFAULT_SUPABASE_URL = 'http://127.0.0.1:55321';
+
+const url = import.meta.env.VITE_SUPABASE_URL ?? DEFAULT_SUPABASE_URL;
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY ?? 'anon-key-not-configured';
 
 if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY) {
