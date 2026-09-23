@@ -1,0 +1,9 @@
+-- Seed data is per-user. When a user signs up, the
+-- `bootstrap_workspace_for_user` trigger (see 0002_auth_scoping.sql) creates
+-- a fresh demo workspace owned by that user.
+--
+-- To re-seed an existing user (e.g. for development) call:
+--   select public.bootstrap_workspace_for_user('<auth-user-uuid>');
+--
+-- This file is intentionally empty so it can be run repeatedly without
+-- producing globally shared rows that bypass RLS scoping.

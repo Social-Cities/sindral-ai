@@ -14,6 +14,8 @@ apps/worker       Node daemon that runs Claude Code / Codex agents in git worktr
 supabase          Database migrations (RLS on every table) and local config
 ```
 
+The pre-existing remote Next.js application is preserved under [`archive/legacy-next-app`](archive/legacy-next-app/MERGE_NOTE.md). It is reference material only and is intentionally excluded from the active package workspace and Supabase migration path.
+
 ## Prerequisites
 
 - Node 22+ and pnpm 10 (`corepack enable`)
