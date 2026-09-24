@@ -210,10 +210,35 @@ describe('feedback loops', () => {
     const job = (await queuedJobs(task.id))[0]!;
     expect(agentPayload(job).step.id).toBe('planning-feedback');
     expect(agentPayload(job).context.feedback).toBe('Please add tests');
+    const messages = await ctx.repo.listMessages(userId, task.id);
+    expect(messages.at(-1)).toMatchObject({ role: 'system', source: 'web', content: 'Got it — Revise Plan is working on your request.' });
     await completeNext(ctx, userId, plan('# v2'));
     task = await reload(ctx, userId, task);
     expect(task.state).toBe('plan-review');
     expect(task.plan).toBe('# v2');
+  });
+
+  it('does not acknowledge a saved chat note when no worker starts', async () => {
+    const task = await newTask();
+    await orch().postUserMessage(userId, task.id, 'Remember this', 'web');
+    const messages = await ctx.repo.listMessages(userId, task.id);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({ role: 'user', content: 'Remember this' });
+  });
+
+  it('keeps a dispatched command successful when its acknowledgement cannot be saved', async () => {
+    const task = await newTask();
+    await orch().applyUserEvent(userId, task.id, 'start');
+    await completeNext(ctx, userId, plan());
+    const createMessage = ctx.repo.createMessage.bind(ctx.repo);
+    vi.spyOn(ctx.repo, 'createMessage')
+      .mockImplementationOnce((...args) => createMessage(...args))
+      .mockRejectedValueOnce(new Error('ack write failed'));
+
+    const result = await orch().postUserMessage(userId, task.id, 'Please add tests', 'web');
+
+    expect(result.task.state).toBe('planning-feedback');
+    expect((await queuedJobs(task.id))[0]).toBeDefined();
   });
 
   it('collects only user messages since the last agent message', async () => {

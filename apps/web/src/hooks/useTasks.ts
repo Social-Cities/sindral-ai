@@ -140,11 +140,22 @@ export function useSendMessage(taskId: string, workflow: Workflow | null) {
           source: 'web',
           createdAt: new Date().toISOString(),
         };
-        const patch = chatTriggersFeedback(previous, workflow) ? predictTransition(previous, workflow, 'feedback') : null;
+        const triggersFeedback = chatTriggersFeedback(previous, workflow);
+        const patch = triggersFeedback ? predictTransition(previous, workflow, 'feedback') : null;
+        const acknowledgement: Message | null = triggersFeedback
+          ? {
+              id: `${optimisticId}-ack`,
+              taskId,
+              role: 'system',
+              content: 'Got it — the worker is working on your request.',
+              source: 'web',
+              createdAt: new Date().toISOString(),
+            }
+          : null;
         qc.setQueryData<TaskWithRelations>(key, {
           ...previous,
           ...(patch ?? {}),
-          messages: [...previous.messages, optimistic],
+          messages: [...previous.messages, optimistic, ...(acknowledgement ? [acknowledgement] : [])],
         });
       }
       return { previous, optimisticId };

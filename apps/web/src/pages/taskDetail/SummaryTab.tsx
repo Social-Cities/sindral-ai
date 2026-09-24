@@ -1,22 +1,52 @@
 import type { TaskWithRelations, Workflow } from '@sindral/shared';
 import { getStateStyle, getStep, isAgentActive } from '@sindral/shared';
 import { Markdown } from '@/components/Markdown';
+import { Button } from '@/components/Button';
 import { ExternalLink } from '@/components/ExternalLink';
 import { shortPrLabel } from '@/lib/format';
+import { planOverview } from '@/lib/plan';
 
 interface SummaryTabProps {
   task: TaskWithRelations;
   workflow: Workflow | null;
+  canApprove: boolean;
+  approving: boolean;
+  onApprove: () => void;
+  onViewPlan: () => void;
 }
 
-export function SummaryTab({ task, workflow }: SummaryTabProps) {
+const PLAN_FIELDS = [
+  ['summary', 'Summary'],
+  ['outcome', 'Outcome'],
+  ['assumptions', 'Assumptions'],
+  ['acceptanceCriteria', 'Acceptance criteria'],
+] as const;
+
+export function SummaryTab({ task, workflow, canApprove, approving, onApprove, onViewPlan }: SummaryTabProps) {
   const agentActive = isAgentActive(task, workflow);
   const step = workflow ? getStep(workflow, task.currentStepId ?? workflow.entryStepId) : null;
   const style = getStateStyle(task.state, step);
+  const overview = task.plan ? planOverview(task.plan) : null;
 
   return (
     <div className="overflow-y-auto h-full p-6">
       <div className="max-w-2xl space-y-6">
+        {agentActive && (
+          <div className="flex items-start gap-3 p-4 rounded-lg" style={{ background: '#fbbf2408', border: '1px solid #fbbf2420' }}>
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse mt-1.5 shrink-0" aria-hidden="true" />
+            <div>
+              <p className="text-sm font-medium text-amber-200/80">Agent is working</p>
+              <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                {task.state === 'troubleshoot'
+                  ? 'The troubleshooting agent is diagnosing what went wrong.'
+                  : step
+                    ? `${step.label} is running on your worker (${style.label}).`
+                    : 'An agent is running on your worker.'}
+              </p>
+            </div>
+          </div>
+        )}
+
         <section>
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Description</p>
           {task.description ? (
@@ -41,10 +71,27 @@ export function SummaryTab({ task, workflow }: SummaryTabProps) {
 
         {task.plan && (
           <section>
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Implementation Plan</p>
-            <div className="p-4 rounded-lg bg-muted border border-border">
-              <Markdown>{task.plan}</Markdown>
+            <div className="flex items-center justify-between gap-4 mb-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Plan at a glance</p>
+              <button type="button" onClick={onViewPlan} className="text-xs text-accent hover:text-accent/70 transition-colors">
+                View full plan →
+              </button>
             </div>
+            <div className="grid sm:grid-cols-2 gap-3">
+              {PLAN_FIELDS.map(([key, label]) => (
+                <div key={key} className="p-3 rounded-lg bg-muted border border-border">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{label}</p>
+                  <p className="text-xs text-secondary-foreground leading-relaxed">{overview?.[key]}</p>
+                </div>
+              ))}
+            </div>
+            {canApprove && (
+              <div className="mt-3 flex justify-end">
+                <Button variant="success" onClick={onApprove} disabled={approving}>
+                  Approve Plan
+                </Button>
+              </div>
+            )}
           </section>
         )}
 
@@ -81,22 +128,6 @@ export function SummaryTab({ task, workflow }: SummaryTabProps) {
             <p className="text-secondary-foreground">
               This task is ready to start. Use the action button above to hand it to the first agent.
             </p>
-          </div>
-        )}
-
-        {agentActive && (
-          <div className="flex items-start gap-3 p-4 rounded-lg" style={{ background: '#fbbf2408', border: '1px solid #fbbf2420' }}>
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse mt-1.5 shrink-0" aria-hidden="true" />
-            <div>
-              <p className="text-sm font-medium text-amber-200/80">Agent is working</p>
-              <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
-                {task.state === 'troubleshoot'
-                  ? 'The troubleshooting agent is diagnosing what went wrong.'
-                  : step
-                    ? `${step.label} is running on your worker (${style.label}).`
-                    : 'An agent is running on your worker.'}
-              </p>
-            </div>
           </div>
         )}
 

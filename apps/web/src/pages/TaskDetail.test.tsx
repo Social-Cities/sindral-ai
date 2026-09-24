@@ -42,23 +42,37 @@ describe('TaskDetail', () => {
   });
 
   it('offers "Approve Plan" on plan review and shows the plan', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.runTaskAction).mockReturnValue(new Promise(() => undefined));
     setup(
       makeTaskWithRelations({
         id: 't2',
         state: 'plan-review',
         currentStepId: 'plan-review',
         pinnedWorkflow: snapshotWorkflow(FULL_SDLC_WORKFLOW),
-        plan: '# Plan\n\n- step one',
+        plan: '# Plan\n\n## Summary\nStep one.\n\n## Outcome\nA better result.\n\n## Assumptions\n- API remains stable.\n\n## Acceptance criteria\n- Tests pass.\n\n## Steps\n- full detail',
       }),
     );
     expect(await screen.findByRole('button', { name: 'Approve Plan' })).toBeInTheDocument();
-    expect(screen.getByText('step one')).toBeInTheDocument();
+    expect(screen.getByText('Step one.')).toBeInTheDocument();
+    expect(screen.getByText('A better result.')).toBeInTheDocument();
+    expect(screen.getByText('API remains stable.')).toBeInTheDocument();
+    expect(screen.getByText('Tests pass.')).toBeInTheDocument();
+    expect(screen.queryByText('full detail')).not.toBeInTheDocument();
     expect(screen.getByText(/Pinned — changes to this workflow/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('tab', { name: 'Plan' }));
+    expect(screen.getByText('full detail')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Approve Plan' }));
+    expect(api.runTaskAction).toHaveBeenCalledWith('t2', 'approve', 0);
   });
 
   it('shows the spinner and no buttons while an agent is working', async () => {
     setup(makeTaskWithRelations({ id: 't3', state: 'implement', currentStepId: 'implement', pinnedWorkflow: snapshotWorkflow(FULL_SDLC_WORKFLOW) }));
     expect(await screen.findByText('Agent working…')).toBeInTheDocument();
+    const summaryStatus = screen.getByText('Agent is working');
+    const description = screen.getByText('Description');
+    expect(summaryStatus.compareDocumentPosition(description) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const actions = screen.getByTestId('task-actions');
     expect(within(actions).queryAllByRole('button')).toHaveLength(0);
   });
@@ -131,6 +145,7 @@ describe('TaskDetail', () => {
     expect(api.sendMessage).toHaveBeenCalledWith('t7', 'Please add tests');
     expect(screen.getByText('Please add tests')).toBeInTheDocument();
     expect(screen.getByText('sending…')).toBeInTheDocument();
+    expect(screen.getByText('Got it — the worker is working on your request.')).toBeInTheDocument();
     expect(screen.getByTestId('status-badge')).toHaveTextContent('Plan Feedback');
     expect(screen.getByText('Agent working…')).toBeInTheDocument();
 
