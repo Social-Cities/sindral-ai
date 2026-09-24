@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { planOverview } from './plan';
 
 describe('planOverview', () => {
-  it('extracts and flattens the four plan overview sections', () => {
+  it('extracts the four plan overview sections while preserving markdown', () => {
     expect(
       planOverview(`# Plan
 
@@ -14,6 +14,11 @@ Users can review the plan quickly.
 
 ## Assumptions
 - Existing workflows still use markdown plans.
+- Tables remain readable:
+
+| Assumption | Risk |
+| --- | --- |
+| Existing API | Low |
 
 ## Acceptance criteria
 1. Summary shows the condensed plan.
@@ -24,9 +29,14 @@ This must not leak into acceptance criteria.`),
     ).toEqual({
       summary: 'Add a dedicated plan view.',
       outcome: 'Users can review the plan quickly.',
-      assumptions: 'Existing workflows still use markdown plans.',
-      acceptanceCriteria: 'Summary shows the condensed plan. Plan tab shows the full plan.',
+      assumptions: '- Existing workflows still use markdown plans.\n- Tables remain readable:\n\n| Assumption | Risk |\n| --- | --- |\n| Existing API | Low |',
+      acceptanceCriteria: '1. Summary shows the condensed plan.\n2. Plan tab shows the full plan.',
     });
+  });
+
+  it('does not truncate long overview sections', () => {
+    const summary = 'Complete sentence. '.repeat(30).trim();
+    expect(planOverview(`## Summary\n${summary}`).summary).toBe(summary);
   });
 
   it('keeps legacy plans useful and marks missing structured fields', () => {

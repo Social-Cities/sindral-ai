@@ -30,7 +30,7 @@ export function SummaryTab({ task, workflow, canApprove, approving, onApprove, o
 
   return (
     <div className="overflow-y-auto h-full p-6">
-      <div className="max-w-2xl space-y-6">
+      <div className="max-w-4xl space-y-6">
         {agentActive && (
           <div className="flex items-start gap-3 p-4 rounded-lg" style={{ background: '#fbbf2408', border: '1px solid #fbbf2420' }}>
             <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse mt-1.5 shrink-0" aria-hidden="true" />
@@ -77,11 +77,13 @@ export function SummaryTab({ task, workflow, canApprove, approving, onApprove, o
                 View full plan →
               </button>
             </div>
-            <div className="grid sm:grid-cols-2 gap-3">
+            <div className="grid gap-3">
               {PLAN_FIELDS.map(([key, label]) => (
-                <div key={key} className="p-3 rounded-lg bg-muted border border-border">
+                <div key={key} className="p-4 rounded-lg bg-muted border border-border min-w-0">
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{label}</p>
-                  <p className="text-xs text-secondary-foreground leading-relaxed">{overview?.[key]}</p>
+                  <div className="overflow-x-auto">
+                    <Markdown className="text-xs [&_table]:min-w-full">{overview?.[key] ?? ''}</Markdown>
+                  </div>
                 </div>
               ))}
             </div>

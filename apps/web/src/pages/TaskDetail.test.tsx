@@ -50,13 +50,15 @@ describe('TaskDetail', () => {
         state: 'plan-review',
         currentStepId: 'plan-review',
         pinnedWorkflow: snapshotWorkflow(FULL_SDLC_WORKFLOW),
-        plan: '# Plan\n\n## Summary\nStep one.\n\n## Outcome\nA better result.\n\n## Assumptions\n- API remains stable.\n\n## Acceptance criteria\n- Tests pass.\n\n## Steps\n- full detail',
+        plan:
+          '# Plan\n\n## Summary\nStep one.\n\n## Outcome\nA better result.\n\n## Assumptions\n- API remains stable.\n\n| Assumption | Risk |\n| --- | --- |\n| Existing API | Low |\n\n## Acceptance criteria\n- Tests pass.\n\n## Steps\n- full detail',
       }),
     );
     expect(await screen.findByRole('button', { name: 'Approve Plan' })).toBeInTheDocument();
     expect(screen.getByText('Step one.')).toBeInTheDocument();
     expect(screen.getByText('A better result.')).toBeInTheDocument();
     expect(screen.getByText('API remains stable.')).toBeInTheDocument();
+    expect(screen.getByRole('table')).toBeInTheDocument();
     expect(screen.getByText('Tests pass.')).toBeInTheDocument();
     expect(screen.queryByText('full detail')).not.toBeInTheDocument();
     expect(screen.getByText(/Pinned — changes to this workflow/)).toBeInTheDocument();
