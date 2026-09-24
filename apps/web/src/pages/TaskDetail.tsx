@@ -18,14 +18,16 @@ import { ArtifactsTab } from './taskDetail/ArtifactsTab';
 import { ChatTab } from './taskDetail/ChatTab';
 import { CodeTab } from './taskDetail/CodeTab';
 import { Pipeline } from './taskDetail/Pipeline';
+import { PlanTab } from './taskDetail/PlanTab';
 import { StepsTab } from './taskDetail/StepsTab';
 import { SubtasksTab } from './taskDetail/SubtasksTab';
 import { SummaryTab } from './taskDetail/SummaryTab';
 
-type Tab = 'summary' | 'chat' | 'code' | 'steps' | 'artifacts' | 'subtasks';
+type Tab = 'summary' | 'plan' | 'chat' | 'code' | 'steps' | 'artifacts' | 'subtasks';
 
 const TAB_LABELS: Record<Tab, string> = {
   summary: 'Summary',
+  plan: 'Plan',
   chat: 'Chat',
   code: 'Code',
   steps: 'Steps',
@@ -89,9 +91,11 @@ export function TaskDetail() {
   const actions = availableActions(task, workflow);
   const agentActive = isAgentActive(task, workflow);
   const step = workflow ? getStep(workflow, task.currentStepId ?? workflow.entryStepId) : null;
-  const tabs: Tab[] = ['summary', 'chat', 'code', 'steps', 'artifacts', ...(task.subtasks.length > 0 ? (['subtasks'] as Tab[]) : [])];
+  const tabs: Tab[] = ['summary', 'plan', 'chat', 'code', 'steps', 'artifacts', ...(task.subtasks.length > 0 ? (['subtasks'] as Tab[]) : [])];
   const userInitial = (displayNameFor(user, 'U').charAt(0) || 'U').toUpperCase();
   const actionError = action.error ? errorMessage(action.error) : null;
+  const canApprovePlan = actions.some((item) => item.event === 'approve');
+  const approvePlan = () => action.mutate('approve');
 
   return (
     <div className="h-full flex flex-col">
@@ -125,7 +129,7 @@ export function TaskDetail() {
               View PR ↗
             </ExternalLink>
           )}
-          {actions.map((a) => (
+          {actions.filter((a) => a.event !== 'approve' || (tab !== 'summary' && tab !== 'plan')).map((a) => (
             <Button key={a.event} variant={variantForEvent(a.event)} onClick={() => action.mutate(a.event)} disabled={action.isPending} data-event={a.event}>
               {a.label}
             </Button>
@@ -216,7 +220,17 @@ export function TaskDetail() {
           </div>
 
           <div className="flex-1 overflow-hidden" role="tabpanel">
-            {tab === 'summary' && <SummaryTab task={task} workflow={workflow} />}
+            {tab === 'summary' && (
+              <SummaryTab
+                task={task}
+                workflow={workflow}
+                canApprove={canApprovePlan}
+                approving={action.isPending}
+                onApprove={approvePlan}
+                onViewPlan={() => setTab('plan')}
+              />
+            )}
+            {tab === 'plan' && <PlanTab task={task} canApprove={canApprovePlan} approving={action.isPending} onApprove={approvePlan} />}
             {tab === 'chat' && (
               <ChatTab
                 task={task}

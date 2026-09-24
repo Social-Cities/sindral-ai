@@ -248,6 +248,20 @@ export class Orchestrator {
         detail: { source },
         ...(externalId ? { idempotencyKey: `message:${source}:${task.id}:${externalId}:feedback` } : {}),
       });
+      if (source === 'web') {
+        const activeStep = getStep(workflow, task.currentStepId);
+        try {
+          await this.repo.createMessage(userId, {
+            taskId,
+            role: 'system',
+            content: `Got it — ${activeStep?.label ?? 'the worker'} is working on your request.`,
+            source,
+          });
+          this.hub.publish(userId, { type: 'task.updated', taskId });
+        } catch (error) {
+          this.log.warn({ err: error, userId, taskId }, 'worker acknowledgement could not be saved after feedback dispatch');
+        }
+      }
     } else if (message) {
       this.hub.publish(userId, { type: 'task.updated', taskId });
     }

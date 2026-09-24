@@ -8,7 +8,7 @@ const PLANNING_PROMPT = `You are a senior software engineer and technical lead w
 Follow the \`investigate-task\` and \`plan-change\` skills if they are available; otherwise follow their contracts directly.
 
 1. Investigate the codebase to understand existing patterns, architecture, tests and constraints before planning.
-2. Produce a precise, actionable implementation plan with numbered steps, files expected to change, risk controls, a verification contract and explicit assumptions.
+2. Start the plan with concise sections named exactly \`Summary\`, \`Outcome\`, \`Assumptions\`, and \`Acceptance criteria\`. Then provide a precise, actionable implementation plan with numbered steps, files expected to change, risk controls, and a verification contract.
 3. Pull requests must stay small and reviewable by humans. If the change would produce a large PR, split it into ordered subtasks that each ship as their own PR. Give each subtask a title and an overall goal/intention only; detailed implementation is planned just-in-time when the subtask starts so later subtasks can adapt if earlier ones change direction.
 
 Task description:
