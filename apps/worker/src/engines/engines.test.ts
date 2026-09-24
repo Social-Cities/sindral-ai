@@ -23,8 +23,9 @@ describe('claude args', () => {
     const args = buildClaudeArgs(s, { supportsEffort: false }, ['/w/results', '/w/outputs/j1']);
     expect(args[args.indexOf('--permission-mode') + 1]).toBe('default');
     const tools = args[args.indexOf('--allowedTools') + 1]?.split(',') ?? [];
-    expect(tools).toEqual(['Read', 'Grep', 'Glob', 'Write(//w/results/**)', 'Write(//w/outputs/j1/**)']);
+    expect(tools).toEqual(['Read', 'Grep', 'Glob', 'Edit(//w/results/**)', 'Edit(//w/outputs/j1/**)']);
     expect(tools).not.toContain('Edit');
+    expect(tools).not.toContain('Write');
     expect(tools).not.toContain('Bash');
     expect(args).toContain('--add-dir');
   });
@@ -36,9 +37,9 @@ describe('claude args', () => {
     ]);
     const tools = args[args.indexOf('--allowedTools') + 1]?.split(',') ?? [];
 
-    expect(tools).toContain('Write(//Users/agatha/Developer/sindral-work/results/**)');
-    expect(tools).toContain('Write(//Users/agatha/Developer/sindral-work/outputs/job-1/**)');
-    expect(tools.some((tool) => tool.startsWith('Write(/Users/'))).toBe(false);
+    expect(tools).toContain('Edit(//Users/agatha/Developer/sindral-work/results/**)');
+    expect(tools).toContain('Edit(//Users/agatha/Developer/sindral-work/outputs/job-1/**)');
+    expect(tools.some((tool) => tool.startsWith('Edit(/Users/'))).toBe(false);
   });
 
   it('only grants Bash with execute permission and never grants anything for create_pr', () => {

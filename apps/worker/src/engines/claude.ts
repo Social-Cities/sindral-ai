@@ -45,12 +45,14 @@ export function claudeEffort(mode: AgentMode | undefined): string | null {
   }
 }
 
-function claudeWriteRule(dir: string): string {
+function claudeEditRule(dir: string): string {
   const normalized = dir.replaceAll('\\', '/').replace(/\/+$/, '');
   // Claude permission patterns use `//` for absolute paths. A single leading
   // slash is resolved like a relative pattern and does not authorize the file.
+  // `Edit` is the umbrella permission for every built-in file editing tool,
+  // including the `Write` calls used to create result and artifact files.
   const pattern = path.isAbsolute(dir) ? `//${normalized.replace(/^\/+/, '')}` : normalized;
-  return `Write(${pattern}/**)`;
+  return `Edit(${pattern}/**)`;
 }
 
 export function buildClaudeArgs(step: WorkflowStep, caps: Pick<ClaudeCapabilities, 'supportsEffort'>, writableDirs: string[] = []): string[] {
@@ -63,7 +65,7 @@ export function buildClaudeArgs(step: WorkflowStep, caps: Pick<ClaudeCapabilitie
   const canWrite = permissions.has('write');
   args.push('--permission-mode', canWrite ? 'acceptEdits' : 'default');
   const tools = claudeAllowedTools(step);
-  if (!canWrite) for (const dir of writableDirs) tools.push(claudeWriteRule(dir));
+  if (!canWrite) for (const dir of writableDirs) tools.push(claudeEditRule(dir));
   if (tools.length > 0) args.push('--allowedTools', tools.join(','));
   const effort = claudeEffort(step.mode);
   if (caps.supportsEffort && effort) args.push('--effort', effort);
