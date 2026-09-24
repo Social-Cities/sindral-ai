@@ -1,4 +1,5 @@
 import type { AgentMode, ToolName, WorkflowStep } from '@sindral/shared';
+import path from 'node:path';
 import { run, stream } from '../proc.js';
 import { extractVersion, OutputTail, type Engine, type EngineCapabilities, type EngineRunOptions, type EngineRunResult } from './types.js';
 
@@ -44,6 +45,14 @@ export function claudeEffort(mode: AgentMode | undefined): string | null {
   }
 }
 
+function claudeWriteRule(dir: string): string {
+  const normalized = dir.replaceAll('\\', '/').replace(/\/+$/, '');
+  // Claude permission patterns use `//` for absolute paths. A single leading
+  // slash is resolved like a relative pattern and does not authorize the file.
+  const pattern = path.isAbsolute(dir) ? `//${normalized.replace(/^\/+/, '')}` : normalized;
+  return `Write(${pattern}/**)`;
+}
+
 export function buildClaudeArgs(step: WorkflowStep, caps: Pick<ClaudeCapabilities, 'supportsEffort'>, writableDirs: string[] = []): string[] {
   const permissions = new Set(step.permissions ?? []);
   const args = ['-p', '--output-format', 'stream-json', '--verbose'];
@@ -54,7 +63,7 @@ export function buildClaudeArgs(step: WorkflowStep, caps: Pick<ClaudeCapabilitie
   const canWrite = permissions.has('write');
   args.push('--permission-mode', canWrite ? 'acceptEdits' : 'default');
   const tools = claudeAllowedTools(step);
-  if (!canWrite) for (const dir of writableDirs) tools.push(`Write(${dir}/**)`);
+  if (!canWrite) for (const dir of writableDirs) tools.push(claudeWriteRule(dir));
   if (tools.length > 0) args.push('--allowedTools', tools.join(','));
   const effort = claudeEffort(step.mode);
   if (caps.supportsEffort && effort) args.push('--effort', effort);
