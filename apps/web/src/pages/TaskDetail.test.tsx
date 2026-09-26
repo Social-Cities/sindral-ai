@@ -50,6 +50,8 @@ describe('TaskDetail', () => {
         state: 'plan-review',
         currentStepId: 'plan-review',
         pinnedWorkflow: snapshotWorkflow(FULL_SDLC_WORKFLOW),
+        outcome: 'A better result.',
+        acceptanceCriteria: '- Tests pass.',
         plan:
           '# Plan\n\n## Summary\nStep one.\n\n## Outcome\nA better result.\n\n## Assumptions\n- API remains stable.\n\n| Assumption | Risk |\n| --- | --- |\n| Existing API | Low |\n\n## Acceptance criteria\n- Tests pass.\n\n## Steps\n- full detail',
       }),

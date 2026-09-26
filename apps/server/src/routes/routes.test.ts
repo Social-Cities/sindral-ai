@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WORKER_PROTOCOL_HEADER, WORKER_PROTOCOL_VERSION, type Task, type WorkflowRecord } from '@sindral/shared';
-import { completeMerge, completeNext, createTestApp, plan, pr, review, testConfig, verdict, type TestContext } from '../test/helpers.js';
+import { claimNext, completeMerge, completeNext, createTestApp, plan, pr, review, testConfig, verdict, type TestContext } from '../test/helpers.js';
 
 const fetchMock = vi.fn<typeof fetch>();
 let ctx: TestContext;
@@ -501,7 +501,16 @@ describe('end to end through HTTP', () => {
     const task = await createTask(asA(), { title: 'quick', repos: ['acme/app'], workflowId: fast.id });
     await taskAction(task.id, 'start');
     await completeNext(ctx, ctx.userA, pr(3));
-    await completeNext(ctx, ctx.userA, verdict(true));
+    expect(await ctx.repo.getTask(ctx.userA, task.id)).toMatchObject({
+      outcome: 'The requested behavior is delivered.',
+      acceptanceCriteria: '- The requested behavior is verified.',
+    });
+    const verifyJob = await claimNext(ctx, ctx.userA);
+    expect(verifyJob?.payload.kind).toBe('agent');
+    if (!verifyJob || verifyJob.payload.kind !== 'agent') throw new Error('expected verify job');
+    expect(verifyJob.payload.context.task_outcome).toBe('The requested behavior is delivered.');
+    expect(verifyJob.payload.context.acceptance_criteria).toBe('- The requested behavior is verified.');
+    await ctx.app.ctx.orchestrator.completeJob(ctx.userA, verifyJob.id, verdict(true), verifyJob.attempt, verifyJob.leaseToken);
     expect((await ctx.repo.getTask(ctx.userA, task.id))?.state).toBe('in-review');
     expect((await ctx.app.inject({ method: 'GET', url: `/api/tasks/${task.id}/artifacts`, headers: asA() })).json<{ artifacts: { name: string }[] }>().artifacts.map((a) => a.name)).toEqual(['verify-report.md']);
     const accepted = await taskAction(task.id, 'accept');

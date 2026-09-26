@@ -56,6 +56,14 @@ describe('task creation', () => {
   it('rejects an unknown workflow', async () => {
     await expect(newTask({ workflowId: 'nope' })).rejects.toBeInstanceOf(HttpError);
   });
+
+  it('imports a structured task contract from the source description', async () => {
+    const task = await newTask({
+      description: '## Outcome\nUsers can recover a failed run.\n\n## Acceptance criteria\n- Retrying resumes the run.\n- The retry is audited.\n\n## Notes\nKeep the API stable.',
+    });
+    expect(task.outcome).toBe('Users can recover a failed run.');
+    expect(task.acceptanceCriteria).toBe('- Retrying resumes the run.\n- The retry is audited.');
+  });
 });
 
 describe('atomic task commands', () => {
@@ -93,12 +101,17 @@ describe('full SDLC happy path', () => {
     expect(payload.step.id).toBe('planning');
     expect(payload.context.task_key).toBe('SIN-1');
     expect(payload.context.task_description).toBe('Do the thing');
+    expect(payload.context.task_outcome).toBe('');
+    expect(payload.context.acceptance_criteria).toBe('');
+    expect(payload.step.prompt).toContain('If either field is empty, define it from the task source');
     expect(payload.branch).toBe('sindral/sin-1');
 
     await completeNext(ctx, userId, plan('# The plan'));
     task = await reload(ctx, userId, task);
     expect(task.state).toBe('plan-review');
     expect(task.plan).toBe('# The plan');
+    expect(task.outcome).toBe('The requested behavior is delivered.');
+    expect(task.acceptanceCriteria).toBe('- The requested behavior is verified.');
     const messages = await ctx.repo.listMessages(userId, task.id);
     expect(messages.at(-1)).toMatchObject({ role: 'agent', source: 'worker', content: 'planned' });
 
@@ -106,6 +119,9 @@ describe('full SDLC happy path', () => {
     expect(task.state).toBe('implement');
     const implJob = (await queuedJobs(task.id))[0]!;
     expect(agentPayload(implJob).context.plan).toBe('# The plan');
+    expect(agentPayload(implJob).context.task_outcome).toBe('The requested behavior is delivered.');
+    expect(agentPayload(implJob).context.acceptance_criteria).toBe('- The requested behavior is verified.');
+    expect(agentPayload(implJob).step.prompt).toContain('Treat this contract as the definition of done.');
 
     await completeNext(ctx, userId, pr(7));
     task = await reload(ctx, userId, task);
@@ -212,10 +228,32 @@ describe('feedback loops', () => {
     expect(agentPayload(job).context.feedback).toBe('Please add tests');
     const messages = await ctx.repo.listMessages(userId, task.id);
     expect(messages.at(-1)).toMatchObject({ role: 'system', source: 'web', content: 'Got it — Revise Plan is working on your request.' });
-    await completeNext(ctx, userId, plan('# v2'));
+    await completeNext(ctx, userId, {
+      kind: 'plan',
+      summary: 'revised',
+      plan: '# v2',
+      outcome: 'Users get the revised result.',
+      acceptanceCriteria: '- The revised behavior is covered by tests.',
+    });
     task = await reload(ctx, userId, task);
     expect(task.state).toBe('plan-review');
     expect(task.plan).toBe('# v2');
+    expect(task.outcome).toBe('Users get the revised result.');
+    expect(task.acceptanceCriteria).toBe('- The revised behavior is covered by tests.');
+  });
+
+  it('accepts legacy plan results when the task contract is embedded in markdown', async () => {
+    let task = await newTask();
+    await orch().applyUserEvent(userId, task.id, 'start');
+    await completeNext(ctx, userId, {
+      kind: 'plan',
+      summary: 'planned',
+      plan: '## Outcome\nThe deployment is recoverable.\n\n## Acceptance criteria\n- A failed deployment can be retried.',
+    });
+    task = await reload(ctx, userId, task);
+    expect(task.state).toBe('plan-review');
+    expect(task.outcome).toBe('The deployment is recoverable.');
+    expect(task.acceptanceCriteria).toBe('- A failed deployment can be retried.');
   });
 
   it('does not acknowledge a saved chat note when no worker starts', async () => {
@@ -294,6 +332,102 @@ describe('feedback loops', () => {
     await completeNext(ctx, userId, verdict(true));
     task = await reload(ctx, userId, task);
     expect(task.state).toBe('in-review');
+  });
+});
+
+describe('task contracts outside planning workflows', () => {
+  it('blocks a custom plan-review transition with a nonstandard event until the contract exists', async () => {
+    const service = ctx.app.ctx.workflows;
+    const custom = await service.create(userId, 'Custom review');
+    await service.update(userId, custom.id, {
+      ...custom,
+      edges: custom.edges.map((edge) => (edge.from === 'plan-review' && edge.event === 'approve' ? { ...edge, event: 'ship' } : edge)),
+    });
+    let task = await newTask({ workflowId: custom.id });
+    await orch().applyUserEvent(userId, task.id, 'start');
+    await completeNext(ctx, userId, plan());
+    await ctx.repo.updateTask(userId, task.id, { outcome: '', acceptanceCriteria: '' });
+    task = await reload(ctx, userId, task);
+
+    await expect(orch().applyUserEvent(userId, task.id, 'ship')).rejects.toThrow(/needs an outcome and acceptance criteria/);
+  });
+
+  it('repairs a legacy plan contract before a custom review transition', async () => {
+    const service = ctx.app.ctx.workflows;
+    const custom = await service.create(userId, 'Legacy review');
+    await service.update(userId, custom.id, {
+      ...custom,
+      edges: custom.edges.map((edge) => (edge.from === 'plan-review' && edge.event === 'approve' ? { ...edge, event: 'ship' } : edge)),
+    });
+    let task = await newTask({ workflowId: custom.id });
+    await orch().applyUserEvent(userId, task.id, 'start');
+    await completeNext(ctx, userId, plan());
+    await ctx.repo.updateTask(userId, task.id, {
+      plan: '### Outcome\nLegacy users can proceed.\n\n### Acceptance criteria\n- The existing plan can be approved.\n\n### Steps\n1. Ship.',
+      outcome: '',
+      acceptanceCriteria: '',
+    });
+    task = await reload(ctx, userId, task);
+
+    task = await orch().applyUserEvent(userId, task.id, 'ship');
+    expect(task.state).toBe('implement');
+    expect(task.outcome).toBe('Legacy users can proceed.');
+    expect(task.acceptanceCriteria).toBe('- The existing plan can be approved.');
+  });
+
+  it('persists a contract generated by the first document agent before review', async () => {
+    const documentWorkflow = (await ctx.app.ctx.workflows.list(userId)).find((workflow) => workflow.name === 'Document (non-code)')!;
+    let task = await newTask({ repos: [], workflowId: documentWorkflow.id });
+    task = await orch().applyUserEvent(userId, task.id, 'start');
+    const job = (await queuedJobs(task.id))[0]!;
+    expect(agentPayload(job).context.task_outcome).toBe('');
+    expect(agentPayload(job).step.prompt).toContain('If either field is empty, define it from the task source');
+
+    await completeNext(ctx, userId, {
+      kind: 'document',
+      summary: 'Wrote the guide',
+      outcome: 'Readers can deploy the service safely.',
+      acceptanceCriteria: '- The guide covers setup and rollback.',
+      artifacts: [{ name: 'guide.md', contentType: 'text/markdown', content: '# Guide' }],
+    });
+
+    task = await reload(ctx, userId, task);
+    expect(task).toMatchObject({
+      state: 'in-review',
+      outcome: 'Readers can deploy the service safely.',
+      acceptanceCriteria: '- The guide covers setup and rollback.',
+    });
+  });
+
+  it('rejects a first non-planning result that omits the generated contract', async () => {
+    const documentWorkflow = (await ctx.app.ctx.workflows.list(userId)).find((workflow) => workflow.name === 'Document (non-code)')!;
+    const task = await newTask({ repos: [], workflowId: documentWorkflow.id });
+    await orch().applyUserEvent(userId, task.id, 'start');
+    await expect(
+      completeNext(ctx, userId, {
+        kind: 'document',
+        summary: 'Wrote the guide',
+        artifacts: [{ name: 'guide.md', contentType: 'text/markdown', content: '# Guide' }],
+      }),
+    ).rejects.toThrow(/must define its outcome and acceptance criteria/);
+  });
+
+  it('does not persist a generated contract from an invalid first PR result', async () => {
+    const fastTrack = (await ctx.app.ctx.workflows.list(userId)).find((workflow) => workflow.name === 'Fast Track')!;
+    const task = await newTask({ workflowId: fastTrack.id });
+    await orch().applyUserEvent(userId, task.id, 'start');
+    const invalidPr = pr();
+    if (invalidPr.kind !== 'pr') throw new Error('expected PR result');
+
+    await expect(
+      completeNext(ctx, userId, {
+        ...invalidPr,
+        outcome: 'Rejected outcome',
+        acceptanceCriteria: '- Rejected criterion.',
+        branch: 'wrong-branch',
+      }),
+    ).rejects.toThrow(/Legacy pull request fields do not match/);
+    expect(await ctx.repo.getTask(userId, task.id)).toMatchObject({ outcome: '', acceptanceCriteria: '' });
   });
 });
 
@@ -725,7 +859,13 @@ describe('stale job sweeper', () => {
     await orch().applyUserEvent(userId, task.id, 'start');
     const worker = await ctx.repo.createWorker(userId, { name: 'w', hostname: 'h', version: '1', workerKeyId: null });
     const [job] = await ctx.repo.claimJobs(userId, worker.id, 1);
-    const result = { kind: 'plan' as const, summary: 'Recovered plan', plan: 'Durable plan' };
+    const result = {
+      kind: 'plan' as const,
+      summary: 'Recovered plan',
+      plan: 'Durable plan',
+      outcome: 'The recovered plan can proceed.',
+      acceptanceCriteria: '- The durable result is applied once.',
+    };
     const hash = createHash('sha256').update(JSON.stringify({ result })).digest('hex');
     const claim = await ctx.repo.beginJobOutcome(userId, job!.id, job!.attempt, hash, { result }, job!.leaseToken);
 

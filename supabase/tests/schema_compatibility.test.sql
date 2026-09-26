@@ -1,12 +1,16 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(7);
+select plan(11);
 
-select is(public.sindral_schema_version(), '20260922175000', 'database reports the server-compatible migration version');
+select is(public.sindral_schema_version(), '20260926000000', 'database reports the server-compatible migration version');
 select ok(not has_function_privilege('authenticated', 'public.sindral_schema_version()', 'EXECUTE'), 'browser role cannot call the compatibility probe');
 select ok(has_function_privilege('service_role', 'public.sindral_schema_version()', 'EXECUTE'), 'service role can call the compatibility probe');
 select ok(not has_function_privilege('authenticated', 'public.sindral_operational_snapshot()', 'EXECUTE'), 'browser role cannot read cross-tenant aggregates');
 select ok(has_function_privilege('service_role', 'public.sindral_operational_snapshot()', 'EXECUTE'), 'service role can read operational aggregates');
+select has_column('public', 'tasks', 'outcome', 'tasks store a durable outcome');
+select col_not_null('public', 'tasks', 'outcome', 'task outcomes are never null');
+select has_column('public', 'tasks', 'acceptance_criteria', 'tasks store durable acceptance criteria');
+select col_not_null('public', 'tasks', 'acceptance_criteria', 'task acceptance criteria are never null');
 
 insert into auth.users (id, email) values ('81000000-0000-4000-8000-000000000081', 'metrics@example.test');
 insert into public.tasks (id, user_id, key, title, state)

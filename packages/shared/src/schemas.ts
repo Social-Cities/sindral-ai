@@ -128,11 +128,17 @@ const artifactSchema = z.object({
     .refine((content) => new TextEncoder().encode(content).byteLength <= MAX_ARTIFACT_BYTES, 'Artifact content exceeds the byte limit'),
 });
 
+const taskContractResultFields = {
+  outcome: z.string().trim().min(1).max(20_000).optional(),
+  acceptanceCriteria: z.string().trim().min(1).max(50_000).optional(),
+};
+
 export const agentResultSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('plan'),
     summary: z.string().max(20_000),
     plan: z.string().max(200_000),
+    ...taskContractResultFields,
     subtasks: z.array(z.object({ title: shortText, goal: z.string().max(5000) })).max(20).optional(),
   }),
   z.object({
@@ -140,6 +146,7 @@ export const agentResultSchema = z.discriminatedUnion('kind', [
     summary: z.string().max(20_000),
     prUrl: z.string().url().max(2000),
     branch: z.string().max(200),
+    ...taskContractResultFields,
     pullRequests: z
       .array(
         z.object({
@@ -159,6 +166,7 @@ export const agentResultSchema = z.discriminatedUnion('kind', [
     summary: z.string().max(20_000),
     report: z.string().max(200_000),
     verdict: z.enum(['MATERIAL_FINDINGS', 'NO_MATERIAL_FINDINGS', 'REVIEW_BLOCKED']),
+    ...taskContractResultFields,
   }),
   z.object({
     kind: z.literal('verdict'),
@@ -166,9 +174,10 @@ export const agentResultSchema = z.discriminatedUnion('kind', [
     report: z.string().max(200_000),
     verdict: z.enum(['GO', 'NO_GO']),
     feedback: z.string().max(50_000).optional(),
+    ...taskContractResultFields,
   }),
-  z.object({ kind: z.literal('document'), summary: z.string().max(20_000), artifacts: z.array(artifactSchema).max(50) }),
-  z.object({ kind: z.literal('troubleshoot'), summary: z.string().max(20_000), diagnosis: z.string().max(100_000), resolved: z.boolean() }),
+  z.object({ kind: z.literal('document'), summary: z.string().max(20_000), artifacts: z.array(artifactSchema).max(50), ...taskContractResultFields }),
+  z.object({ kind: z.literal('troubleshoot'), summary: z.string().max(20_000), diagnosis: z.string().max(100_000), resolved: z.boolean(), ...taskContractResultFields }),
   z.object({
     kind: z.literal('rebase'),
     summary: z.string().max(20_000),

@@ -51,15 +51,16 @@ async function readJsonResponse(res: Response, provider: string): Promise<unknow
 export function adfToText(node: unknown): string {
   if (typeof node === 'string') return node;
   if (!node || typeof node !== 'object') return '';
-  const n = node as { type?: string; text?: string; content?: unknown[]; attrs?: { text?: string } };
+  const n = node as { type?: string; text?: string; content?: unknown[]; attrs?: { text?: string; level?: number } };
   if (n.type === 'text') return n.text ?? '';
   if (n.type === 'hardBreak') return '\n';
   if (n.type === 'mention' || n.type === 'emoji') return n.attrs?.text ?? '';
   const children = Array.isArray(n.content) ? n.content.map(adfToText) : [];
   switch (n.type) {
     case 'paragraph':
-    case 'heading':
       return `${children.join('')}\n\n`;
+    case 'heading':
+      return `${'#'.repeat(Math.min(6, Math.max(1, n.attrs?.level ?? 2)))} ${children.join('').trim()}\n\n`;
     case 'listItem':
       return `- ${children.join('').trim()}\n`;
     case 'bulletList':

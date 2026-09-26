@@ -19,4 +19,10 @@ describe('protocolInstructions', () => {
     expect(out).toContain('/tmp/result.json');
     expect(out).toContain('"GO" | "NO_GO"');
   });
+
+  it('requires planning agents to return the durable task contract', () => {
+    const out = protocolInstructions('plan', '/tmp/result.json');
+    expect(out).toContain('"outcome"');
+    expect(out).toContain('"acceptanceCriteria"');
+  });
 });

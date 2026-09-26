@@ -24,6 +24,8 @@ export function makeTask(overrides: Partial<Task> = {}): Task {
     key: `SIN-${counter}`,
     title: `Task ${counter}`,
     description: 'Some description',
+    outcome: '',
+    acceptanceCriteria: '',
     state: 'todo',
     currentStepId: 'todo',
     workflowId: FULL_SDLC_WORKFLOW.id,

@@ -20,6 +20,12 @@ async function importTicket(url: string) {
 }
 
 describe('ticket import', () => {
+  it('preserves Jira ADF headings so task contracts can be imported', () => {
+    expect(adfToText({ type: 'heading', attrs: { level: 3 }, content: [{ type: 'text', text: 'Acceptance criteria' }] })).toBe(
+      '### Acceptance criteria\n\n',
+    );
+  });
+
   it('rejects unsupported hosts without fetching (SSRF guard)', async () => {
     const res = await importTicket('https://evil.example.com/browse/ENG-1');
     expect(res.statusCode).toBe(400);
@@ -137,7 +143,7 @@ describe('adfToText', () => {
         { type: 'mystery', content: [{ type: 'text', text: 'raw' }] },
       ],
     };
-    expect(adfToText(doc)).toBe('Title\n\n```\nx = 1\n```\n\n@bob\nend\n\nraw');
+    expect(adfToText(doc)).toBe('## Title\n\n```\nx = 1\n```\n\n@bob\nend\n\nraw');
     expect(adfToText(null)).toBe('');
     expect(adfToText('plain')).toBe('plain');
   });

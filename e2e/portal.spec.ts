@@ -86,7 +86,7 @@ test('shows multiple repository diffs and auditable conflict escalation evidence
     payload: {
       kind: 'resolve-rebase-conflict', repository: 'acme/web', taskId: task.id, taskKey: task.key, branch: second.branch, baseBranch: 'main',
       sourceSha: 'b'.repeat(40), targetSha: 'c'.repeat(40), conflictedPaths: ['.github/workflows/ci.yml'], engine: 'claude', model: 'claude-opus-5', mode: 'high',
-      context: { task_key: task.key, task_title: task.title, task_description: task.description, plan: 'Plan', feedback: '', pr_url: second.url, parent_plan: '', sibling_summaries: '', review: '', verify_report: '', error: task.lastError ?? '' },
+      context: { task_key: task.key, task_title: task.title, task_description: task.description, task_outcome: task.outcome, acceptance_criteria: task.acceptanceCriteria, plan: 'Plan', feedback: '', pr_url: second.url, parent_plan: '', sibling_summaries: '', review: '', verify_report: '', error: task.lastError ?? '' },
       policy: { allowedPaths: ['.github/workflows/ci.yml'], protectedPaths: ['.github/'], validationCommands: [['pnpm', 'test']], maxFiles: 10, maxChangedLines: 500 },
     },
     result: null, error: task.lastError, outcomeHash: null, outcomeToken: null, outcomeStartedAt: null, dedupeKey: null, createdAt: task.createdAt, claimedAt: task.createdAt, leaseExpiresAt: null, finishedAt: task.updatedAt,

@@ -147,6 +147,8 @@ export class MemoryRepository implements Repository {
       key: input.key,
       title: input.title,
       description: input.description,
+      outcome: input.outcome,
+      acceptanceCriteria: input.acceptanceCriteria,
       state: input.state,
       currentStepId: input.currentStepId,
       workflowId: input.workflowId,

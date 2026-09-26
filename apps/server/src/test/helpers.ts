@@ -128,10 +128,14 @@ export async function reload(ctx: TestContext, userId: string, task: Task): Prom
 }
 
 export const plan = (text = '# Plan', subtasks?: { title: string; goal: string }[]): AgentResult =>
-  subtasks ? { kind: 'plan', summary: 'planned', plan: text, subtasks } : { kind: 'plan', summary: 'planned', plan: text };
+  subtasks
+    ? { kind: 'plan', summary: 'planned', plan: text, outcome: 'The requested behavior is delivered.', acceptanceCriteria: '- The requested behavior is verified.', subtasks }
+    : { kind: 'plan', summary: 'planned', plan: text, outcome: 'The requested behavior is delivered.', acceptanceCriteria: '- The requested behavior is verified.' };
 export const pr = (n = 1, branch = 'sindral/sin-1'): AgentResult => ({
   kind: 'pr',
   summary: `opened PR ${n}`,
+  outcome: 'The requested behavior is delivered.',
+  acceptanceCriteria: '- The requested behavior is verified.',
   prUrl: `https://github.com/acme/app/pull/${n}`,
   branch,
   pullRequests: [

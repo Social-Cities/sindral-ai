@@ -67,7 +67,7 @@ export function createSupabaseClient(url: string, serviceRoleKey: string): Supab
   });
 }
 
-export const EXPECTED_SCHEMA_VERSION = '20260922175000';
+export const EXPECTED_SCHEMA_VERSION = '20260926000000';
 
 // ---- row shapes (snake_case, as stored) ----
 interface ProfileRow {
@@ -91,6 +91,8 @@ interface TaskRow {
   key: string;
   title: string;
   description: string;
+  outcome: string;
+  acceptance_criteria: string;
   state: string;
   current_step_id: string | null;
   workflow_id: string | null;
@@ -265,6 +267,8 @@ const mapTask = (r: TaskRow): Task => ({
   key: r.key,
   title: r.title,
   description: r.description,
+  outcome: r.outcome,
+  acceptanceCriteria: r.acceptance_criteria,
   state: r.state,
   currentStepId: r.current_step_id,
   workflowId: r.workflow_id,
@@ -416,6 +420,8 @@ function taskPatchToRow(patch: TaskPatch): Record<string, unknown> {
   const row: Record<string, unknown> = {};
   if (patch.title !== undefined) row.title = patch.title;
   if (patch.description !== undefined) row.description = patch.description;
+  if (patch.outcome !== undefined) row.outcome = patch.outcome;
+  if (patch.acceptanceCriteria !== undefined) row.acceptance_criteria = patch.acceptanceCriteria;
   if (patch.state !== undefined) row.state = patch.state;
   if (patch.currentStepId !== undefined) row.current_step_id = patch.currentStepId;
   if (patch.workflowId !== undefined) row.workflow_id = patch.workflowId;
@@ -604,6 +610,8 @@ export class SupabaseRepository implements Repository {
           key: input.key,
           title: input.title,
           description: input.description,
+          outcome: input.outcome,
+          acceptance_criteria: input.acceptanceCriteria,
           state: input.state,
           current_step_id: input.currentStepId,
           workflow_id: input.workflowId,

@@ -62,6 +62,8 @@ export interface TaskInsert {
   key: string;
   title: string;
   description: string;
+  outcome: string;
+  acceptanceCriteria: string;
   state: string;
   currentStepId: string | null;
   workflowId: string | null;
@@ -79,6 +81,8 @@ export type TaskPatch = Partial<
     Task,
     | 'title'
     | 'description'
+    | 'outcome'
+    | 'acceptanceCriteria'
     | 'state'
     | 'currentStepId'
     | 'workflowId'

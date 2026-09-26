@@ -6,6 +6,7 @@ import {
   UNIVERSAL_EVENTS,
   chatTriggersFeedback,
   eventForResult,
+  extractTaskContract,
   getStep,
   snapshotWorkflow,
   transition,
@@ -73,6 +74,22 @@ const DEFAULT_CONFLICT_PROTECTED_PATHS = [
   '.env',
 ];
 
+const TASK_CONTRACT_PROMPT = `## Task contract (mandatory)
+
+Required outcome:
+{{task_outcome}}
+
+Acceptance criteria:
+{{acceptance_criteria}}
+
+Treat this contract as the definition of done. Your work and evidence must account for the outcome and every acceptance criterion.
+
+If either field is empty, define it from the task source before doing the work, use the generated contract to guide the work, and return both fields in your structured result so the contract becomes durable.`;
+
+const PLANNING_CONTRACT_PROMPT = `${TASK_CONTRACT_PROMPT}
+
+When revising a plan, update the contract when the user's feedback requests a change. Return both fields in the structured plan result.`;
+
 function transitionRequestHash(
   userId: string,
   taskId: string,
@@ -124,10 +141,13 @@ export class Orchestrator {
       workflowId = (await this.workflows.getDefault(userId))?.id ?? null;
     }
     const key = input.key ?? `SIN-${await this.repo.nextTaskNumber(userId)}`;
+    const importedContract = extractTaskContract(input.description);
     const task = await this.repo.createTask(userId, {
       key,
       title: input.title,
       description: input.description,
+      outcome: importedContract.outcome ?? '',
+      acceptanceCriteria: importedContract.acceptanceCriteria ?? '',
       state: 'todo',
       currentStepId: null,
       workflowId,
@@ -278,7 +298,25 @@ export class Orchestrator {
     const pinNow = task.pinnedWorkflow === null;
     const workflow = pinNow ? snapshotWorkflow(live) : live;
 
+    if (task.plan && (!task.outcome.trim() || !task.acceptanceCriteria.trim())) {
+      const recovered = extractTaskContract(task.plan);
+      const outcome = task.outcome.trim() || recovered.outcome || '';
+      const acceptanceCriteria = task.acceptanceCriteria.trim() || recovered.acceptanceCriteria || '';
+      if (outcome !== task.outcome || acceptanceCriteria !== task.acceptanceCriteria) {
+        task = (await this.repo.updateTask(userId, task.id, { outcome, acceptanceCriteria })) ?? task;
+      }
+    }
+
     const t: Transition = transition(task, workflow, event);
+    if (task.plan && (!task.outcome.trim() || !task.acceptanceCriteria.trim())) {
+      const dispatchesNonPlanningAgent = t.effects.some((effect) => {
+        if (effect.type !== 'dispatch') return false;
+        return getStep(workflow, effect.stepId)?.output !== 'plan';
+      });
+      if (dispatchesNonPlanningAgent || t.effects.some((effect) => effect.type === 'complete-task')) {
+        throw conflict('The plan needs an outcome and acceptance criteria before this task can advance. Send feedback to the planning agent to add them.');
+      }
+    }
     const patch: Parameters<Repository['applyTaskTransition']>[1]['patch'] = {
       state: t.nextState,
       currentStepId: t.nextStepId,
@@ -369,11 +407,13 @@ export class Orchestrator {
     feedbackOverride?: string,
   ): Promise<Parameters<Repository['createJob']>[1]> {
     const context = await this.buildJobContext(userId, task, feedbackOverride);
+    const contractPrompt = step.output === 'plan' ? PLANNING_CONTRACT_PROMPT : TASK_CONTRACT_PROMPT;
+    const stepWithContract = { ...step, prompt: `${step.prompt ?? ''}\n\n${contractPrompt}`.trim() };
     return {
       taskId: task.id,
       kind: 'agent',
       stepId: step.id,
-      payload: { kind: 'agent', step, context, repos: task.repos, branch: task.branch, baseBranch: task.baseBranch, prUrl: task.prUrl },
+      payload: { kind: 'agent', step: stepWithContract, context, repos: task.repos, branch: task.branch, baseBranch: task.baseBranch, prUrl: task.prUrl },
     };
   }
 
@@ -436,6 +476,8 @@ export class Orchestrator {
       task_key: task.key,
       task_title: task.title,
       task_description: task.description,
+      task_outcome: task.outcome,
+      acceptance_criteria: task.acceptanceCriteria,
       plan: task.plan ?? '',
       feedback,
       pr_url: task.prUrl ?? '',
@@ -627,9 +669,29 @@ export class Orchestrator {
     task: Task,
     result: Exclude<AgentResult, { kind: 'rebase' | 'conflict-resolution' | 'merge' }>,
   ): Promise<Task> {
+    let generatedContract: Pick<Task, 'outcome' | 'acceptanceCriteria'> | null = null;
+    if (result.kind !== 'plan' && (!task.outcome.trim() || !task.acceptanceCriteria.trim())) {
+      const outcome = result.outcome?.trim() || task.outcome.trim();
+      const acceptanceCriteria = result.acceptanceCriteria?.trim() || task.acceptanceCriteria.trim();
+      if (!outcome || !acceptanceCriteria) {
+        throw badRequest('The first agent result for a task must define its outcome and acceptance criteria');
+      }
+      generatedContract = { outcome, acceptanceCriteria };
+    }
+    const persistGeneratedContract = async (): Promise<Task> => {
+      if (!generatedContract) return task;
+      task = (await this.repo.updateTask(userId, task.id, generatedContract)) ?? task;
+      return task;
+    };
     switch (result.kind) {
       case 'plan': {
-        const updated = await this.repo.updateTask(userId, task.id, { plan: result.plan });
+        const embedded = extractTaskContract(result.plan);
+        const outcome = result.outcome?.trim() || embedded.outcome || task.outcome.trim();
+        const acceptanceCriteria = result.acceptanceCriteria?.trim() || embedded.acceptanceCriteria || task.acceptanceCriteria.trim();
+        if (!outcome || !acceptanceCriteria) {
+          throw badRequest('Plan results must define a task outcome and acceptance criteria');
+        }
+        const updated = await this.repo.updateTask(userId, task.id, { plan: result.plan, outcome, acceptanceCriteria });
         if (result.subtasks && result.subtasks.length >= MIN_SUBTASKS && task.parentTaskId === null) {
           await this.createSubtasks(userId, updated ?? task, result.subtasks, `job:${job.id}:subtasks`);
         }
@@ -670,7 +732,13 @@ export class Orchestrator {
             headSha: item.headSha ?? null,
           });
         }
-        return (await this.repo.updateTask(userId, task.id, { prUrl: result.prUrl, branch: result.branch || task.branch })) ?? task;
+        return (
+          (await this.repo.updateTask(userId, task.id, {
+            prUrl: result.prUrl,
+            branch: result.branch || task.branch,
+            ...(generatedContract ?? {}),
+          })) ?? task
+        );
       }
       case 'review':
         await this.repo.createArtifact(userId, {
@@ -681,7 +749,7 @@ export class Orchestrator {
           content: result.report,
           dedupeKey: `job:${job.id}:artifact:${REVIEW_ARTIFACT}`,
         });
-        return task;
+        return persistGeneratedContract();
       case 'verdict':
         await this.repo.createArtifact(userId, {
           taskId: task.id,
@@ -691,7 +759,7 @@ export class Orchestrator {
           content: result.report,
           dedupeKey: `job:${job.id}:artifact:${VERIFY_ARTIFACT}`,
         });
-        return task;
+        return persistGeneratedContract();
       case 'document':
         for (const [index, artifact] of result.artifacts.entries()) {
           await this.repo.createArtifact(userId, {
@@ -703,7 +771,7 @@ export class Orchestrator {
             dedupeKey: `job:${job.id}:artifact:${index}`,
           });
         }
-        return task;
+        return persistGeneratedContract();
       case 'troubleshoot':
         await this.repo.createMessage(userId, {
           taskId: task.id,
@@ -712,7 +780,7 @@ export class Orchestrator {
           source: 'worker',
           externalId: `job:${job.id}:diagnosis`,
         });
-        return task;
+        return persistGeneratedContract();
     }
   }
 
@@ -739,6 +807,8 @@ export class Orchestrator {
           key,
           title: sub.title,
           description: sub.goal,
+          outcome: sub.goal,
+          acceptanceCriteria: '',
           state: 'todo',
           currentStepId: null,
           workflowId: parent.workflowId,

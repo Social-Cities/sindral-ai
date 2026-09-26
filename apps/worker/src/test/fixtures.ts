@@ -30,6 +30,8 @@ export function context(overrides: Partial<JobContext> = {}): JobContext {
     task_key: 'ENG-142',
     task_title: 'Add rate limiting',
     task_description: 'Limit requests per user.',
+    task_outcome: 'Requests are limited per user.',
+    acceptance_criteria: '- Requests above the limit are rejected.',
     plan: '',
     feedback: '',
     pr_url: '',

@@ -8,11 +8,18 @@ const PLANNING_PROMPT = `You are a senior software engineer and technical lead w
 Follow the \`investigate-task\` and \`plan-change\` skills if they are available; otherwise follow their contracts directly.
 
 1. Investigate the codebase to understand existing patterns, architecture, tests and constraints before planning.
-2. Start the plan with concise sections named exactly \`Summary\`, \`Outcome\`, \`Assumptions\`, and \`Acceptance criteria\`. Then provide a precise, actionable implementation plan with numbered steps, files expected to change, risk controls, and a verification contract.
-3. Pull requests must stay small and reviewable by humans. If the change would produce a large PR, split it into ordered subtasks that each ship as their own PR. Give each subtask a title and an overall goal/intention only; detailed implementation is planned just-in-time when the subtask starts so later subtasks can adapt if earlier ones change direction.
+2. Define the task contract before planning. Preserve the imported outcome and acceptance criteria when they are already accurate; otherwise generate missing values or revise them to address the user's feedback. Acceptance criteria must be observable and testable.
+3. Start the plan with concise sections named exactly \`Summary\`, \`Outcome\`, \`Assumptions\`, and \`Acceptance criteria\`. The Outcome and Acceptance criteria sections must exactly match the structured task contract you return. Then provide a precise, actionable implementation plan with numbered steps, files expected to change, risk controls, and a verification contract.
+4. Pull requests must stay small and reviewable by humans. If the change would produce a large PR, split it into ordered subtasks that each ship as their own PR. Give each subtask a title and an overall goal/intention only; detailed implementation is planned just-in-time when the subtask starts so later subtasks can adapt if earlier ones change direction.
 
 Task description:
 {{task_description}}
+
+Imported/current outcome (generate one if empty; revise it when the user's feedback asks you to):
+{{task_outcome}}
+
+Imported/current acceptance criteria (generate them if empty; revise them when the user's feedback asks you to):
+{{acceptance_criteria}}
 
 Previous plan (empty if this is the first pass):
 {{plan}}
@@ -38,6 +45,12 @@ Follow the \`design-tests\` and \`implement-change\` skills if available; otherw
 Task description:
 {{task_description}}
 
+Required outcome:
+{{task_outcome}}
+
+Acceptance criteria (implement and verify every item):
+{{acceptance_criteria}}
+
 Approved plan:
 {{plan}}
 
@@ -57,6 +70,12 @@ Review the diff of the current branch against its base branch. Pull request: {{p
 Task description:
 {{task_description}}
 
+Required outcome:
+{{task_outcome}}
+
+Acceptance criteria to review against:
+{{acceptance_criteria}}
+
 Approved plan:
 {{plan}}`;
 
@@ -64,7 +83,7 @@ const VERIFY_PROMPT = `You are the final technical gate for task {{task_key}}: "
 
 Follow the \`verify-change\` and \`production-readiness\` skills if available; otherwise apply their contracts directly:
 1. Run the repository's real compiler, typechecker, linters and tests. Never claim a check passed unless you executed it.
-2. Check that the change accomplishes the goal and intention of the original task, follows best practice and stays within scope.
+2. Check that the change achieves the required outcome and evaluate every acceptance criterion with concrete evidence. Also check that it follows best practice and stays within scope.
 3. Evaluate every production-readiness gate and produce the readiness matrix, residual risks, rollout recommendation and human attention points.
 4. Return GO only when verification is VERIFIED and there are no unresolved material findings from the adversarial review below. Otherwise return NO_GO with precise, actionable feedback for the implementer.
 
@@ -72,6 +91,12 @@ Pull request: {{pr_url}}
 
 Task description:
 {{task_description}}
+
+Required outcome:
+{{task_outcome}}
+
+Acceptance criteria (the report must account for every item):
+{{acceptance_criteria}}
 
 Approved plan:
 {{plan}}
@@ -85,6 +110,12 @@ This is a non-code task. Work in the current directory, research as needed, and 
 
 Task description:
 {{task_description}}
+
+Required outcome:
+{{task_outcome}}
+
+Acceptance criteria:
+{{acceptance_criteria}}
 
 Feedback to address (empty if none):
 {{feedback}}`;

@@ -18,29 +18,39 @@ const RESULT_SHAPES: Record<StepOutputKind, string> = {
   "kind": "plan",
   "summary": "one paragraph for the user",
   "plan": "full markdown implementation plan",
+  "outcome": "the concise user-visible result this task must achieve",
+  "acceptanceCriteria": "a markdown list of observable, testable conditions",
   "subtasks": [ { "title": "...", "goal": "..." } ]   // ONLY if the change must be split into multiple PRs; omit otherwise
 }`,
   pr: `{
   "kind": "pr",
-  "summary": "one paragraph describing what you implemented and how you verified it"
+  "summary": "one paragraph describing what you implemented and how you verified it",
+  "outcome": "required only when the current task outcome is empty",
+  "acceptanceCriteria": "required only when the current task acceptance criteria are empty"
 }
 (Commit all your changes on the current branch. Do NOT push or open a PR yourself; the worker does that.)`,
   review: `{
   "kind": "review",
   "summary": "one paragraph",
   "report": "full markdown review following the required output sections",
-  "verdict": "MATERIAL_FINDINGS" | "NO_MATERIAL_FINDINGS" | "REVIEW_BLOCKED"
+  "verdict": "MATERIAL_FINDINGS" | "NO_MATERIAL_FINDINGS" | "REVIEW_BLOCKED",
+  "outcome": "required only when the current task outcome is empty",
+  "acceptanceCriteria": "required only when the current task acceptance criteria are empty"
 }`,
   verdict: `{
   "kind": "verdict",
   "summary": "one paragraph",
   "report": "full markdown readiness report",
   "verdict": "GO" | "NO_GO",
-  "feedback": "if NO_GO: precise, actionable changes the implementer must make"
+  "feedback": "if NO_GO: precise, actionable changes the implementer must make",
+  "outcome": "required only when the current task outcome is empty",
+  "acceptanceCriteria": "required only when the current task acceptance criteria are empty"
 }`,
   document: `{
   "kind": "document",
   "summary": "one paragraph",
+  "outcome": "required only when the current task outcome is empty",
+  "acceptanceCriteria": "required only when the current task acceptance criteria are empty",
   "artifacts": [ { "name": "report.md", "contentType": "text/markdown", "content": "..." } ]
 }
 (Alternatively write files into $${OUTPUT_DIR_ENV}; every file there is uploaded as an artifact.)`,
@@ -48,7 +58,9 @@ const RESULT_SHAPES: Record<StepOutputKind, string> = {
   "kind": "troubleshoot",
   "summary": "one paragraph",
   "diagnosis": "markdown explanation of the root cause and what you changed",
-  "resolved": true | false   // true only if the failed step can now be retried safely
+  "resolved": true | false,   // true only if the failed step can now be retried safely
+  "outcome": "required only when the current task outcome is empty",
+  "acceptanceCriteria": "required only when the current task acceptance criteria are empty"
 }`,
   'conflict-resolution': `{
   "kind": "conflict-resolution",
