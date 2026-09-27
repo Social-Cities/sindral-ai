@@ -1,0 +1,524 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		380F4F49BCF664F3722586B3 /* AuthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 955DBC89C9C3ED8038051128 /* AuthView.swift */; };
+		60B2143768A2CE9F44BC876F /* SindralAIApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24B9B2863FB546A7CFE08F4D /* SindralAIApp.swift */; };
+		7B8054E971FA6E102C3BBCB7 /* AppStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3D04240133A44586E08987B /* AppStore.swift */; };
+		7F0A06993FC0FB1076AEE611 /* WorkflowsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E1C7F1F6F08487721C917BD /* WorkflowsView.swift */; };
+		86F90861EA628B65D28D6CD3 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B441AB9AFABE1F518FF1C407 /* DashboardView.swift */; };
+		8EFF8B2D5A8BBFA7950C4697 /* TasksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89B8B6F40E26E631F9E6190D /* TasksView.swift */; };
+		906D267BFBCB4DD007C2D945 /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10CEE358E7DCF93C2A0B9FF /* Components.swift */; };
+		90F9CF17DA30BC1D89F01C65 /* TaskLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4874CC3FE96E740ED22DCE17 /* TaskLogicTests.swift */; };
+		A48058C560E7FA72326AA7E8 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = D804C0D438256FF667619E4F /* Models.swift */; };
+		BE81891A198F98F34653D824 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 215C6F822B517E389FF49A08 /* APIClient.swift */; };
+		C325F7E5778599536129D02A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2ABF6AC38E7879FC1E808A1B /* SettingsView.swift */; };
+		C59CDD0FF6F680B04F74A845 /* TaskDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A545932B106B545B29FAC8B4 /* TaskDetailView.swift */; };
+		CFFB6D656DF8040315DF1C0E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D4B85A512DF7A0A00BE87823 /* Assets.xcassets */; };
+		EE3EEECE68467E52CEC3A6A6 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 712A96D1FEBAEAE5305A44D7 /* KeychainStore.swift */; };
+		EF83323B29A526F6E4203065 /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02C1A1F70F0D46A81C45B320 /* AuthService.swift */; };
+		FAAEE55E809B4B5290C99FF2 /* Configuration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2E9086FD028766DAD281A72 /* Configuration.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		00AD401724E3F149D6365427 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DAEE4FB7294AB4A84733C02A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8815CD467C46447324B7DB91;
+			remoteInfo = SindralAI;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		02C1A1F70F0D46A81C45B320 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
+		086A16A207C8B1201120E44A /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
+		1184E4C9C723D363B96B0853 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		215C6F822B517E389FF49A08 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
+		24B9B2863FB546A7CFE08F4D /* SindralAIApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SindralAIApp.swift; sourceTree = "<group>"; };
+		2ABF6AC38E7879FC1E808A1B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		4874CC3FE96E740ED22DCE17 /* TaskLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskLogicTests.swift; sourceTree = "<group>"; };
+		5A88A8E5FC3958EE0B0B5C96 /* SindralAI.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = SindralAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		6E1C7F1F6F08487721C917BD /* WorkflowsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkflowsView.swift; sourceTree = "<group>"; };
+		712A96D1FEBAEAE5305A44D7 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
+		89B8B6F40E26E631F9E6190D /* TasksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TasksView.swift; sourceTree = "<group>"; };
+		955DBC89C9C3ED8038051128 /* AuthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthView.swift; sourceTree = "<group>"; };
+		A10CEE358E7DCF93C2A0B9FF /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
+		A2E9086FD028766DAD281A72 /* Configuration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Configuration.swift; sourceTree = "<group>"; };
+		A545932B106B545B29FAC8B4 /* TaskDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDetailView.swift; sourceTree = "<group>"; };
+		A5948A715F553FB9EC4156A3 /* SindralAITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = SindralAITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B441AB9AFABE1F518FF1C407 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
+		D4B85A512DF7A0A00BE87823 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		D804C0D438256FF667619E4F /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		F3D04240133A44586E08987B /* AppStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStore.swift; sourceTree = "<group>"; };
+		F8314E86CE5F72EC7D79F5C7 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		11606663CA4E8BD363194F61 /* Support */ = {
+			isa = PBXGroup;
+			children = (
+				A2E9086FD028766DAD281A72 /* Configuration.swift */,
+				712A96D1FEBAEAE5305A44D7 /* KeychainStore.swift */,
+			);
+			path = Support;
+			sourceTree = "<group>";
+		};
+		9B51876873BC3493D888B840 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				086A16A207C8B1201120E44A /* Debug.xcconfig */,
+				F8314E86CE5F72EC7D79F5C7 /* Release.xcconfig */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
+		9BC4EAA83631631F7B2CD503 /* SindralAI */ = {
+			isa = PBXGroup;
+			children = (
+				D4B85A512DF7A0A00BE87823 /* Assets.xcassets */,
+				1184E4C9C723D363B96B0853 /* Info.plist */,
+				9FD6F98108DAA934617BD8E3 /* App */,
+				C13CD77CB9F254E3F542EC0D /* Models */,
+				C84D73C10F964AD24FD83BC9 /* Networking */,
+				11606663CA4E8BD363194F61 /* Support */,
+				A9AA6DDA0B0E13D054F11706 /* Views */,
+			);
+			path = SindralAI;
+			sourceTree = "<group>";
+		};
+		9FD6F98108DAA934617BD8E3 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				F3D04240133A44586E08987B /* AppStore.swift */,
+				24B9B2863FB546A7CFE08F4D /* SindralAIApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		A9AA6DDA0B0E13D054F11706 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				955DBC89C9C3ED8038051128 /* AuthView.swift */,
+				A10CEE358E7DCF93C2A0B9FF /* Components.swift */,
+				B441AB9AFABE1F518FF1C407 /* DashboardView.swift */,
+				2ABF6AC38E7879FC1E808A1B /* SettingsView.swift */,
+				A545932B106B545B29FAC8B4 /* TaskDetailView.swift */,
+				89B8B6F40E26E631F9E6190D /* TasksView.swift */,
+				6E1C7F1F6F08487721C917BD /* WorkflowsView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		AA485913DC31A6B73A4FB55E /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				5A88A8E5FC3958EE0B0B5C96 /* SindralAI.app */,
+				A5948A715F553FB9EC4156A3 /* SindralAITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		AA537A9FEE9E186697E5AE8C = {
+			isa = PBXGroup;
+			children = (
+				9B51876873BC3493D888B840 /* Config */,
+				9BC4EAA83631631F7B2CD503 /* SindralAI */,
+				D6E2EB3547D165BA72EDDD7D /* SindralAITests */,
+				AA485913DC31A6B73A4FB55E /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		C13CD77CB9F254E3F542EC0D /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				D804C0D438256FF667619E4F /* Models.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		C84D73C10F964AD24FD83BC9 /* Networking */ = {
+			isa = PBXGroup;
+			children = (
+				215C6F822B517E389FF49A08 /* APIClient.swift */,
+				02C1A1F70F0D46A81C45B320 /* AuthService.swift */,
+			);
+			path = Networking;
+			sourceTree = "<group>";
+		};
+		D6E2EB3547D165BA72EDDD7D /* SindralAITests */ = {
+			isa = PBXGroup;
+			children = (
+				4874CC3FE96E740ED22DCE17 /* TaskLogicTests.swift */,
+			);
+			path = SindralAITests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		5BEE07F1489A656AA7E72F79 /* SindralAITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D60AF757542163911177A54A /* Build configuration list for PBXNativeTarget "SindralAITests" */;
+			buildPhases = (
+				41EF5530E478AA8684FEB725 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				C4DB21B59E22FD7E419327B5 /* PBXTargetDependency */,
+			);
+			name = SindralAITests;
+			packageProductDependencies = (
+			);
+			productName = SindralAITests;
+			productReference = A5948A715F553FB9EC4156A3 /* SindralAITests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		8815CD467C46447324B7DB91 /* SindralAI */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3BE2323029DE4B8B64868C29 /* Build configuration list for PBXNativeTarget "SindralAI" */;
+			buildPhases = (
+				517ED053090902EFC9C3E468 /* Sources */,
+				FD74A8015EFB7AE693E70E57 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SindralAI;
+			packageProductDependencies = (
+			);
+			productName = SindralAI;
+			productReference = 5A88A8E5FC3958EE0B0B5C96 /* SindralAI.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		DAEE4FB7294AB4A84733C02A /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					5BEE07F1489A656AA7E72F79 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					8815CD467C46447324B7DB91 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 234684DF1F2F52BD0BA58C03 /* Build configuration list for PBXProject "SindralAI" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = AA537A9FEE9E186697E5AE8C;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = AA485913DC31A6B73A4FB55E /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				8815CD467C46447324B7DB91 /* SindralAI */,
+				5BEE07F1489A656AA7E72F79 /* SindralAITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		FD74A8015EFB7AE693E70E57 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CFFB6D656DF8040315DF1C0E /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		41EF5530E478AA8684FEB725 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				90F9CF17DA30BC1D89F01C65 /* TaskLogicTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		517ED053090902EFC9C3E468 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BE81891A198F98F34653D824 /* APIClient.swift in Sources */,
+				7B8054E971FA6E102C3BBCB7 /* AppStore.swift in Sources */,
+				EF83323B29A526F6E4203065 /* AuthService.swift in Sources */,
+				380F4F49BCF664F3722586B3 /* AuthView.swift in Sources */,
+				906D267BFBCB4DD007C2D945 /* Components.swift in Sources */,
+				FAAEE55E809B4B5290C99FF2 /* Configuration.swift in Sources */,
+				86F90861EA628B65D28D6CD3 /* DashboardView.swift in Sources */,
+				EE3EEECE68467E52CEC3A6A6 /* KeychainStore.swift in Sources */,
+				A48058C560E7FA72326AA7E8 /* Models.swift in Sources */,
+				C325F7E5778599536129D02A /* SettingsView.swift in Sources */,
+				60B2143768A2CE9F44BC876F /* SindralAIApp.swift in Sources */,
+				C59CDD0FF6F680B04F74A845 /* TaskDetailView.swift in Sources */,
+				8EFF8B2D5A8BBFA7950C4697 /* TasksView.swift in Sources */,
+				7F0A06993FC0FB1076AEE611 /* WorkflowsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		C4DB21B59E22FD7E419327B5 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8815CD467C46447324B7DB91 /* SindralAI */;
+			targetProxy = 00AD401724E3F149D6365427 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		098CE477930662089ED2239F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		620C44725742563A4F2DC2BA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 086A16A207C8B1201120E44A /* Debug.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = SindralAI/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.sindral.ios;
+				PRODUCT_NAME = SindralAI;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		76B1355C22FBF448D8FFAA6A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.sindral.ios.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SindralAI.app/SindralAI";
+			};
+			name = Debug;
+		};
+		DE58F71C524570B0C1181ADD /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = F8314E86CE5F72EC7D79F5C7 /* Release.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = SindralAI/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.sindral.ios;
+				PRODUCT_NAME = SindralAI;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		DE9D3CAF6B7110CDD673BDD7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.sindral.ios.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SindralAI.app/SindralAI";
+			};
+			name = Release;
+		};
+		F4B7AC96634F9678E541E6D4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		234684DF1F2F52BD0BA58C03 /* Build configuration list for PBXProject "SindralAI" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				098CE477930662089ED2239F /* Debug */,
+				F4B7AC96634F9678E541E6D4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		3BE2323029DE4B8B64868C29 /* Build configuration list for PBXNativeTarget "SindralAI" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				620C44725742563A4F2DC2BA /* Debug */,
+				DE58F71C524570B0C1181ADD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		D60AF757542163911177A54A /* Build configuration list for PBXNativeTarget "SindralAITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				76B1355C22FBF448D8FFAA6A /* Debug */,
+				DE9D3CAF6B7110CDD673BDD7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = DAEE4FB7294AB4A84733C02A /* Project object */;
+}

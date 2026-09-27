@@ -1,0 +1,4 @@
+SINDRAL_API_URL = http:/$()/127.0.0.1:8787
+SUPABASE_URL = http:/$()/127.0.0.1:55321
+SUPABASE_ANON_KEY =
+#include? "Local.xcconfig"

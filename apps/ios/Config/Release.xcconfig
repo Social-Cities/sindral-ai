@@ -1,0 +1,5 @@
+// Supply these values in an untracked Local.xcconfig or CI build settings.
+SINDRAL_API_URL = https:/$()/api.example.com
+SUPABASE_URL = https:/$()/project.supabase.co
+SUPABASE_ANON_KEY =
+#include? "Local.xcconfig"
