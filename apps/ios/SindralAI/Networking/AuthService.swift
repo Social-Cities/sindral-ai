@@ -1,7 +1,5 @@
-import AuthenticationServices
 import Foundation
 import Observation
-import UIKit
 
 struct AuthSession: Codable, Hashable, Sendable {
     let accessToken: String
@@ -65,22 +63,6 @@ final class SessionStore {
         return true
     }
 
-    func signInWithGitHub() async throws {
-        var components = URLComponents(url: configuration.supabaseURL.appending(path: "auth/v1/authorize"), resolvingAgainstBaseURL: false)!
-        components.queryItems = [.init(name: "provider", value: "github"), .init(name: "redirect_to", value: "sindral://auth-callback")]
-        guard let url = components.url else { throw AuthError.invalidCallback }
-        let callback = try await WebAuthSession.start(url: url, callbackScheme: "sindral")
-        guard let fragment = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.fragment else { throw AuthError.invalidCallback }
-        let values = fragment.split(separator: "&").reduce(into: [String: String]()) { output, pair in
-            let parts = pair.split(separator: "=", maxSplits: 1).map(String.init)
-            if parts.count == 2 { output[parts[0]] = parts[1].removingPercentEncoding ?? parts[1] }
-        }
-        guard let access = values["access_token"], let refresh = values["refresh_token"] else { throw AuthError.invalidCallback }
-        let user: AuthUser = try await userForToken(access)
-        let expires = TimeInterval(values["expires_in"].flatMap(Int.init) ?? 3600)
-        try setSession(.init(accessToken: access, refreshToken: refresh, expiresAt: Date().addingTimeInterval(expires), user: user))
-    }
-
     func validAccessToken() async throws -> String {
         guard let current = session else { throw AuthError.notAuthenticated }
         if current.expiresAt.timeIntervalSinceNow > 60 { return current.accessToken }
@@ -118,14 +100,6 @@ final class SessionStore {
         return try JSONDecoder().decode(T.self, from: data)
     }
 
-    private func userForToken(_ token: String) async throws -> AuthUser {
-        var request = URLRequest(url: configuration.supabaseURL.appending(path: "auth/v1/user"))
-        request.setValue(configuration.supabaseAnonKey, forHTTPHeaderField: "apikey")
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await urlSession.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw AuthError.invalidResponse }
-        return try JSONDecoder().decode(AuthUser.self, from: data)
-    }
 }
 
 private struct SignUpResponse: Codable {
@@ -134,34 +108,12 @@ private struct SignUpResponse: Codable {
 }
 
 enum AuthError: LocalizedError {
-    case notAuthenticated, invalidResponse, invalidCallback, server(String)
+    case notAuthenticated, invalidResponse, server(String)
     var errorDescription: String? {
         switch self {
         case .notAuthenticated: "Please sign in again."
         case .invalidResponse: "The authentication service returned an invalid response."
-        case .invalidCallback: "GitHub sign-in did not complete."
         case .server(let message): message
-        }
-    }
-}
-
-@MainActor
-private final class WebAuthSession: NSObject, ASWebAuthenticationPresentationContextProviding {
-    private var session: ASWebAuthenticationSession?
-    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows).first { $0.isKeyWindow } ?? ASPresentationAnchor()
-    }
-    static func start(url: URL, callbackScheme: String) async throws -> URL {
-        let owner = WebAuthSession()
-        return try await withCheckedThrowingContinuation { continuation in
-            let session = ASWebAuthenticationSession(url: url, callbackURLScheme: callbackScheme) { url, error in
-                owner.session = nil
-                if let error { continuation.resume(throwing: error) }
-                else if let url { continuation.resume(returning: url) }
-                else { continuation.resume(throwing: AuthError.invalidCallback) }
-            }
-            owner.session = session; session.presentationContextProvider = owner; session.prefersEphemeralWebBrowserSession = false
-            session.start()
         }
     }
 }

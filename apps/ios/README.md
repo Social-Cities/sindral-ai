@@ -17,8 +17,6 @@ SUPABASE_ANON_KEY = your-local-anon-key
 
 The checked-in Debug URLs point at the local server (`127.0.0.1:8787`) and Supabase (`127.0.0.1:55321`). `Local.xcconfig` can override any Debug value without affecting the team. The checked-in Staging values are public client configuration; never add a Supabase secret/service-role key or other server credential to an iOS xcconfig. Override Release values in CI or an untracked xcconfig.
 
-Supabase GitHub auth must allow `sindral://auth-callback` as a redirect URL.
-
 ## Generate and build
 
 ```bash

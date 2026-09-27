@@ -18,7 +18,6 @@ struct AuthView: View {
                     if let message { Text(message).font(.footnote).foregroundStyle(message.hasPrefix("Check") ? .green : .red) }
                     Button(mode == 0 ? "Sign in" : "Create account") { Task { await submit() } }
                         .disabled(isBusy || email.isEmpty || password.count < 6)
-                    Button("Continue with GitHub") { Task { await github() } }.disabled(isBusy)
                 } footer: { Text("Agents run on your own connected worker. Credentials stay in the iOS Keychain.") }
             }
             .navigationTitle("Sindral AI")
@@ -33,5 +32,4 @@ struct AuthView: View {
             else if try await session.signUp(email: email, password: password) { message = "Check your inbox to confirm your email, then sign in." }
         } catch { message = error.localizedDescription }
     }
-    private func github() async { isBusy = true; message = nil; defer { isBusy = false }; do { try await session.signInWithGitHub() } catch { message = error.localizedDescription } }
 }
