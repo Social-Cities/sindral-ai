@@ -45,7 +45,7 @@
 		24B9B2863FB546A7CFE08F4D /* SindralAIApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SindralAIApp.swift; sourceTree = "<group>"; };
 		2ABF6AC38E7879FC1E808A1B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		4874CC3FE96E740ED22DCE17 /* TaskLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskLogicTests.swift; sourceTree = "<group>"; };
-		5A88A8E5FC3958EE0B0B5C96 /* SindralAI.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = SindralAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		5A88A8E5FC3958EE0B0B5C96 /* SindralAI.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SindralAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6E1C7F1F6F08487721C917BD /* WorkflowsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkflowsView.swift; sourceTree = "<group>"; };
 		6F4AD6BDF63B30B95C9C1270 /* Staging.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Staging.xcconfig; sourceTree = "<group>"; };
 		712A96D1FEBAEAE5305A44D7 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
@@ -217,7 +217,6 @@
 						ProvisioningStyle = Automatic;
 					};
 					8815CD467C46447324B7DB91 = {
-						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -369,6 +368,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = WNT9BWAKYX;
 				INFOPLIST_FILE = SindralAI/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -472,6 +472,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = WNT9BWAKYX;
 				INFOPLIST_FILE = SindralAI/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -490,6 +491,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = WNT9BWAKYX;
 				INFOPLIST_FILE = SindralAI/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
