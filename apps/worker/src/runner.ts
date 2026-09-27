@@ -19,7 +19,7 @@ export interface RunnerPersistence {
 }
 
 export interface RunnerDeps {
-  config: Pick<WorkerConfig, 'concurrency' | 'workerName'>;
+  config: Pick<WorkerConfig, 'concurrency' | 'workerName' | 'jobTimeoutMs'>;
   api: Pick<ApiClient, 'register' | 'heartbeat' | 'disconnect' | 'claim' | 'fail'>;
   logger: Logger;
   runJob: (dispatch: JobDispatch, signal: AbortSignal) => Promise<unknown>;
@@ -28,7 +28,7 @@ export interface RunnerDeps {
   persistence?: RunnerPersistence;
   sleep?: (ms: number) => Promise<void>;
   heartbeatIntervalMs?: number;
-  /** How long to wait for running jobs on shutdown before killing them. */
+  /** How long to wait for running jobs on shutdown before killing them. Defaults to the configured job timeout. */
   shutdownGraceMs?: number;
   /** Pause after a failed claim before polling again. */
   claimErrorBackoffMs?: number;
@@ -116,7 +116,7 @@ export class Runner {
     if (this.fatal) throw this.fatal;
   }
 
-  /** Stops claiming, waits for running jobs (up to the grace period), then kills them. */
+  /** Stops claiming, keeps active leases alive, and waits for running jobs before killing them at the deadline. */
   stop(reason: string = SHUTDOWN_REASON): Promise<void> {
     if (this.stopped) return this.stopped;
     this.stopping = true;
@@ -215,7 +215,7 @@ export class Runner {
   }
 
   private async heartbeat(): Promise<void> {
-    if (!this.workerId || this.stopping) return;
+    if (!this.workerId || this.fatal) return;
     try {
       const runningJobs = [
         ...[...this.active].map(([jobId, active]) => ({ jobId, leaseToken: active.leaseToken })),
@@ -233,7 +233,6 @@ export class Runner {
   }
 
   private async drain(): Promise<void> {
-    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     const reason = this.fatal instanceof WorkerProtocolError ? 'worker protocol rejected' : this.fatal ? 'worker key rejected' : SHUTDOWN_REASON;
 
     // Jobs claimed but never started must be released back as failures.
@@ -246,7 +245,7 @@ export class Runner {
     );
 
     if (this.active.size > 0) {
-      const grace = this.deps.shutdownGraceMs ?? 60_000;
+      const grace = this.fatal ? 0 : (this.deps.shutdownGraceMs ?? this.deps.config.jobTimeoutMs);
       this.deps.logger.info({ running: this.active.size, graceMs: grace }, 'waiting for running jobs');
       const finished = await raceTimeout(
         Promise.all([...this.active.values()].map((a) => a.done)),
@@ -259,6 +258,7 @@ export class Runner {
         await raceTimeout(Promise.all([...this.active.values()].map((a) => a.done)), 15_000, this.sleep);
       }
     }
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     await this.persistRunning();
     this.onDrained?.();
   }

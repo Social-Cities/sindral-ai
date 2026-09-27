@@ -14,6 +14,7 @@ interface Harness {
   release: (jobId: string) => void;
   started: string[];
   finished: string[];
+  aborted: string[];
   concurrent: () => number;
   maxConcurrent: () => number;
 }
@@ -22,6 +23,7 @@ function harness(batches: JobDispatch[][], overrides: Partial<RunnerDeps> = {}):
   const releases = new Map<string, () => void>();
   const started: string[] = [];
   const finished: string[] = [];
+  const aborted: string[] = [];
   let running = 0;
   let max = 0;
   const failed: { jobId: string; error: string }[] = [];
@@ -72,7 +74,10 @@ function harness(batches: JobDispatch[][], overrides: Partial<RunnerDeps> = {}):
           resolve();
         };
         releases.set(d.job.id, done);
-        signal.addEventListener('abort', done);
+        signal.addEventListener('abort', () => {
+          aborted.push(d.job.id);
+          done();
+        });
       }),
     ...overrides,
   });
@@ -82,6 +87,7 @@ function harness(batches: JobDispatch[][], overrides: Partial<RunnerDeps> = {}):
     release: (id) => releases.get(id)?.(),
     started,
     finished,
+    aborted,
     concurrent: () => running,
     maxConcurrent: () => max,
   };
@@ -189,6 +195,35 @@ describe('Runner', () => {
     await run;
   });
 
+  it('keeps active leases alive and lets running jobs finish while draining', async () => {
+    const job = dispatch();
+    const h = harness([[job]], {
+      heartbeatIntervalMs: 5,
+      shutdownGraceMs: 100,
+      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    });
+    const run = h.runner.start();
+    await tick();
+    const heartbeatCount = vi.mocked(h.api.heartbeat).mock.calls.length;
+
+    const stopping = h.runner.stop();
+    await new Promise((resolve) => setTimeout(resolve, 12));
+
+    expect(h.concurrent()).toBe(1);
+    expect(h.aborted).toEqual([]);
+    expect(vi.mocked(h.api.heartbeat).mock.calls.length).toBeGreaterThan(heartbeatCount);
+    expect(h.api.heartbeat).toHaveBeenCalledWith({
+      workerId: expect.any(String),
+      runningJobs: [{ jobId: job.job.id, leaseToken: job.lease.token }],
+    });
+
+    h.release(job.job.id);
+    await stopping;
+    await run;
+    expect(h.finished).toEqual([job.job.id]);
+    expect(h.aborted).toEqual([]);
+  });
+
   it('on shutdown waits for the grace period, then aborts jobs and fails unstarted ones', async () => {
     const taskId = randomUUID();
     const a = dispatch({ taskId });
@@ -200,6 +235,7 @@ describe('Runner', () => {
     await h.runner.stop();
     await run;
     expect(h.finished).toEqual([a.job.id]);
+    expect(h.aborted).toEqual([a.job.id]);
     expect(h.api.failed).toEqual([{ jobId: b.job.id, error: 'worker shutting down' }]);
   });
 

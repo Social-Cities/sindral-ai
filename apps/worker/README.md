@@ -38,7 +38,7 @@ sindral-worker clean --dry-run         # preview inactive retained files eligibl
 sindral-worker clean                   # remove eligible files after server lease/worker checks
 ```
 
-`SIGINT`/`SIGTERM` stop claiming, wait up to 60s for running jobs, then kill the agent processes and report those jobs as failed ("worker shutting down").
+`SIGINT`/`SIGTERM` stop claiming new work, keep renewing active job leases, and wait up to `SINDRAL_JOB_TIMEOUT_MINUTES` for running jobs to finish. Jobs still running at that deadline are killed and reported as failed ("worker shutting down"). Claimed jobs that have not started are released immediately.
 
 Cleanup requires a previously registered worker and a reachable server. It refuses to run while that worker is online or owns an active job lease, preserves repository clones, and removes only inactive worktrees, temporary directories, results, outputs, and logs older than `SINDRAL_RETENTION_DAYS`.
 
