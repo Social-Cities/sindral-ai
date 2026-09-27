@@ -272,6 +272,23 @@ describe('feedback loops', () => {
     expect(task.acceptanceCriteria).toBe('- A failed deployment can be retried.');
   });
 
+  it('does not pin an invalid legacy plan revision before reporting its failure', async () => {
+    const task = await newTask();
+    await orch().applyUserEvent(userId, task.id, 'start');
+    await completeNext(ctx, userId, plan());
+    await ctx.repo.updateTask(userId, task.id, { outcome: '', acceptanceCriteria: '' });
+    await orch().postUserMessage(userId, task.id, 'Please revise the plan', 'web');
+    const job = await claimNext(ctx, userId);
+
+    await expect(
+      orch().completeJob(userId, job!.id, { kind: 'plan', summary: 'revised', plan: '# Revised plan' }, job!.attempt, job!.leaseToken),
+    ).rejects.toThrow(/Plan results must define a task outcome and acceptance criteria/);
+
+    expect(await ctx.repo.getJob(userId, job!.id)).toMatchObject({ status: 'claimed', outcomeHash: null, result: null });
+    await orch().failJob(userId, job!.id, 'Plan result omitted the task contract', job!.attempt, job!.leaseToken);
+    expect(await ctx.repo.getJob(userId, job!.id)).toMatchObject({ status: 'failed', error: 'Plan result omitted the task contract' });
+  });
+
   it('does not acknowledge a saved chat note when no worker starts', async () => {
     const task = await newTask();
     await orch().postUserMessage(userId, task.id, 'Remember this', 'web');
@@ -419,13 +436,27 @@ describe('task contracts outside planning workflows', () => {
     const documentWorkflow = (await ctx.app.ctx.workflows.list(userId)).find((workflow) => workflow.name === 'Document (non-code)')!;
     const task = await newTask({ repos: [], workflowId: documentWorkflow.id });
     await orch().applyUserEvent(userId, task.id, 'start');
+    const job = await claimNext(ctx, userId);
     await expect(
-      completeNext(ctx, userId, {
-        kind: 'document',
-        summary: 'Wrote the guide',
-        artifacts: [{ name: 'guide.md', contentType: 'text/markdown', content: '# Guide' }],
-      }),
+      orch().completeJob(
+        userId,
+        job!.id,
+        {
+          kind: 'document',
+          summary: 'Wrote the guide',
+          artifacts: [{ name: 'guide.md', contentType: 'text/markdown', content: '# Guide' }],
+        },
+        job!.attempt,
+        job!.leaseToken,
+      ),
     ).rejects.toThrow(/must define its outcome and acceptance criteria/);
+
+    // A semantic 400 must not pin the invalid result hash. The worker can then
+    // report that rejection as the job failure instead of falling into 409s
+    // until the lease sweeper misclassifies it as an unresponsive worker.
+    expect(await ctx.repo.getJob(userId, job!.id)).toMatchObject({ status: 'claimed', outcomeHash: null, result: null });
+    await orch().failJob(userId, job!.id, 'Result omitted the task contract', job!.attempt, job!.leaseToken);
+    expect(await ctx.repo.getJob(userId, job!.id)).toMatchObject({ status: 'failed', error: 'Result omitted the task contract' });
   });
 
   it('does not persist a generated contract from an invalid first PR result', async () => {

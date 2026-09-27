@@ -528,6 +528,12 @@ export class Orchestrator {
 
     const task = await this.repo.getTask(userId, job.taskId);
     if (!task) throw notFound('Task');
+    // Reject contract-incomplete agent output before acquiring the durable
+    // outcome claim. Once a hash is accepted it must stay pinned so partially
+    // applied effects can only be replayed with the exact same outcome.
+    if (result.kind !== 'rebase' && result.kind !== 'conflict-resolution' && result.kind !== 'merge') {
+      this.taskContractFromResult(task, result);
+    }
     const attempt = expectedAttempt;
     const outcomeHash = this.jobOutcomeHash({ result });
     const claim = await this.beginJobOutcome(userId, job.id, attempt, outcomeHash, { result }, leaseToken);
@@ -721,15 +727,7 @@ export class Orchestrator {
     task: Task,
     result: Exclude<AgentResult, { kind: 'rebase' | 'conflict-resolution' | 'merge' }>,
   ): Promise<Task> {
-    let generatedContract: Pick<Task, 'outcome' | 'acceptanceCriteria'> | null = null;
-    if (result.kind !== 'plan' && (!task.outcome.trim() || !task.acceptanceCriteria.trim())) {
-      const outcome = result.outcome?.trim() || task.outcome.trim();
-      const acceptanceCriteria = result.acceptanceCriteria?.trim() || task.acceptanceCriteria.trim();
-      if (!outcome || !acceptanceCriteria) {
-        throw badRequest('The first agent result for a task must define its outcome and acceptance criteria');
-      }
-      generatedContract = { outcome, acceptanceCriteria };
-    }
+    const generatedContract = this.taskContractFromResult(task, result);
     const persistGeneratedContract = async (): Promise<Task> => {
       if (!generatedContract) return task;
       task = (await this.repo.updateTask(userId, task.id, generatedContract)) ?? task;
@@ -737,12 +735,7 @@ export class Orchestrator {
     };
     switch (result.kind) {
       case 'plan': {
-        const embedded = extractTaskContract(result.plan);
-        const outcome = result.outcome?.trim() || embedded.outcome || task.outcome.trim();
-        const acceptanceCriteria = result.acceptanceCriteria?.trim() || embedded.acceptanceCriteria || task.acceptanceCriteria.trim();
-        if (!outcome || !acceptanceCriteria) {
-          throw badRequest('Plan results must define a task outcome and acceptance criteria');
-        }
+        const { outcome, acceptanceCriteria } = generatedContract!;
         const updated = await this.repo.updateTask(userId, task.id, { plan: result.plan, outcome, acceptanceCriteria });
         if (result.subtasks && result.subtasks.length >= MIN_SUBTASKS && task.parentTaskId === null) {
           await this.createSubtasks(userId, updated ?? task, result.subtasks, `job:${job.id}:subtasks`);
@@ -834,6 +827,27 @@ export class Orchestrator {
         });
         return persistGeneratedContract();
     }
+  }
+
+  /** Resolve and validate task-contract fields without mutating durable outcome state. */
+  private taskContractFromResult(
+    task: Task,
+    result: Exclude<AgentResult, { kind: 'rebase' | 'conflict-resolution' | 'merge' }>,
+  ): Pick<Task, 'outcome' | 'acceptanceCriteria'> | null {
+    if (result.kind === 'plan') {
+      const embedded = extractTaskContract(result.plan);
+      const outcome = result.outcome?.trim() || embedded.outcome || task.outcome.trim();
+      const acceptanceCriteria = result.acceptanceCriteria?.trim() || embedded.acceptanceCriteria || task.acceptanceCriteria.trim();
+      if (!outcome || !acceptanceCriteria) throw badRequest('Plan results must define a task outcome and acceptance criteria');
+      return { outcome, acceptanceCriteria };
+    }
+    if (task.outcome.trim() && task.acceptanceCriteria.trim()) return null;
+    const outcome = result.outcome?.trim() || task.outcome.trim();
+    const acceptanceCriteria = result.acceptanceCriteria?.trim() || task.acceptanceCriteria.trim();
+    if (!outcome || !acceptanceCriteria) {
+      throw badRequest('The first agent result for a task must define its outcome and acceptance criteria');
+    }
+    return { outcome, acceptanceCriteria };
   }
 
   // ---------------------------------------------------------------- subtasks
