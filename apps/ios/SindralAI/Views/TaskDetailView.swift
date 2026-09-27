@@ -3,105 +3,725 @@ import SwiftUI
 struct TaskDetailView: View {
     @Environment(AppStore.self) private var store
     @Environment(APIClient.self) private var api
-    @Environment(\.dismiss) private var dismiss
+    @Environment(SessionStore.self) private var session
+    @Environment(AppRouter.self) private var router
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let taskID: String
+    /// iPad portrait: wrap the pipeline and stretch the tab bar across the width.
+    var portrait = false
+    /// Shows the "Tasks" list toggle in the toolbar when the list is collapsed.
+    var onShowList: (() -> Void)?
+
     @State private var task: TaskDetail?
-    @State private var selectedTab = DetailTab.summary
+    @State private var selectedTab: DetailTab = {
+        #if DEBUG
+        if DemoMode.isEnabled, let tab = DemoMode.tab { return tab }
+        #endif
+        return .summary
+    }()
     @State private var isLoading = true
     @State private var error: Error?
     @State private var isActing = false
+    @State private var actionError: String?
     @State private var showingEdit = false
+    @State private var showingJobs = false
     @State private var confirmingDelete = false
+    @State private var pendingClose: String?
+
+    private var isCompact: Bool { horizontalSizeClass == .compact }
+    /// Changes whenever the list refresh (SSE) reports a newer version of this task.
+    private var listVersion: String { store.tasks.first { $0.id == taskID }?.updatedAt ?? "" }
 
     var body: some View {
         Group {
-            if isLoading { ProgressView("Loading task…") }
-            else if let error { ErrorRetryView(error: error) { Task { await load() } } }
-            else if let task {
-                VStack(spacing: 0) {
-                    header(task)
-                    ScrollView(.horizontal, showsIndicators: false) { HStack { ForEach(DetailTab.allCases) { tab in Button(tab.title) { selectedTab = tab }.buttonStyle(.bordered).tint(selectedTab == tab ? .indigo : .secondary) } }.padding(.horizontal).padding(.vertical, 8) }
-                    Divider()
-                    tabContent(task)
-                }
-            }
+            if isLoading && task == nil { ProgressView("Loading task…").frame(maxWidth: .infinity, maxHeight: .infinity) }
+            else if let error, task == nil { ErrorRetryView(error: error) { Task { await load() } } }
+            else if let task { content(task) }
         }
+        .background(Theme.background)
         .navigationTitle(task?.key ?? "Task").navigationBarTitleDisplayMode(.inline)
-        .toolbar { ToolbarItem(placement: .topBarTrailing) { Menu { Button("Edit", systemImage: "pencil") { showingEdit = true }; Button("Delete", systemImage: "trash", role: .destructive) { confirmingDelete = true } } label: { Image(systemName: "ellipsis.circle") } } }
+        .toolbar(isCompact ? .visible : .hidden, for: .navigationBar)
         .sheet(isPresented: $showingEdit) { if let task { EditTaskView(task: task.summary) { await load() } } }
+        .sheet(isPresented: $showingJobs) { NavigationStack { TaskJobsView(taskID: taskID).navigationTitle("Jobs").toolbar { Button("Done") { showingJobs = false } } } }
         .confirmationDialog("Delete this task?", isPresented: $confirmingDelete, titleVisibility: .visible) { Button("Delete task", role: .destructive) { Task { await deleteTask() } } }
-        .task(id: taskID) { await load() }
-        .refreshable { await load() }
+        .alert(pendingClose == "mark-done" ? "Mark task done?" : "Mark task as won't do?", isPresented: Binding(get: { pendingClose != nil }, set: { if !$0 { pendingClose = nil } })) {
+            Button("Cancel", role: .cancel) { pendingClose = nil }
+            Button(pendingClose == "mark-done" ? "Mark done" : "Won't do", role: pendingClose == "mark-done" ? nil : .destructive) {
+                if let event = pendingClose { Task { await run(event) } }
+                pendingClose = nil
+            }
+        } message: {
+            Text("This stops queued work for the task and hides it from the default Active task view. If an agent is already working, wait for it to finish first. You can still find the task with the status filter.")
+        }
+        .task(id: "\(taskID)|\(listVersion)") { await load() }
     }
 
-    private func header(_ task: TaskDetail) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top) { Text(task.title).font(.title2.bold()); Spacer(); StatusPill(state: task.state) }
-            let actions = task.summary.availableActions(workflows: store.workflows)
-            if !actions.isEmpty { ScrollView(.horizontal, showsIndicators: false) { HStack { ForEach(actions) { action in Button(action.label) { Task { await run(action.event) } }.buttonStyle(.borderedProminent).disabled(isActing) } } } }
-        }.padding()
+    private func content(_ task: TaskDetail) -> some View {
+        VStack(spacing: 0) {
+            toolbar(task)
+            VStack(alignment: .leading, spacing: 14) {
+                Text(task.title).font(Theme.font(portrait ? 24 : 22, .semibold, relativeTo: .title2)).tracking(-0.3)
+                    .foregroundStyle(Theme.foreground).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+                PipelineView(task: task, workflow: task.resolvedWorkflow(store.workflows), wraps: portrait || isCompact)
+                tabBar(task)
+            }
+            .padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .hairline(.bottom)
+            tabContent(task)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    // MARK: Toolbar
+
+    private func toolbar(_ task: TaskDetail) -> some View {
+        let actions = task.summary.availableActions(workflows: store.workflows)
+            .filter { $0.event != "approve" || (selectedTab != .summary && selectedTab != .plan) }
+        let agentActive = task.isAgentActive(store.workflows)
+        return HStack(spacing: 10) {
+            if let onShowList {
+                Button(action: onShowList) { Label("Tasks", systemImage: "sidebar.left").font(Theme.font(16)) }
+                    .foregroundStyle(Theme.secondaryForeground).frame(minHeight: 44)
+                    .padding(.trailing, 6)
+            }
+            if let parent = task.parentTaskId {
+                Button("↑ parent") { router.selectedTaskID = parent }.font(Theme.mono(12)).foregroundStyle(Theme.mutedForeground).frame(minHeight: 44)
+            }
+            Text(task.key).font(Theme.mono(13)).foregroundStyle(Theme.mutedForeground)
+            StatusBadge(state: task.state, step: task.currentStep(store.workflows))
+            Spacer(minLength: 8)
+            if let actionError { Text(actionError).font(Theme.font(12)).foregroundStyle(Theme.dangerText).lineLimit(1).frame(maxWidth: 200) }
+            if let pr = task.prUrl, let url = URL(string: pr) {
+                Link(destination: url) { Text("View PR ↗").font(Theme.mono(13)) }.buttonStyle(.sindral(.ghost))
+            } else if let ticket = task.ticketUrl, let url = URL(string: ticket), !isCompact {
+                Link(destination: url) { Text("\(task.key) ↗").font(Theme.mono(13)) }.buttonStyle(.sindral(.ghost))
+            }
+            ForEach(actions) { action in
+                Button(action.label) { Task { await run(action.event) } }
+                    .buttonStyle(.sindral(ButtonVariant.forEvent(action.event)))
+                    .disabled(isActing)
+            }
+            if agentActive {
+                HStack(spacing: 8) {
+                    ProgressView().tint(Theme.violet)
+                    Text("Agent working…").font(Theme.font(15)).foregroundStyle(Theme.secondaryForeground)
+                }
+                .accessibilityElement(children: .combine)
+            }
+            moreMenu(task)
+        }
+        .padding(.leading, onShowList == nil ? 24 : 16).padding(.trailing, 20)
+        .frame(minHeight: 64)
+        .hairline(.bottom)
+    }
+
+    private func moreMenu(_ task: TaskDetail) -> some View {
+        let terminal = TaskStates.terminal.contains(task.state)
+        let workflow = task.resolvedWorkflow(store.workflows)
+        return Menu {
+            Button("Edit", systemImage: "pencil") { showingEdit = true }
+            Button("Mark done", systemImage: "checkmark.circle") { pendingClose = "mark-done" }.disabled(terminal)
+            Button("Won't do", systemImage: "xmark.circle") { pendingClose = "mark-wont-do" }.disabled(terminal)
+            Button("Jobs", systemImage: "terminal") { showingJobs = true }
+            Section("Info") {
+                Text("Created \(Formatters.day(task.createdAt))")
+                if let ticket = task.ticketUrl, let url = URL(string: ticket) { Link("Ticket \(task.key) ↗", destination: url) }
+                if let workflow {
+                    Text(task.pinnedWorkflow != nil ? "📌 \(workflow.name) — pinned" : task.state == "todo" ? "⬡ \(workflow.name) — pinned when started" : "⬡ \(workflow.name) — live workflow")
+                }
+            }
+            Button("Delete", systemImage: "trash", role: .destructive) { confirmingDelete = true }
+        } label: {
+            Image(systemName: "ellipsis").font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Theme.secondaryForeground)
+                .frame(width: 44, height: 44)
+                .overlay { RoundedRectangle(cornerRadius: Theme.Radius.control).strokeBorder(Theme.border) }
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("More actions")
+    }
+
+    // MARK: Tabs
+
+    private func tabs(_ task: TaskDetail) -> [DetailTab] {
+        DetailTab.allCases.filter { $0 != .subtasks || !task.subtasks.isEmpty }
+    }
+
+    private func tabBar(_ task: TaskDetail) -> some View {
+        let bar = HStack(spacing: 4) {
+            ForEach(tabs(task)) { tab in
+                let selected = selectedTab == tab
+                Button { selectedTab = tab } label: {
+                    HStack(spacing: 6) {
+                        Text(tab.title)
+                        if let count = count(tab, task) { Text("\(count)").font(Theme.mono(11)).foregroundStyle(Theme.mutedForeground) }
+                    }
+                    .font(Theme.font(14, .medium))
+                    .foregroundStyle(selected ? Theme.foreground : Theme.mutedForeground)
+                    .lineLimit(1)
+                    .padding(.horizontal, 16).frame(height: 36)
+                    .frame(maxWidth: portrait ? .infinity : nil)
+                    .background {
+                        if selected {
+                            RoundedRectangle(cornerRadius: 9).fill(Theme.secondary)
+                                .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(Theme.borderStrong) }
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .padding(4)
+        .surface(Theme.muted, radius: 12)
+        return Group {
+            if portrait { bar } else { ScrollView(.horizontal, showsIndicators: false) { bar } }
+        }
+        .frame(minHeight: 44)
+    }
+
+    private func count(_ tab: DetailTab, _ task: TaskDetail) -> Int? {
+        switch tab {
+        case .chat: task.messages.isEmpty ? nil : task.messages.count
+        case .subtasks: task.subtasks.count
+        default: nil
+        }
     }
 
     @ViewBuilder private func tabContent(_ task: TaskDetail) -> some View {
+        let canApprove = task.summary.availableActions(workflows: store.workflows).contains { $0.event == "approve" }
         switch selectedTab {
-        case .summary: TaskSummaryView(task: task)
-        case .chat: TaskChatView(task: task) { await load() }
-        case .plan: TextDocumentView(title: "Implementation plan", content: task.plan)
+        case .summary:
+            TaskSummaryView(task: task, canApprove: canApprove, approving: isActing,
+                            onApprove: { Task { await run("approve") } }, onViewPlan: { selectedTab = .plan },
+                            onRequestChanges: { selectedTab = .chat }, onOpenTask: { router.selectedTaskID = $0 })
+        case .chat:
+            TaskChatView(task: task, userInitial: String(store.displayName(fallbackEmail: session.user?.email).prefix(1)).uppercased()) { await load() }
+        case .plan: TaskPlanView(task: task, canApprove: canApprove, approving: isActing) { Task { await run("approve") } }
         case .code: TaskCodeView(task: task)
         case .steps: TaskStepsView(task: task)
         case .artifacts: TaskArtifactsView(artifacts: task.artifacts)
-        case .subtasks: TaskSubtasksView(tasks: task.subtasks)
-        case .jobs: TaskJobsView(taskID: task.id)
+        case .subtasks: TaskSubtasksView(tasks: task.subtasks) { router.selectedTaskID = $0 }
         }
     }
 
-    private func load() async { isLoading = task == nil; defer { isLoading = false }; do { task = try await api.task(taskID); error = nil } catch { self.error = error } }
-    private func run(_ event: String) async { guard let task else { return }; isActing = true; defer { isActing = false }; do { _ = try await api.runAction(task: task.summary, event: event); await load(); await store.refreshTasks() } catch { store.present(error) } }
-    private func deleteTask() async { do { try await api.deleteTask(taskID); await store.refreshTasks(); dismiss() } catch { store.present(error) } }
-}
+    // MARK: Actions
 
-private enum DetailTab: String, CaseIterable, Identifiable { case summary, chat, plan, code, steps, artifacts, subtasks, jobs; var id: String { rawValue }; var title: String { rawValue.capitalized } }
+    private func load() async {
+        isLoading = task == nil; defer { isLoading = false }
+        do { task = try await api.task(taskID); error = nil } catch { self.error = error }
+    }
 
-private struct TaskSummaryView: View {
-    let task: TaskDetail
-    var body: some View {
-        List {
-            if !task.outcome.isEmpty { Section("Outcome") { Text(task.outcome) } }
-            if !task.acceptanceCriteria.isEmpty { Section("Acceptance criteria") { Text(task.acceptanceCriteria) } }
-            Section("Description") { Text(task.description.isEmpty ? "No description" : task.description) }
-            if let error = task.lastError { Section("Last error") { Text(error).foregroundStyle(.red) } }
-            Section("Delivery") {
-                if !task.repos.isEmpty { LabeledContent("Repositories", value: task.repos.joined(separator: ", ")) }
-                if let branch = task.branch { LabeledContent("Branch", value: branch) }
-                if let url = task.ticketUrl, let link = URL(string: url) { Link("Open source ticket", destination: link) }
-                if let url = task.prUrl, let link = URL(string: url) { Link("Open pull request", destination: link) }
-            }
-        }.listStyle(.insetGrouped)
+    private func run(_ event: String) async {
+        guard let task else { return }
+        isActing = true; actionError = nil; defer { isActing = false }
+        do { _ = try await api.runAction(task: task.summary, event: event); await load(); await store.refreshTasks() }
+        catch { actionError = error.localizedDescription; store.present(error) }
+    }
+
+    private func deleteTask() async {
+        do { try await api.deleteTask(taskID); router.selectedTaskID = nil; await store.refreshTasks() } catch { store.present(error) }
     }
 }
+
+enum DetailTab: String, CaseIterable, Identifiable {
+    case summary, plan, chat, code, steps, artifacts, subtasks
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+}
+
+// MARK: - Pipeline
+
+/// The workflow's happy path with the current step highlighted, mirroring `Pipeline.tsx`.
+struct PipelineView: View {
+    let task: TaskDetail
+    let workflow: Workflow?
+    var wraps = false
+
+    var body: some View {
+        if TaskStates.offPath.contains(task.state) {
+            let style = StateStyle.for(task.state)
+            let failed = workflow?.step(task.failedStepId ?? task.currentStepId)
+            let label = task.state == "failure" ? "⚠ Failed" : task.state == "conflict-resolution" ? "◐ Resolving Conflict" : "◐ Troubleshoot"
+            HStack(spacing: 8) {
+                Text(label).font(Theme.mono(12, .medium)).foregroundStyle(style.color)
+                    .padding(.horizontal, 8).frame(height: 28)
+                    .background(Color(hex: 0xF87171, opacity: 0.08), in: RoundedRectangle(cornerRadius: 7))
+                    .overlay { RoundedRectangle(cornerRadius: 7).strokeBorder(Color(hex: 0xFB923C, opacity: 0.13)) }
+                Text("— task is off the main flow\(failed.map { " (failed at \($0.label))" } ?? "")")
+                    .font(Theme.font(13)).foregroundStyle(Theme.mutedForeground)
+            }
+        } else if let workflow, !workflow.happyPath.isEmpty {
+            let path = workflow.happyPath
+            let currentIndex = index(in: path, workflow: workflow)
+            let items = ForEach(Array(path.enumerated()), id: \.element.id) { i, step in
+                chip(step, isCurrent: i == currentIndex && !TaskStates.terminal.contains(task.state),
+                     isPast: i < currentIndex || (task.state == "done" && i <= currentIndex), isLast: i == path.count - 1)
+            }
+            Group {
+                if wraps { FlowLayout(spacing: 0, lineSpacing: 10) { items } }
+                else { ScrollView(.horizontal, showsIndicators: false) { HStack(spacing: 0) { items } } }
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Pipeline")
+        } else {
+            Text("No workflow attached.").font(Theme.font(13)).foregroundStyle(Theme.mutedForeground)
+        }
+    }
+
+    private func index(in path: [WorkflowStep], workflow: Workflow) -> Int {
+        guard let current = workflow.step(task.currentStepId ?? workflow.entryStepId) else { return -1 }
+        if task.state == "done" { return path.count - 1 }
+        if let i = path.firstIndex(where: { $0.id == current.id }) { return i }
+        // Feedback loops count as the step they return to.
+        if let back = workflow.edges.first(where: { $0.from == current.id && $0.event == "complete" }), let i = path.firstIndex(where: { $0.id == back.to }) { return i }
+        return -1
+    }
+
+    private func chip(_ step: WorkflowStep, isCurrent: Bool, isPast: Bool, isLast: Bool) -> some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 5) {
+                if isPast { Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)) }
+                Text(step.label).font(Theme.font(13, .medium)).lineLimit(1)
+            }
+            .foregroundStyle(isCurrent ? Theme.violet : isPast ? Theme.secondaryForeground : Theme.mutedForeground)
+            .padding(.horizontal, 8).frame(height: 30)
+            .background(isCurrent ? Theme.primary.opacity(0.12) : isPast ? Theme.card : .clear, in: RoundedRectangle(cornerRadius: 7))
+            .overlay { RoundedRectangle(cornerRadius: 7).strokeBorder(isCurrent ? Theme.primary.opacity(0.4) : isPast ? Theme.border : .clear) }
+            .accessibilityElement(children: .combine)
+            .accessibilityValue(isCurrent ? "Current step" : isPast ? "Completed" : "Upcoming")
+            if !isLast { Rectangle().fill(isPast ? Theme.borderStrong : Theme.border).frame(width: 8, height: 1).padding(.horizontal, 2) }
+        }
+    }
+}
+
+/// Left-to-right wrapping layout for pipeline chips and tags.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+    var lineSpacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = arrange(width: proposal.width ?? .infinity, subviews: subviews)
+        return CGSize(width: proposal.width ?? rows.map(\.width).max() ?? 0, height: rows.reduce(0) { $0 + $1.height } + lineSpacing * CGFloat(max(0, rows.count - 1)))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in arrange(width: bounds.width, subviews: subviews) {
+            var x = bounds.minX
+            for index in row.indices {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: y + (row.height - size.height) / 2), proposal: .unspecified)
+                x += size.width + spacing
+            }
+            y += row.height + lineSpacing
+        }
+    }
+
+    private struct Row { var indices: [Int] = []; var width: CGFloat = 0; var height: CGFloat = 0 }
+
+    private func arrange(width: CGFloat, subviews: Subviews) -> [Row] {
+        var rows = [Row()]
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            if !rows[rows.count - 1].indices.isEmpty, rows[rows.count - 1].width + spacing + size.width > width { rows.append(Row()) }
+            var row = rows[rows.count - 1]
+            row.width += (row.indices.isEmpty ? 0 : spacing) + size.width
+            row.height = max(row.height, size.height)
+            row.indices.append(index)
+            rows[rows.count - 1] = row
+        }
+        return rows
+    }
+}
+
+// MARK: - Summary
+
+private struct TaskSummaryView: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    let task: TaskDetail
+    let canApprove: Bool
+    let approving: Bool
+    let onApprove: () -> Void
+    let onViewPlan: () -> Void
+    let onRequestChanges: () -> Void
+    let onOpenTask: (String) -> Void
+
+    var body: some View {
+        let step = task.currentStep(store.workflows)
+        let agentActive = task.isAgentActive(store.workflows)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                if agentActive {
+                    HStack(alignment: .top, spacing: 12) {
+                        PulsingDot(color: Theme.amber, pulses: true, size: 8).padding(.top, 7)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Agent is working").font(Theme.bodyMedium).foregroundStyle(Color(hex: 0xFDE68A, opacity: 0.85))
+                            Text(task.state == "troubleshoot" ? "The troubleshooting agent is diagnosing what went wrong."
+                                 : step.map { "\($0.label) is running on your worker (\(StateStyle.for(task.state, step: $0).label))." } ?? "An agent is running on your worker.")
+                                .font(Theme.secondaryBody).foregroundStyle(Theme.mutedForeground)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(16)
+                    .surface(Theme.amber.opacity(0.03), radius: Theme.Radius.row, border: Theme.amber.opacity(0.13))
+                }
+                if !agentActive, let step, step.type == "human", task.state != "todo" {
+                    HStack(spacing: 16) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Waiting for you").font(Theme.bodyMedium).foregroundStyle(Theme.foreground)
+                            Text("\(step.label): use the action buttons above, or send chat feedback to request changes.")
+                                .font(Theme.secondaryBody).foregroundStyle(Theme.mutedForeground)
+                        }
+                        Spacer(minLength: 0)
+                        if task.chatTriggersFeedback(store.workflows) {
+                            Button("Request changes", action: onRequestChanges).buttonStyle(.sindral(.subtle))
+                        }
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 14)
+                    .surface(Theme.secondary)
+                }
+                if task.state == "todo" {
+                    Text("This task is ready to start. Use the action button above to hand it to the first agent.")
+                        .font(Theme.secondaryBody).foregroundStyle(Theme.secondaryForeground)
+                        .padding(16).frame(maxWidth: .infinity, alignment: .leading).surface(Theme.secondary)
+                }
+
+                section("Description") {
+                    if task.description.isEmpty { Text("No description.").italic().font(Theme.body).foregroundStyle(Theme.mutedForeground) }
+                    else { MarkdownText(source: task.description) }
+                }
+
+                section("Task contract") {
+                    if horizontalSizeClass == .regular {
+                        RatioColumns(ratios: [1, 1], spacing: 12, equalHeights: true) { contractBox("Outcome", task.outcome); contractBox("Acceptance criteria", task.acceptanceCriteria) }
+                    } else {
+                        VStack(spacing: 12) { contractBox("Outcome", task.outcome); contractBox("Acceptance criteria", task.acceptanceCriteria) }
+                    }
+                }
+
+                if !task.subtasks.isEmpty {
+                    let done = task.subtasks.filter { $0.state == "done" }.count
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            SectionLabel(text: "Subtasks")
+                            Spacer()
+                            Text("↳ \(done)/\(task.subtasks.count) done").font(Theme.mono(12)).foregroundStyle(Theme.mutedForeground)
+                        }
+                        VStack(spacing: 8) {
+                            ForEach(task.subtasks.sorted { ($0.sequence ?? 0) < ($1.sequence ?? 0) }) { sub in
+                                Button { onOpenTask(sub.id) } label: {
+                                    HStack(spacing: 10) {
+                                        Text("↳ \(sub.sequence ?? 0)").font(Theme.mono(12)).foregroundStyle(Theme.mutedForeground)
+                                        Text(sub.title).font(Theme.bodyMedium).foregroundStyle(Theme.foreground).lineLimit(2)
+                                        Spacer(minLength: 8)
+                                        StatusBadge(state: sub.state, step: sub.currentStep(store.workflows))
+                                    }
+                                    .padding(.horizontal, 16).frame(minHeight: 56)
+                                    .surface(Theme.card)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.leading, 14)
+                        .overlay(alignment: .leading) { Rectangle().fill(Theme.border).frame(width: 1) }
+                    }
+                }
+
+                if !task.repos.isEmpty {
+                    section("Repositories") {
+                        FlowLayout(spacing: 6, lineSpacing: 6) {
+                            ForEach(task.repos, id: \.self) { repo in
+                                Text(repo).font(Theme.mono(13)).foregroundStyle(Theme.secondaryForeground)
+                                    .padding(.horizontal, 10).frame(height: 32)
+                                    .surface(Theme.secondary, radius: 8)
+                            }
+                        }
+                    }
+                }
+
+                if let plan = task.plan, !plan.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            SectionLabel(text: "Plan at a glance")
+                            Spacer()
+                            Button("View full plan →", action: onViewPlan).font(Theme.font(14)).foregroundStyle(Theme.accent).frame(minHeight: 44)
+                        }
+                        let overview = PlanOverview(plan)
+                        contractBox("Summary", overview.summary, empty: "No summary section.")
+                        contractBox("Assumptions", overview.assumptions, empty: "No assumptions section.")
+                        if canApprove {
+                            HStack { Spacer(); Button("Approve Plan", action: onApprove).buttonStyle(.sindral(.success)).disabled(approving) }
+                        }
+                    }
+                }
+
+                if !pullRequests.isEmpty {
+                    section("Pull requests") {
+                        VStack(spacing: 8) {
+                            ForEach(pullRequests, id: \.url) { pr in
+                                HStack(spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(pr.repository).font(Theme.mono(13)).foregroundStyle(Theme.secondaryForeground).lineLimit(1)
+                                        if !pr.branch.isEmpty {
+                                            Text(pr.baseBranch.isEmpty ? pr.branch : "\(pr.branch) → \(pr.baseBranch)").font(Theme.mono(12)).foregroundStyle(Theme.mutedForeground).lineLimit(1)
+                                        }
+                                    }
+                                    Spacer(minLength: 8)
+                                    Text(pr.status.uppercased()).font(Theme.mono(11)).foregroundStyle(Theme.mutedForeground)
+                                    if let url = URL(string: pr.url), url.scheme == "https" {
+                                        Link(destination: url) { Text("\(pr.number.map { "#\($0)" } ?? "PR") ↗").font(Theme.mono(13)).foregroundStyle(Theme.accent) }
+                                            .frame(minHeight: 44)
+                                    }
+                                }
+                                .padding(.horizontal, 14).frame(minHeight: 56)
+                                .surface(Theme.input)
+                            }
+                        }
+                    }
+                }
+
+                if task.state == "failure" {
+                    stateCard(title: "Task failed", titleColor: Color(hex: 0xFCA5A5, opacity: 0.85), fill: Color(hex: 0xF87171, opacity: 0.03), border: Color(hex: 0xF87171, opacity: 0.13),
+                              message: "The agent ran into an error it couldn't resolve. Use the chat to provide guidance, retry the step, or run the troubleshoot agent.", detail: task.lastError)
+                }
+                if task.state == "done" {
+                    stateCard(title: "Task complete", titleColor: Color(hex: 0x6EE7B7, opacity: 0.85), fill: Theme.emerald.opacity(0.03), border: Theme.emerald.opacity(0.13), message: "All work has been accepted.")
+                }
+                if task.state == "wont-do" {
+                    stateCard(title: "Task closed", titleColor: Theme.secondaryForeground, fill: Theme.secondary, border: Theme.border, message: "This task was marked as won't do.")
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: 980, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private struct PRRow { let repository: String; let url: String; let number: Int?; let branch: String; let baseBranch: String; let status: String }
+
+    private var pullRequests: [PRRow] {
+        if !task.pullRequests.isEmpty {
+            return task.pullRequests.map { PRRow(repository: $0.repository, url: $0.url, number: $0.number, branch: $0.branch, baseBranch: $0.baseBranch, status: $0.status) }
+        }
+        guard let url = task.prUrl else { return [] }
+        return [PRRow(repository: task.repos.first ?? "Repository", url: url, number: nil, branch: task.branch ?? "", baseBranch: task.baseBranch ?? "", status: "open")]
+    }
+
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) { SectionLabel(text: title); content() }
+    }
+
+    private func contractBox(_ title: String, _ text: String, empty: String = "Will be generated by the first agent.") -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            SectionLabel(text: title, size: 11)
+            if text.isEmpty { Text(empty).italic().font(Theme.secondaryBody).foregroundStyle(Theme.mutedForeground) }
+            else { MarkdownText(source: text, size: 14) }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .surface(Theme.muted)
+    }
+
+    private func stateCard(title: String, titleColor: Color, fill: Color, border: Color, message: String, detail: String? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(Theme.bodyMedium).foregroundStyle(titleColor)
+            Text(message).font(Theme.secondaryBody).foregroundStyle(Theme.mutedForeground)
+            if let detail {
+                Text(detail).font(Theme.mono(12)).foregroundStyle(Color(hex: 0xFECACA, opacity: 0.7)).textSelection(.enabled)
+                    .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                    .surface(Theme.background.opacity(0.6), radius: 8)
+                    .padding(.top, 6)
+            }
+        }
+        .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+        .surface(fill, border: border)
+    }
+}
+
+/// Pulls the Summary and Assumptions sections out of a plan, like `planOverview` in the web app.
+struct PlanOverview {
+    let summary: String
+    let assumptions: String
+
+    init(_ plan: String) {
+        var sections: [String: [String]] = [:]
+        var current: String?
+        for line in plan.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("#") {
+                current = trimmed.drop { $0 == "#" }.trimmingCharacters(in: .whitespaces).lowercased()
+                continue
+            }
+            if let current { sections[current, default: []].append(line) }
+        }
+        func pick(_ key: String) -> String {
+            (sections.first { $0.key.hasPrefix(key) }?.value ?? []).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let summary = pick("summary")
+        self.summary = summary.isEmpty && sections.isEmpty ? String(plan.prefix(600)) : summary
+        assumptions = pick("assumption")
+    }
+}
+
+// MARK: - Chat
 
 private struct TaskChatView: View {
     @Environment(APIClient.self) private var api
     @Environment(AppStore.self) private var store
-    let task: TaskDetail; let didSend: () async -> Void
-    @State private var message = ""; @State private var sending = false
+    let task: TaskDetail
+    let userInitial: String
+    let didSend: () async -> Void
+    @State private var draft = ""
+    @State private var sending = false
+    @State private var sendError: String?
+    @FocusState private var focused: Bool
+
     var body: some View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
-                List(task.messages) { item in
-                    HStack { if item.role == "user" { Spacer(minLength: 40) }; VStack(alignment: .leading, spacing: 4) { Text(item.role.capitalized).font(.caption2).foregroundStyle(.secondary); Text(item.content).textSelection(.enabled) }.padding(10).background(item.role == "user" ? Color.indigo.opacity(0.14) : Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 12)); if item.role != "user" { Spacer(minLength: 40) } }.id(item.id).listRowSeparator(.hidden)
-                }.listStyle(.plain).onAppear { if let last = task.messages.last { proxy.scrollTo(last.id) } }
+                ScrollView {
+                    LazyVStack(spacing: 18) {
+                        if task.messages.isEmpty {
+                            VStack(spacing: 8) {
+                                AgentAvatar()
+                                Text("No messages yet").font(Theme.body).foregroundStyle(Theme.secondaryForeground)
+                                Text("Send a message to guide the agent").font(Theme.secondaryBody).foregroundStyle(Theme.mutedForeground)
+                            }
+                            .padding(.top, 80)
+                        }
+                        ForEach(task.messages) { ChatMessageView(message: $0, userInitial: userInitial).id($0.id) }
+                    }
+                    .padding(.horizontal, 24).padding(.vertical, 20)
+                }
+                .defaultScrollAnchor(.bottom)
+                .onChange(of: task.messages.count) { if let last = task.messages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } } }
+                .accessibilityLabel("Conversation")
             }
-            Divider()
-            HStack(alignment: .bottom) { TextField("Message or feedback", text: $message, axis: .vertical).lineLimit(1...5).textFieldStyle(.roundedBorder); Button { Task { await send() } } label: { Image(systemName: "arrow.up.circle.fill").font(.title2) }.disabled(message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || sending) }.padding()
+            composer.hairline(.top)
         }
     }
-    private func send() async { let content = message.trimmingCharacters(in: .whitespacesAndNewlines); sending = true; defer { sending = false }; do { _ = try await api.sendMessage(taskId: task.id, content: content); message = ""; await didSend(); await store.refreshTasks() } catch { store.present(error) } }
+
+    private var composer: some View {
+        let target = task.feedbackTarget(store.workflows)
+        let canSend = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !sending
+        return VStack(alignment: .leading, spacing: 8) {
+            if let sendError { Text(sendError).font(Theme.font(13)).foregroundStyle(Theme.dangerText) }
+            HStack(alignment: .bottom, spacing: 10) {
+                TextField("", text: $draft, prompt: Text("Type a message...").foregroundStyle(Theme.mutedForeground), axis: .vertical)
+                    .font(Theme.body).foregroundStyle(Theme.foreground)
+                    .lineLimit(1...6)
+                    .focused($focused)
+                    .padding(.vertical, 12)
+                    .onKeyPress(.return, phases: .down) { press in
+                        guard !press.modifiers.contains(.shift) else { return .ignored }
+                        Task { await send() }
+                        return .handled
+                    }
+                    .accessibilityLabel("Message")
+                Button { Task { await send() } } label: { Image(systemName: "arrow.up").font(.system(size: 17, weight: .bold)) }
+                    .buttonStyle(IconButtonStyle(filled: true))
+                    .opacity(canSend ? 1 : 0.4)
+                    .disabled(!canSend)
+                    .accessibilityLabel("Send message")
+                    .padding(.vertical, 6)
+            }
+            .padding(.leading, 16).padding(.trailing, 6)
+            .background(Theme.input, in: RoundedRectangle(cornerRadius: 14))
+            .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(focused ? Theme.accent.opacity(0.4) : Theme.border) }
+            HStack(spacing: 8) {
+                if target != nil { Circle().fill(Theme.amber).frame(width: 7, height: 7) }
+                Text(target.map { "Sending will trigger an agent revision (\($0.label))" } ?? "Message is saved to the thread — no agent run will start")
+                    .foregroundStyle(Theme.secondaryForeground)
+                Text("· Return to send · Shift-Return for new line").foregroundStyle(Theme.mutedForeground.opacity(0.7))
+            }
+            .font(Theme.font(13)).lineLimit(1)
+            .padding(.horizontal, 4)
+        }
+        .padding(.horizontal, 24).padding(.vertical, 14)
+    }
+
+    private func send() async {
+        let content = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty, !sending else { return }
+        sending = true; sendError = nil; defer { sending = false }
+        do { _ = try await api.sendMessage(taskId: task.id, content: content); draft = ""; await didSend(); await store.refreshTasks() }
+        catch { sendError = error.localizedDescription }
+    }
 }
 
-private struct TextDocumentView: View {
-    let title: String; let content: String?
-    var body: some View { ScrollView { if let content, !content.isEmpty { Text(content).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled).padding() } else { ContentUnavailableView("No \(title.lowercased()) yet", systemImage: "doc.text") } }.navigationTitle(title) }
+private struct AgentAvatar: View {
+    var body: some View {
+        Text("∆").font(Theme.font(14, .semibold)).foregroundStyle(Theme.violet)
+            .frame(width: 32, height: 32)
+            .background(Theme.primary.opacity(0.13), in: Circle())
+            .overlay { Circle().strokeBorder(Theme.primary.opacity(0.19)) }
+            .accessibilityHidden(true)
+    }
+}
+
+private struct ChatMessageView: View {
+    let message: Message
+    let userInitial: String
+
+    var body: some View {
+        let isUser = message.role == "user"
+        if message.role == "system" {
+            Text(message.content).font(Theme.mono(12)).foregroundStyle(Theme.mutedForeground)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(Theme.secondary.opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
+                .frame(maxWidth: .infinity)
+        } else {
+            HStack(alignment: .top, spacing: 12) {
+                if isUser { Spacer(minLength: 80) } else { AgentAvatar() }
+                VStack(alignment: isUser ? .trailing : .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Text("\(isUser ? "You" : "Sindral") · \(Formatters.time(message.createdAt))").font(Theme.mono(12)).foregroundStyle(Theme.mutedForeground)
+                        if message.source == "github" {
+                            Text("via GitHub").font(Theme.mono(11)).foregroundStyle(Theme.mutedForeground)
+                                .padding(.horizontal, 5).padding(.vertical, 1).background(Theme.secondary, in: RoundedRectangle(cornerRadius: 4))
+                        }
+                    }
+                    Group {
+                        if isUser { Text(message.content).font(Theme.body).foregroundStyle(Theme.foreground).textSelection(.enabled) }
+                        else { MarkdownText(source: message.content, color: Theme.foreground) }
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 12)
+                    .surface(isUser ? Theme.secondary : Theme.card, radius: Theme.Radius.row, border: isUser ? Theme.borderStrong : Theme.border)
+                }
+                .frame(maxWidth: 760, alignment: isUser ? .trailing : .leading)
+                if isUser {
+                    Text(userInitial).font(Theme.font(13, .semibold)).foregroundStyle(Theme.secondaryForeground)
+                        .frame(width: 32, height: 32).background(Theme.border, in: Circle())
+                        .overlay { Circle().strokeBorder(Theme.borderStrong) }
+                        .accessibilityHidden(true)
+                } else { Spacer(minLength: 80) }
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
+}
+
+// MARK: - Other tabs
+
+private struct TaskPlanView: View {
+    let task: TaskDetail; let canApprove: Bool; let approving: Bool; let onApprove: () -> Void
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if canApprove { HStack { Spacer(); Button("Approve Plan", action: onApprove).buttonStyle(.sindral(.success)).disabled(approving) } }
+                if let plan = task.plan, !plan.isEmpty { MarkdownText(source: plan) }
+                else { EmptyPane(title: "No plan yet", systemImage: "doc.text", message: "The planning agent writes the plan here.").padding(.top, 60) }
+            }
+            .padding(24).frame(maxWidth: 980, alignment: .leading)
+        }
+    }
 }
 
 private struct TaskCodeView: View {
@@ -111,41 +731,104 @@ private struct TaskCodeView: View {
     var body: some View {
         List {
             if task.pullRequests.count > 1 { Picker("Repository", selection: $repository) { Text("First PR").tag(String?.none); ForEach(task.pullRequests) { Text($0.repository).tag(Optional($0.repository)) } } }
-            ForEach(task.pullRequests) { pr in if let url = URL(string: pr.url) { Link(destination: url) { Label("#\(pr.number) · \(pr.repository)", systemImage: "arrow.up.right.square") } } }
+            ForEach(task.pullRequests) { pr in if let url = URL(string: pr.url) { Link(destination: url) { Label("#\(pr.number) · \(pr.repository)", systemImage: "arrow.up.right.square").foregroundStyle(Theme.accent) } } }
             if loading { ProgressView() }
-            if let error { Text(error.localizedDescription).foregroundStyle(.red) }
-            ForEach(files) { file in DisclosureGroup { if let patch = file.patch { ScrollView(.horizontal) { Text(patch).font(.caption.monospaced()).textSelection(.enabled) } } else { Text("Patch unavailable") } } label: { VStack(alignment: .leading) { Text(file.filename).font(.subheadline.monospaced()); Text("+\(file.additions) −\(file.deletions) · \(file.status)").font(.caption).foregroundStyle(.secondary) } } }
-        }.task(id: repository) { await load() }
+            if let error { Text(error.localizedDescription).foregroundStyle(Theme.dangerText) }
+            ForEach(files) { file in DisclosureGroup { if let patch = file.patch { ScrollView(.horizontal) { Text(patch).font(Theme.mono(12)).textSelection(.enabled) } } else { Text("Patch unavailable").foregroundStyle(Theme.mutedForeground) } } label: { VStack(alignment: .leading) { Text(file.filename).font(Theme.mono(13)); Text("+\(file.additions) −\(file.deletions) · \(file.status)").font(Theme.font(12)).foregroundStyle(Theme.mutedForeground) } } }
+        }
+        .themedList()
+        .overlay { if files.isEmpty && !loading && error == nil && task.pullRequests.isEmpty { EmptyPane(title: "No code changes yet", systemImage: "chevron.left.forwardslash.chevron.right") } }
+        .task(id: repository) { await load() }
     }
     private func load() async { loading = true; defer { loading = false }; do { files = try await api.diff(taskId: task.id, repository: repository); error = nil } catch { self.error = error } }
 }
 
 private struct TaskStepsView: View {
     let task: TaskDetail
-    var body: some View { List(task.events.sorted { $0.createdAt > $1.createdAt }) { event in VStack(alignment: .leading, spacing: 4) { Text(event.type.replacingOccurrences(of: "-", with: " ").capitalized).font(.headline); if let from = event.fromState, let to = event.toState { Text("\(from) → \(to)").font(.caption.monospaced()).foregroundStyle(.secondary) }; Text(event.createdAt).font(.caption2).foregroundStyle(.secondary) } } }
+    var body: some View {
+        List(task.events.sorted { $0.createdAt > $1.createdAt }) { event in
+            VStack(alignment: .leading, spacing: 4) {
+                Text(event.type.replacingOccurrences(of: "-", with: " ").capitalized).font(Theme.bodyMedium)
+                if let from = event.fromState, let to = event.toState { Text("\(from) → \(to)").font(Theme.mono(12)).foregroundStyle(Theme.mutedForeground) }
+                Text(Formatters.day(event.createdAt) + " · " + Formatters.time(event.createdAt)).font(Theme.mono(11)).foregroundStyle(Theme.mutedForeground)
+            }
+            .listRowBackground(Theme.card)
+        }
+        .themedList()
+        .overlay { if task.events.isEmpty { EmptyPane(title: "No steps yet", systemImage: "list.number") } }
+    }
 }
 
 private struct TaskArtifactsView: View {
     let artifacts: [Artifact]
-    var body: some View { List(artifacts) { artifact in DisclosureGroup { if let content = artifact.content { Text(content).font(.caption.monospaced()).textSelection(.enabled) }; if let link = artifact.downloadUrl.flatMap(URL.init(string:)) { Link("Download", destination: link) } } label: { Label { VStack(alignment: .leading) { Text(artifact.name); Text(ByteCountFormatter.string(fromByteCount: Int64(artifact.byteSize), countStyle: .file)).font(.caption).foregroundStyle(.secondary) } } icon: { Image(systemName: "doc") } } }.overlay { if artifacts.isEmpty { ContentUnavailableView("No artifacts", systemImage: "archivebox") } } }
+    var body: some View {
+        List(artifacts) { artifact in
+            DisclosureGroup {
+                if let content = artifact.content { Text(content).font(Theme.mono(12)).textSelection(.enabled) }
+                if let link = artifact.downloadUrl.flatMap(URL.init(string:)) { Link("Download", destination: link) }
+            } label: {
+                Label { VStack(alignment: .leading) { Text(artifact.name); Text(ByteCountFormatter.string(fromByteCount: Int64(artifact.byteSize), countStyle: .file)).font(Theme.font(12)).foregroundStyle(Theme.mutedForeground) } } icon: { Image(systemName: "doc") }
+            }
+            .listRowBackground(Theme.card)
+        }
+        .themedList()
+        .overlay { if artifacts.isEmpty { EmptyPane(title: "No artifacts", systemImage: "archivebox") } }
+    }
 }
 
 private struct TaskSubtasksView: View {
-    let tasks: [SindralTask]
-    var body: some View { List(tasks.sorted { ($0.sequence ?? 0) < ($1.sequence ?? 0) }) { task in NavigationLink(value: task.id) { TaskRow(task: task) } }.overlay { if tasks.isEmpty { ContentUnavailableView("No subtasks", systemImage: "list.bullet.indent") } } }
+    @Environment(AppStore.self) private var store
+    let tasks: [SindralTask]; let onOpen: (String) -> Void
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 8) {
+                ForEach(tasks.sorted { ($0.sequence ?? 0) < ($1.sequence ?? 0) }) { task in
+                    Button { onOpen(task.id) } label: { TaskCard(task: task, step: task.currentStep(store.workflows), compact: true) }.buttonStyle(.plain)
+                }
+            }
+            .padding(24)
+        }
+        .overlay { if tasks.isEmpty { EmptyPane(title: "No subtasks", systemImage: "list.bullet.indent") } }
+    }
 }
 
-private struct TaskJobsView: View {
+struct TaskJobsView: View {
     @Environment(APIClient.self) private var api
     let taskID: String
     @State private var jobs: [Job] = []; @State private var selected: Job?
-    var body: some View { List(jobs) { job in Button { selected = job } label: { HStack { VStack(alignment: .leading) { Text(job.kind.replacingOccurrences(of: "-", with: " ").capitalized); Text("Attempt \(job.attempt)").font(.caption).foregroundStyle(.secondary) }; Spacer(); StatusPill(state: job.status) } }.buttonStyle(.plain) }.overlay { if jobs.isEmpty { ContentUnavailableView("No jobs", systemImage: "terminal") } }.task { jobs = (try? await api.jobs(taskId: taskID)) ?? [] }.sheet(item: $selected) { JobLogsView(job: $0) } }
+    var body: some View {
+        List(jobs) { job in
+            Button { selected = job } label: {
+                HStack {
+                    VStack(alignment: .leading) { Text(job.kind.replacingOccurrences(of: "-", with: " ").capitalized).foregroundStyle(Theme.foreground); Text("Attempt \(job.attempt)").font(Theme.font(12)).foregroundStyle(Theme.mutedForeground) }
+                    Spacer()
+                    Text(job.status).font(Theme.mono(12)).foregroundStyle(job.status == "failed" ? Theme.dangerText : job.status == "succeeded" ? Theme.emerald : Theme.secondaryForeground)
+                }
+            }
+            .listRowBackground(Theme.card)
+        }
+        .themedList()
+        .overlay { if jobs.isEmpty { EmptyPane(title: "No jobs", systemImage: "terminal") } }
+        .task { jobs = (try? await api.jobs(taskId: taskID)) ?? [] }
+        .sheet(item: $selected) { JobLogsView(job: $0) }
+    }
 }
 
 private struct JobLogsView: View {
     @Environment(\.dismiss) private var dismiss; @Environment(APIClient.self) private var api
     let job: Job; @State private var logs: [JobLog] = []
-    var body: some View { NavigationStack { List { if let result = job.result { Section("Result") { Text(result.prettyPrinted).font(.caption.monospaced()).textSelection(.enabled) } }; if let error = job.error { Section("Error") { Text(error).foregroundStyle(.red).textSelection(.enabled) } }; Section("Logs") { ForEach(logs) { log in VStack(alignment: .leading) { Text(log.type.uppercased()).font(.caption2).foregroundStyle(.secondary); Text(log.message).font(.caption.monospaced()).textSelection(.enabled) } } } }.navigationTitle("Job details").toolbar { Button("Done") { dismiss() } }.task { logs = (try? await api.logs(jobId: job.id)) ?? [] } } }
+    var body: some View {
+        NavigationStack {
+            List {
+                if let result = job.result { Section("Result") { Text(result.prettyPrinted).font(Theme.mono(12)).textSelection(.enabled) } }
+                if let error = job.error { Section("Error") { Text(error).foregroundStyle(Theme.dangerText).textSelection(.enabled) } }
+                Section("Logs") { ForEach(logs) { log in VStack(alignment: .leading) { Text(log.type.uppercased()).font(Theme.font(11)).foregroundStyle(Theme.mutedForeground); Text(log.message).font(Theme.mono(12)).textSelection(.enabled) } } }
+            }
+            .themedList()
+            .navigationTitle("Job details").toolbar { Button("Done") { dismiss() } }
+            .task { logs = (try? await api.logs(jobId: job.id)) ?? [] }
+        }
+    }
 }
 
 private struct EditTaskView: View {
@@ -153,6 +836,21 @@ private struct EditTaskView: View {
     let task: SindralTask; let didSave: () async -> Void
     @State private var title: String; @State private var description: String; @State private var repos: String; @State private var workflowID: String; @State private var saving = false
     init(task: SindralTask, didSave: @escaping () async -> Void) { self.task = task; self.didSave = didSave; _title = State(initialValue: task.title); _description = State(initialValue: task.description); _repos = State(initialValue: task.repos.joined(separator: ", ")); _workflowID = State(initialValue: task.workflowId ?? "") }
-    var body: some View { NavigationStack { Form { TextField("Title", text: $title); TextEditor(text: $description).frame(minHeight: 130); TextField("Repositories", text: $repos); Picker("Workflow", selection: $workflowID) { Text("Default").tag(""); ForEach(store.workflows) { Text($0.name).tag($0.id) } } }.navigationTitle("Edit task").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("Save") { Task { await save() } }.disabled(title.isEmpty || saving) } } } }
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("Title", text: $title)
+                TextEditor(text: $description).frame(minHeight: 130)
+                TextField("Repositories", text: $repos).font(Theme.mono(14)).textInputAutocapitalization(.never)
+                Picker("Workflow", selection: $workflowID) { Text("Default").tag(""); ForEach(store.workflows) { Text($0.name).tag($0.id) } }
+            }
+            .themedList()
+            .navigationTitle("Edit task")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Save") { Task { await save() } }.disabled(title.isEmpty || saving) }
+            }
+        }
+    }
     private func save() async { saving = true; defer { saving = false }; do { _ = try await api.updateTask(task.id, title: title, description: description, repos: repos.commaSeparated, workflowId: workflowID.isEmpty ? nil : workflowID); await store.refreshTasks(); await didSave(); dismiss() } catch { store.present(error) } }
 }

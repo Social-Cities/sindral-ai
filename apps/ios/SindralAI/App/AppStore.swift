@@ -14,11 +14,13 @@ final class AppStore {
     var errorMessage: String?
     private var eventTask: Task<Void, Never>?
 
-    init(configuration: AppConfiguration) {
-        let session = SessionStore(configuration: configuration)
+    init(configuration: AppConfiguration, urlSession: URLSession = .shared) {
+        let session = SessionStore(configuration: configuration, urlSession: urlSession)
         self.session = session
-        self.api = APIClient(baseURL: configuration.apiURL, sessionStore: session)
+        self.api = APIClient(baseURL: configuration.apiURL, sessionStore: session, urlSession: urlSession)
     }
+
+    var isLive: Bool { liveStatus == "Live" }
 
     func bootstrap() async {
         guard session.session != nil else { return }

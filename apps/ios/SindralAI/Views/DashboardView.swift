@@ -1,100 +1,390 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// Home: greeting, the create-task card, active tasks, bucket counts and the worker panel.
 struct DashboardView: View {
     @Environment(AppStore.self) private var store
-    @State private var showingCreate = false
+    @Environment(SessionStore.self) private var session
+    @Environment(AppRouter.self) private var router
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Welcome, \(store.profile?.displayName ?? store.profile?.email?.split(separator: "@").first.map(String.init) ?? "there").")
-                        .font(.largeTitle.bold())
-                    Text("What would you like to work on today?").foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 28) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("\(Formatters.greeting(hour: Calendar.current.component(.hour, from: .now))), \(store.displayName(fallbackEmail: session.user?.email)).")
+                        .font(Theme.pageTitle).tracking(-0.6).foregroundStyle(Theme.foreground)
+                    Text("What would you like to work on today?").font(Theme.body).foregroundStyle(Theme.secondaryForeground)
                 }
-                Button { showingCreate = true } label: { Label("Create a task", systemImage: "plus.circle.fill").frame(maxWidth: .infinity) }
-                    .buttonStyle(.borderedProminent).controlSize(.large)
-                LazyVGrid(columns: [.init(.adaptive(minimum: 180, maximum: 260))], spacing: 12) {
-                    DashboardMetric(label: "To do", value: count("todo"), color: .secondary)
-                    DashboardMetric(label: "In progress", value: activeCount, color: .indigo)
-                    DashboardMetric(label: "In review", value: count("in-review"), color: .orange)
-                    DashboardMetric(label: "Done", value: count("done"), color: .green)
+                if horizontalSizeClass == .regular {
+                    RatioColumns(ratios: [2, 1], spacing: 24) {
+                        mainColumn
+                        statsColumn
+                    }
+                } else {
+                    mainColumn
+                    statsColumn
                 }
-                HStack { Text("Recent activity").font(.title2.bold()); Spacer(); Label(store.liveStatus, systemImage: store.liveStatus == "Live" ? "dot.radiowaves.left.and.right" : "wifi.slash").font(.caption).foregroundStyle(.secondary) }
-                if activeTasks.isEmpty { ContentUnavailableView("No active tasks", systemImage: "sparkles", description: Text("Create a task to start a workflow.")) }
-                else { ForEach(activeTasks) { task in NavigationLink(value: task.id) { TaskRow(task: task) }.buttonStyle(.plain); Divider() } }
-            }.padding().frame(maxWidth: 1000, alignment: .leading).frame(maxWidth: .infinity)
+            }
+            .padding(horizontalSizeClass == .regular ? 40 : 16)
+            .padding(.top, horizontalSizeClass == .regular ? -8 : 0)
+            .frame(maxWidth: 1200, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
-        .navigationTitle("Home").navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(for: String.self) { TaskDetailView(taskID: $0) }
-        .sheet(isPresented: $showingCreate) { CreateTaskView() }
+        .background(Theme.background)
         .refreshable { await store.bootstrap() }
-        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button { showingCreate = true } label: { Image(systemName: "plus") }.accessibilityLabel("Create task") } }
+        .toolbar(.hidden, for: .navigationBar)
+        .navigationTitle("Home")
     }
 
-    private func count(_ state: String) -> Int { store.tasks.filter { $0.parentTaskId == nil && $0.state == state }.count }
-    private var activeCount: Int { store.tasks.filter { $0.parentTaskId == nil && !["todo", "in-review", "done", "failure"].contains($0.state) }.count }
-    private var activeTasks: [SindralTask] { Array(store.tasks.filter { $0.parentTaskId == nil && !["todo", "done"].contains($0.state) }.sorted { $0.updatedAt > $1.updatedAt }.prefix(4)) }
-}
-
-private struct DashboardMetric: View {
-    let label: String; let value: Int; let color: Color
-    var body: some View { VStack(alignment: .leading, spacing: 5) { Text(value.formatted()).font(.title.bold()).foregroundStyle(color); Text(label).font(.caption).foregroundStyle(.secondary) }.frame(maxWidth: .infinity, alignment: .leading).padding().background(.background.secondary, in: RoundedRectangle(cornerRadius: 14)) }
-}
-
-struct CreateTaskView: View {
-    @Environment(\.dismiss) private var dismiss
-    @Environment(AppStore.self) private var store
-    @Environment(APIClient.self) private var api
-    @State private var source = 0
-    @State private var description = ""
-    @State private var ticketURL = ""
-    @State private var ticket: TicketImport?
-    @State private var repos = ""
-    @State private var workflowID = ""
-    @State private var isBusy = false
-    @State private var errorMessage: String?
-    @State private var importingFile = false
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Picker("Source", selection: $source) { Text("Describe").tag(0); Text("Ticket URL").tag(1) }.pickerStyle(.segmented)
-                if source == 0 {
-                    Section("Task") { TextEditor(text: $description).frame(minHeight: 150); Button { importingFile = true } label: { Label("Import Markdown or text", systemImage: "doc") } }
-                } else {
-                    Section("Ticket") {
-                        TextField("Jira, Linear, or GitHub URL", text: $ticketURL).keyboardType(.URL).textInputAutocapitalization(.never)
-                        Button("Import ticket") { Task { await importTicket() } }.disabled(ticketURL.isEmpty || isBusy)
-                        if let ticket { LabeledContent(ticket.provider.capitalized, value: ticket.id); Text(ticket.title).font(.headline); Text(ticket.description).font(.caption).foregroundStyle(.secondary).lineLimit(5) }
+    private var mainColumn: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            CreateTaskCard { router.section = .tasks }
+            if !activeTasks.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        SectionLabel(text: "Active tasks")
+                        Spacer()
+                        Button("View all →") { router.openTasks(filter: .active) }
+                            .font(Theme.font(15)).foregroundStyle(Theme.accent).frame(minHeight: 44)
+                    }
+                    ForEach(activeTasks) { task in
+                        Button { router.openTask(task.id) } label: {
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(task.title).font(Theme.bodyMedium).foregroundStyle(Theme.foreground).lineLimit(1)
+                                    Text(task.key).font(Theme.mono(12)).foregroundStyle(Theme.mutedForeground)
+                                }
+                                Spacer(minLength: 8)
+                                StatusBadge(state: task.state, step: task.currentStep(store.workflows))
+                            }
+                            .padding(.horizontal, 18).frame(minHeight: 60)
+                            .surface(Theme.card)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
-                Section("Delivery") {
-                    TextField("Repositories (owner/name, comma separated)", text: $repos).textInputAutocapitalization(.never)
-                    Picker("Workflow", selection: $workflowID) { Text("Default").tag(""); ForEach(store.workflows) { Text($0.name).tag($0.id) } }
-                }
-                if let errorMessage { Text(errorMessage).foregroundStyle(.red).font(.footnote) }
             }
-            .navigationTitle("New task").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("Create") { Task { await create() } }.disabled(!canCreate || isBusy) } }
-            .fileImporter(isPresented: $importingFile, allowedContentTypes: [.plainText, .text, .sourceCode]) { result in
-                do { let url = try result.get(); guard url.startAccessingSecurityScopedResource() else { return }; defer { url.stopAccessingSecurityScopedResource() }; let data = try Data(contentsOf: url); guard data.count <= 1_000_000 else { throw ImportError.tooLarge }; description = String(decoding: data, as: UTF8.self); source = 0 } catch { errorMessage = error.localizedDescription }
-            }
-            .overlay { if isBusy { ProgressView().controlSize(.large) } }
         }
     }
 
-    private var canCreate: Bool { source == 0 ? !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty : ticket != nil }
-    private func importTicket() async { isBusy = true; defer { isBusy = false }; do { ticket = try await api.importTicket(ticketURL.trimmingCharacters(in: .whitespacesAndNewlines)) } catch { errorMessage = error.localizedDescription } }
-    private func create() async {
-        isBusy = true; defer { isBusy = false }
-        let detail = source == 0 ? description.trimmingCharacters(in: .whitespacesAndNewlines) : ticket?.description ?? ""
-        let title = source == 0 ? String(detail.split(separator: "\n").first ?? "New task").prefix(200).description : ticket?.title ?? "New task"
-        let normalizedRepos = repos.commaSeparated
-        guard normalizedRepos.allSatisfy({ $0.range(of: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", options: .regularExpression) != nil }) else { errorMessage = "Repositories must use owner/name."; return }
-        do { _ = try await api.createTask(title: title, description: detail, ticket: ticket, repos: normalizedRepos, workflowId: workflowID.isEmpty ? nil : workflowID); await store.refreshTasks(); dismiss() } catch { errorMessage = error.localizedDescription }
+    private var statsColumn: some View {
+        VStack(spacing: 14) {
+            countCard(label: "Tasks in Todo", sub: "Awaiting start", bucket: .todo, color: Color(hex: 0x8B92A8))
+            countCard(label: "In Progress", sub: "Agent working", bucket: .inProgress, color: Color(hex: 0xA78BFA))
+            countCard(label: "In Review", sub: "Needs approval", bucket: .inReview, color: Color(hex: 0x22D3EE))
+            WorkerPanel(workers: store.workers)
+        }
+    }
+
+    private func countCard(label: String, sub: String, bucket: DashboardBucket, color: Color) -> some View {
+        Button { router.openTasks(filter: TaskFilter(bucket: bucket)) } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(store.isLoading && store.tasks.isEmpty ? "–" : "\(count(bucket))")
+                    .font(Theme.font(38, .semibold, relativeTo: .largeTitle)).monospacedDigit().foregroundStyle(color)
+                    .padding(.bottom, 4)
+                Text(label).font(Theme.bodyMedium).foregroundStyle(Theme.foreground)
+                Text(sub).font(Theme.font(14)).foregroundStyle(Theme.mutedForeground)
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .surface(Theme.card, radius: Theme.Radius.card)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(count(bucket)) \(label), \(sub)")
+        .accessibilityHint("Shows these tasks")
+    }
+
+    private func count(_ bucket: DashboardBucket) -> Int {
+        store.tasks.filter { $0.parentTaskId == nil && $0.bucket(store.workflows) == bucket }.count
+    }
+
+    private var activeTasks: [SindralTask] {
+        Array(store.tasks.filter { $0.parentTaskId == nil && $0.state != "todo" && !TaskStates.terminal.contains($0.state) }
+            .sorted { $0.updatedAt > $1.updatedAt }.prefix(4))
     }
 }
 
-private enum ImportError: LocalizedError { case tooLarge; var errorDescription: String? { "Files must be 1 MB or smaller." } }
+/// Top-aligned columns whose widths follow `ratios` (e.g. 2:1), sized to the tallest column.
+struct RatioColumns: Layout {
+    var ratios: [CGFloat]
+    var spacing: CGFloat = 24
+    /// Stretch every column to the tallest one (for side-by-side cards).
+    var equalHeights = false
+
+    private func widths(_ total: CGFloat, count: Int) -> [CGFloat] {
+        let ratios = (0..<count).map { $0 < self.ratios.count ? self.ratios[$0] : 1 }
+        let available = max(0, total - spacing * CGFloat(count - 1))
+        let sum = ratios.reduce(0, +)
+        return ratios.map { available * $0 / sum }
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 900
+        let columns = widths(width, count: subviews.count)
+        let height = zip(subviews, columns).map { $0.sizeThatFits(.init(width: $1, height: nil)).height }.max() ?? 0
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        for (subview, width) in zip(subviews, widths(bounds.width, count: subviews.count)) {
+            subview.place(at: CGPoint(x: x, y: bounds.minY), proposal: .init(width: width, height: equalHeights ? bounds.height : nil))
+            x += width + spacing
+        }
+    }
+}
+
+struct WorkerPanel: View {
+    @Environment(AppRouter.self) private var router
+    let workers: [Worker]
+
+    var body: some View {
+        let online = workers.filter { $0.status == "online" }
+        let running = online.reduce(0) { $0 + $1.runningJobs }
+        VStack(alignment: .leading, spacing: 10) {
+            if online.isEmpty {
+                Text("No worker connected").font(Theme.font(14)).foregroundStyle(Theme.mutedForeground)
+                if !workers.isEmpty { Text("\(workers.count) registered, all offline.").font(Theme.font(13)).foregroundStyle(Theme.mutedForeground) }
+                Button("See Settings") { router.section = .settings }.font(Theme.font(14)).foregroundStyle(Theme.accent)
+            } else {
+                (Text("\(online.count) worker\(online.count == 1 ? "" : "s")").foregroundStyle(Theme.secondaryForeground).fontWeight(.medium)
+                 + Text(" connected · \(running > 0 ? "\(running) job\(running == 1 ? "" : "s") running" : "idle")").foregroundStyle(Theme.mutedForeground))
+                    .font(Theme.font(14))
+                ForEach(online) { worker in
+                    HStack(spacing: 8) {
+                        PulsingDot(color: Theme.emerald, pulses: true)
+                        Text("\(worker.name) · \(worker.hostname)").font(Theme.mono(12)).foregroundStyle(Theme.mutedForeground).lineLimit(1)
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .surface(Theme.muted, radius: Theme.Radius.row, dashed: true)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// The create-task card from `apps/web/src/pages/Home.tsx`, reused by Home and the Tasks "+" sheet.
+struct CreateTaskCard: View {
+    @Environment(AppStore.self) private var store
+    @Environment(APIClient.self) private var api
+    var onCreated: () -> Void = {}
+
+    private enum Mode: String, CaseIterable { case text = "New task", url = "Paste a URL" }
+    @State private var mode = Mode.text
+    @State private var textInput = ""
+    @State private var urlInput = ""
+    @State private var ticket: TicketImport?
+    @State private var importing = false
+    @State private var importError: String?
+    @State private var reposInput = ""
+    @State private var workflowID = ""
+    @State private var formError: String?
+    @State private var uploadNote: String?
+    @State private var importingFile = false
+    @State private var creating = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 0) {
+                ForEach(Mode.allCases, id: \.self) { item in
+                    let selected = mode == item
+                    Button { mode = item } label: {
+                        Text(item.rawValue)
+                            .font(Theme.font(15, .medium))
+                            .foregroundStyle(selected ? Theme.foreground : Theme.mutedForeground)
+                            .padding(.horizontal, 12).frame(height: 48)
+                            .overlay(alignment: .bottom) { if selected { Rectangle().fill(Theme.accent).frame(height: 2) } }
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+            }
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .hairline(.bottom)
+
+            VStack(alignment: .leading, spacing: 14) {
+                if mode == .text { textMode } else { urlMode }
+                HStack(spacing: 10) {
+                    Image(systemName: "shippingbox").font(.system(size: 13)).foregroundStyle(Theme.mutedForeground)
+                    TextField("", text: $reposInput, prompt: Text(verbatim: "Repositories: owner/name, owner/other").foregroundStyle(Theme.mutedForeground))
+                        .font(Theme.mono(13)).foregroundStyle(Theme.foreground)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .onChange(of: reposInput) { formError = nil }
+                        .accessibilityLabel("Repositories")
+                }
+                .fieldChrome(height: 48)
+                if let formError { Text(formError).font(Theme.font(13)).foregroundStyle(Theme.dangerText) }
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) { uploadButton; Spacer(minLength: 8); workflowPicker; createButton }
+                    VStack(alignment: .leading, spacing: 10) {
+                        uploadButton
+                        HStack(spacing: 10) { workflowPicker; createButton.frame(maxWidth: .infinity) }
+                    }
+                }
+            }
+            .padding(20)
+        }
+        .surface(Theme.card, radius: Theme.Radius.card)
+        .onAppear(perform: pickDefaultWorkflow)
+        .onChange(of: store.workflows) { pickDefaultWorkflow() }
+        .fileImporter(isPresented: $importingFile, allowedContentTypes: [.plainText, .text, UTType(filenameExtension: "md") ?? .text]) { handleFile($0) }
+    }
+
+    private var uploadButton: some View {
+        HStack(spacing: 10) {
+            Button { importingFile = true } label: { Label("Upload plan", systemImage: "square.and.arrow.up").font(Theme.font(15)).fixedSize() }
+                .foregroundStyle(Theme.secondaryForeground).frame(minHeight: 44)
+            if let uploadNote { Text(uploadNote).font(Theme.font(12)).foregroundStyle(Theme.mutedForeground).lineLimit(1) }
+        }
+    }
+
+    private var createButton: some View {
+                    Button { Task { await create() } } label: {
+                        HStack(spacing: 10) {
+                            Text("Create task").fixedSize()
+                            Text("⌘↵").font(Theme.mono(11)).padding(.horizontal, 5).padding(.vertical, 2)
+                                .background(.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 5))
+                                .accessibilityHidden(true)
+                        }
+                    }
+                    .buttonStyle(.sindral(.primary, height: 48))
+                    .disabled(!canCreate || creating)
+                    .keyboardShortcut(.return, modifiers: .command)
+    }
+
+    private var textMode: some View {
+        TextField("", text: $textInput, prompt: Text("Describe the task in detail. Include the problem, expected behavior, and any relevant context...").foregroundStyle(Theme.mutedForeground), axis: .vertical)
+            .font(Theme.body).foregroundStyle(Theme.foreground).lineSpacing(4)
+            .frame(minHeight: 128, alignment: .topLeading)
+            .accessibilityLabel("Task description")
+    }
+
+    @ViewBuilder private var urlMode: some View {
+        let detected = Tickets.detect(urlInput)
+        HStack(spacing: 10) {
+            TextField("", text: $urlInput, prompt: Text(verbatim: "https://linear.app/org/issue/ENG-123").foregroundStyle(Theme.mutedForeground))
+                .font(Theme.mono(14)).foregroundStyle(Theme.foreground)
+                .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                .onSubmit { Task { await importTicket() } }
+                .onChange(of: urlInput) { ticket = nil; importError = nil }
+                .fieldChrome(height: 48, focused: !urlInput.isEmpty)
+                .accessibilityLabel("Ticket URL")
+            Button { Task { await importTicket() } } label: { if importing { ProgressView() } else { Text("Import") } }
+                .buttonStyle(.sindral(.subtle, height: 48)).disabled(detected == nil || importing)
+        }
+        if let importError { Text(importError).font(Theme.font(13)).foregroundStyle(Theme.dangerText) }
+        if let ticket {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Text(TicketProvider(rawValue: ticket.provider)?.label ?? ticket.provider).font(Theme.mono(11)).foregroundStyle(Theme.accent)
+                        .padding(.horizontal, 6).padding(.vertical, 2).background(Theme.secondary, in: RoundedRectangle(cornerRadius: 5))
+                    Text(ticket.id).font(Theme.mono(12)).foregroundStyle(Theme.mutedForeground)
+                }
+                TextField("Title", text: Binding(get: { ticket.title }, set: { self.ticket = TicketImport(provider: ticket.provider, id: ticket.id, title: $0, description: ticket.description, url: ticket.url) }))
+                    .font(Theme.bodyMedium).foregroundStyle(Theme.foreground).accessibilityLabel("Imported title")
+                TextField("Description", text: Binding(get: { ticket.description }, set: { self.ticket = TicketImport(provider: ticket.provider, id: ticket.id, title: ticket.title, description: $0, url: ticket.url) }), axis: .vertical)
+                    .font(Theme.font(14)).foregroundStyle(Theme.secondaryForeground).lineLimit(3...8).accessibilityLabel("Imported description")
+            }
+            .padding(14).surface(Theme.input, radius: Theme.Radius.control)
+        } else {
+            Text(detected.map { "Detected a \($0.provider.label) ticket (\($0.id)). Import to pre-fill the task. Jira and GitHub issue URLs work too." }
+                 ?? "Paste a Linear, Jira, or GitHub issue URL. Sindral will import the ticket title, description, and metadata automatically.")
+                .font(Theme.font(14)).foregroundStyle(Theme.mutedForeground)
+                .frame(minHeight: 72, alignment: .topLeading)
+        }
+    }
+
+    private var workflowPicker: some View {
+        Menu {
+            Picker("Workflow", selection: $workflowID) {
+                if store.workflows.isEmpty { Text("No workflows").tag("") }
+                ForEach(store.workflows) { Text($0.name).tag($0.id) }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "point.3.connected.trianglepath.dotted").font(.system(size: 13))
+                Text(store.workflows.first { $0.id == workflowID }?.name ?? "Workflow").lineLimit(1).fixedSize()
+                Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+            }
+            .font(Theme.font(15)).foregroundStyle(Theme.secondaryForeground)
+            .padding(.horizontal, 16).frame(height: 48)
+            .surface(Theme.secondary.opacity(0.6), radius: Theme.Radius.control)
+        }
+        .accessibilityLabel("Workflow")
+    }
+
+    private var canCreate: Bool { mode == .text ? !textInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty : ticket != nil }
+
+    private func pickDefaultWorkflow() {
+        guard workflowID.isEmpty || !store.workflows.contains(where: { $0.id == workflowID }) else { return }
+        workflowID = (store.workflows.first { $0.isDefault == true } ?? store.workflows.first)?.id ?? ""
+    }
+
+    private func parseRepos() -> [String]? {
+        var repos: [String] = []
+        for raw in reposInput.commaSeparated {
+            guard let repo = Tickets.normalizeRepo(raw) else { formError = "\"\(raw)\" is not a valid repository. Use owner/name."; return nil }
+            if !repos.contains(repo) { repos.append(repo) }
+        }
+        return repos
+    }
+
+    private func importTicket() async {
+        guard Tickets.detect(urlInput) != nil else { return }
+        importError = nil; importing = true; defer { importing = false }
+        do { ticket = try await api.importTicket(urlInput.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        catch { importError = error.localizedDescription }
+    }
+
+    private func create() async {
+        guard canCreate, !creating else { return }
+        formError = nil
+        guard let repos = parseRepos() else { return }
+        creating = true; defer { creating = false }
+        let description = mode == .text ? textInput.trimmingCharacters(in: .whitespacesAndNewlines) : ticket?.description ?? ""
+        let title = mode == .text ? String((description.split(separator: "\n").first ?? "").prefix(200)) : ticket?.title ?? ""
+        do {
+            _ = try await api.createTask(title: title, description: description, ticket: mode == .url ? ticket : nil, repos: repos, workflowId: workflowID.isEmpty ? nil : workflowID)
+            textInput = ""; urlInput = ""; ticket = nil; reposInput = ""
+            await store.refreshTasks()
+            onCreated()
+        } catch { formError = error.localizedDescription }
+    }
+
+    private func handleFile(_ result: Result<URL, Error>) {
+        uploadNote = nil
+        do {
+            let url = try result.get()
+            guard url.startAccessingSecurityScopedResource() else { return }
+            defer { url.stopAccessingSecurityScopedResource() }
+            guard ["md", "txt", "markdown"].contains(url.pathExtension.lowercased()) else { uploadNote = "Only .md and .txt files are supported."; return }
+            let data = try Data(contentsOf: url)
+            guard data.count <= 1_048_576 else { uploadNote = "File is larger than 1 MB."; return }
+            let content = String(decoding: data, as: UTF8.self)
+            mode = .text
+            textInput = textInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? content : "\(textInput.trimmingCharacters(in: .whitespacesAndNewlines))\n\n\(content)"
+            uploadNote = "Loaded \(url.lastPathComponent)"
+        } catch { uploadNote = "Could not read the file." }
+    }
+}
+
+/// Create-task card presented as a sheet (Tasks "+" button).
+struct CreateTaskSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            ScrollView { CreateTaskCard { dismiss() }.padding(24) }
+                .background(Theme.background)
+                .navigationTitle("New task").navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+        }
+        .presentationBackground(Theme.background)
+    }
+}

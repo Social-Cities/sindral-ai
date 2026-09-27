@@ -1,33 +1,151 @@
 import SwiftUI
 
-struct StatusPill: View {
-    let state: String
+/// Task list card: key, chips and relative time, then the title and status badge.
+struct TaskCard: View {
+    let task: SindralTask
+    var step: WorkflowStep?
+    var selected = false
+    var compact = false
+    var subtaskCount = 0
+    var subtaskDone = 0
+
     var body: some View {
-        Text(state.replacingOccurrences(of: "-", with: " ").capitalized)
-            .font(.caption2.monospaced()).fontWeight(.semibold).padding(.horizontal, 8).padding(.vertical, 4)
-            .foregroundStyle(color).background(color.opacity(0.13), in: Capsule())
-            .accessibilityLabel("Status: \(state)")
-    }
-    private var color: Color {
-        switch state { case "done": .green; case "failure": .red; case "todo": .secondary; case "plan-review", "in-review": .orange; default: .indigo }
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                if compact, let sequence = task.sequence { Text("↳ \(sequence)").font(Theme.mono(11)).foregroundStyle(Theme.mutedForeground) }
+                Text(task.key).font(Theme.mono(12)).foregroundStyle(Theme.mutedForeground)
+                if task.prUrl != nil { MetaChip(text: "PR open", color: Theme.secondaryForeground) }
+                if task.ticketUrl != nil { MetaChip(text: "linked") }
+                if subtaskCount > 0 { MetaChip(text: "↳ \(subtaskDone)/\(subtaskCount)").accessibilityLabel("\(subtaskDone) of \(subtaskCount) subtasks done") }
+                Spacer(minLength: 8)
+                Text(Formatters.shortAgo(task.updatedAt)).font(Theme.mono(11)).foregroundStyle(Theme.mutedForeground)
+            }
+            Text(task.title)
+                .font(Theme.font(compact ? 14 : 15, .medium))
+                .foregroundStyle(Theme.foreground)
+                .multilineTextAlignment(.leading)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+            StatusBadge(state: task.state, step: step)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .surface(selected ? Theme.secondary : Theme.card, radius: Theme.Radius.row, border: selected ? Theme.primary.opacity(0.4) : Theme.border)
+        .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.row))
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
-struct TaskRow: View {
-    let task: SindralTask
+/// Minimal Markdown renderer: headings, bullet and numbered lists, fenced code and inline styles.
+struct MarkdownText: View {
+    let source: String
+    var size: CGFloat = 15
+    var color: Color = Theme.secondaryForeground
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack { Text(task.key).font(.caption.monospaced()).foregroundStyle(.secondary); Spacer(); StatusPill(state: task.state) }
-            Text(task.title).font(.headline).lineLimit(2)
-            if !task.description.isEmpty { Text(task.description).font(.subheadline).foregroundStyle(.secondary).lineLimit(2) }
-            if !task.repos.isEmpty { Label(task.repos.joined(separator: ", "), systemImage: "shippingbox").font(.caption).foregroundStyle(.secondary).lineLimit(1) }
-        }.padding(.vertical, 4)
+        VStack(alignment: .leading, spacing: size * 0.55) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                switch block {
+                case .heading(let text, let level):
+                    inline(text).font(Theme.font(level == 1 ? size + 5 : size + 2, .semibold)).foregroundStyle(Theme.foreground)
+                case .paragraph(let text):
+                    inline(text).font(Theme.font(size)).foregroundStyle(color).lineSpacing(size * 0.3)
+                case .list(let items, let ordered):
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text(ordered ? "\(index + 1)." : "•").font(Theme.font(size)).foregroundStyle(color)
+                                inline(item).font(Theme.font(size)).foregroundStyle(color)
+                            }
+                        }
+                    }
+                case .code(let text):
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        Text(text).font(Theme.mono(size - 2)).foregroundStyle(Theme.foreground).padding(12)
+                    }
+                    .surface(Theme.input, radius: 8)
+                }
+            }
+        }
+        .textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private enum Block { case heading(String, Int), paragraph(String), list([String], ordered: Bool), code(String) }
+
+    private var blocks: [Block] {
+        var result: [Block] = []
+        var paragraph: [String] = []
+        var list: [String] = []
+        var ordered = false
+        var code: [String]?
+        func flush() {
+            if !paragraph.isEmpty { result.append(.paragraph(paragraph.joined(separator: "\n"))); paragraph = [] }
+            if !list.isEmpty { result.append(.list(list, ordered: ordered)); list = [] }
+        }
+        for raw in source.components(separatedBy: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("```") {
+                if let open = code { result.append(.code(open.joined(separator: "\n"))); code = nil } else { flush(); code = [] }
+                continue
+            }
+            if code != nil { code?.append(raw); continue }
+            if line.isEmpty { flush(); continue }
+            if let hashes = line.firstIndex(where: { $0 != "#" }), line.hasPrefix("#"), line[hashes] == " " {
+                flush(); result.append(.heading(String(line[hashes...]).trimmingCharacters(in: .whitespaces), line.distance(from: line.startIndex, to: hashes)))
+            } else if line.hasPrefix("- ") || line.hasPrefix("* ") {
+                if !paragraph.isEmpty || (ordered && !list.isEmpty) { flush() }
+                ordered = false; list.append(String(line.dropFirst(2)))
+            } else if let dot = line.firstIndex(of: "."), line[..<dot].allSatisfy(\.isNumber), !line[..<dot].isEmpty, line[line.index(after: dot)...].hasPrefix(" ") {
+                if !paragraph.isEmpty || (!ordered && !list.isEmpty) { flush() }
+                ordered = true; list.append(String(line[line.index(dot, offsetBy: 2)...]))
+            } else {
+                if !list.isEmpty { flush() }
+                paragraph.append(line)
+            }
+        }
+        if let open = code { result.append(.code(open.joined(separator: "\n"))) }
+        flush()
+        return result
+    }
+
+    private func inline(_ text: String) -> Text {
+        guard var attributed = try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) else { return Text(text) }
+        for run in attributed.runs {
+            guard let intent = run.inlinePresentationIntent else { continue }
+            if intent.contains(.code) {
+                attributed[run.range].font = Theme.mono(size - 2)
+                attributed[run.range].foregroundColor = Theme.foreground
+                attributed[run.range].backgroundColor = Theme.input
+            }
+            if intent.contains(.stronglyEmphasized) { attributed[run.range].foregroundColor = Theme.foreground }
+        }
+        return Text(attributed)
     }
 }
 
 struct ErrorRetryView: View {
     let error: Error; let retry: () -> Void
-    var body: some View { ContentUnavailableView { Label("Couldn’t load", systemImage: "exclamationmark.triangle") } description: { Text(error.localizedDescription) } actions: { Button("Try again", action: retry) } }
+    var body: some View {
+        ContentUnavailableView { Label("Couldn’t load", systemImage: "exclamationmark.triangle") } description: { Text(error.localizedDescription) } actions: {
+            Button("Try again", action: retry).buttonStyle(.sindral(.subtle))
+        }
+    }
+}
+
+/// Centered placeholder used by empty lists and panes.
+struct EmptyPane: View {
+    let title: String
+    var systemImage = "tray"
+    var message: String?
+    var body: some View {
+        ContentUnavailableView {
+            Label(title, systemImage: systemImage).foregroundStyle(Theme.secondaryForeground)
+        } description: {
+            if let message { Text(message).foregroundStyle(Theme.mutedForeground) }
+        }
+    }
 }
 
 extension String {
