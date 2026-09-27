@@ -51,7 +51,7 @@ final class SessionStore {
     var user: AuthUser? { session?.user }
 
     func signIn(email: String, password: String) async throws {
-        try await authenticate(path: "token?grant_type=password", body: ["email": email, "password": password])
+        try await authenticate(path: "token", queryItems: [.init(name: "grant_type", value: "password")], body: ["email": email, "password": password])
     }
 
     func signUp(email: String, password: String) async throws -> Bool {
@@ -66,7 +66,7 @@ final class SessionStore {
     func validAccessToken() async throws -> String {
         guard let current = session else { throw AuthError.notAuthenticated }
         if current.expiresAt.timeIntervalSinceNow > 60 { return current.accessToken }
-        try await authenticate(path: "token?grant_type=refresh_token", body: ["refresh_token": current.refreshToken])
+        try await authenticate(path: "token", queryItems: [.init(name: "grant_type", value: "refresh_token")], body: ["refresh_token": current.refreshToken])
         guard let token = session?.accessToken else { throw AuthError.notAuthenticated }
         return token
     }
@@ -76,8 +76,8 @@ final class SessionStore {
         try? keychain.delete(account: sessionAccount)
     }
 
-    private func authenticate(path: String, body: [String: String]) async throws {
-        let next: AuthSession = try await authRequest(path: path, body: body)
+    private func authenticate(path: String, queryItems: [URLQueryItem] = [], body: [String: String]) async throws {
+        let next: AuthSession = try await authRequest(path: path, queryItems: queryItems, body: body)
         try setSession(next)
     }
 
@@ -86,8 +86,11 @@ final class SessionStore {
         session = next; errorMessage = nil
     }
 
-    private func authRequest<T: Decodable>(path: String, body: [String: String]) async throws -> T {
-        var request = URLRequest(url: configuration.supabaseURL.appending(path: "auth/v1/\(path)"))
+    private func authRequest<T: Decodable>(path: String, queryItems: [URLQueryItem] = [], body: [String: String]) async throws -> T {
+        var components = URLComponents(url: configuration.supabaseURL.appending(path: "auth/v1/\(path)"), resolvingAgainstBaseURL: false)
+        if !queryItems.isEmpty { components?.queryItems = queryItems }
+        guard let url = components?.url else { throw AuthError.invalidResponse }
+        var request = URLRequest(url: url)
         request.httpMethod = "POST"; request.httpBody = try JSONEncoder().encode(body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(configuration.supabaseAnonKey, forHTTPHeaderField: "apikey")

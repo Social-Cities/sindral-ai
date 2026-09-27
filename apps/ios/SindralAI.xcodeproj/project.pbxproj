@@ -20,6 +20,7 @@
 		C325F7E5778599536129D02A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2ABF6AC38E7879FC1E808A1B /* SettingsView.swift */; };
 		C59CDD0FF6F680B04F74A845 /* TaskDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A545932B106B545B29FAC8B4 /* TaskDetailView.swift */; };
 		CFFB6D656DF8040315DF1C0E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D4B85A512DF7A0A00BE87823 /* Assets.xcassets */; };
+		D8E302B5A082FC0285F0F3DE /* AuthServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F76D4E5B912583AEC05E83F /* AuthServiceTests.swift */; };
 		EE3EEECE68467E52CEC3A6A6 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 712A96D1FEBAEAE5305A44D7 /* KeychainStore.swift */; };
 		EF83323B29A526F6E4203065 /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02C1A1F70F0D46A81C45B320 /* AuthService.swift */; };
 		FAAEE55E809B4B5290C99FF2 /* Configuration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2E9086FD028766DAD281A72 /* Configuration.swift */; };
@@ -39,6 +40,7 @@
 		02C1A1F70F0D46A81C45B320 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
 		086A16A207C8B1201120E44A /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		1184E4C9C723D363B96B0853 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		1F76D4E5B912583AEC05E83F /* AuthServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthServiceTests.swift; sourceTree = "<group>"; };
 		215C6F822B517E389FF49A08 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		24B9B2863FB546A7CFE08F4D /* SindralAIApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SindralAIApp.swift; sourceTree = "<group>"; };
 		2ABF6AC38E7879FC1E808A1B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
@@ -156,6 +158,7 @@
 		D6E2EB3547D165BA72EDDD7D /* SindralAITests */ = {
 			isa = PBXGroup;
 			children = (
+				1F76D4E5B912583AEC05E83F /* AuthServiceTests.swift */,
 				4874CC3FE96E740ED22DCE17 /* TaskLogicTests.swift */,
 			);
 			path = SindralAITests;
@@ -255,6 +258,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D8E302B5A082FC0285F0F3DE /* AuthServiceTests.swift in Sources */,
 				90F9CF17DA30BC1D89F01C65 /* TaskLogicTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
