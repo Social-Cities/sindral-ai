@@ -4,13 +4,18 @@ Native SwiftUI client for the Sindral REST API. It targets iOS 17 and supports t
 
 ## Configure
 
-Edit `Config/Debug.xcconfig` for local development. Set the Supabase anon/publishable key printed by `supabase status`:
+The project provides two shared development schemes:
+
+- `SindralAI` uses the Debug configuration and the local server and Supabase stack.
+- `SindralAI Staging` uses the checked-in Staging configuration and the hosted Railway and Supabase services.
+
+For local development, create the ignored `Config/Local.xcconfig` and set the Supabase publishable key printed by `supabase status`:
 
 ```text
 SUPABASE_ANON_KEY = your-local-anon-key
 ```
 
-The checked-in debug URLs point at the local server (`127.0.0.1:8787`) and Supabase (`127.0.0.1:55321`). Do not commit production credentials. Override release values in CI or an untracked xcconfig.
+The checked-in Debug URLs point at the local server (`127.0.0.1:8787`) and Supabase (`127.0.0.1:55321`). `Local.xcconfig` can override any Debug value without affecting the team. The checked-in Staging values are public client configuration; never add a Supabase secret/service-role key or other server credential to an iOS xcconfig. Override Release values in CI or an untracked xcconfig.
 
 Supabase GitHub auth must allow `sindral://auth-callback` as a redirect URL.
 
@@ -25,3 +30,5 @@ xcodebuild -project SindralAI.xcodeproj -scheme SindralAI \
 ```
 
 Open `SindralAI.xcodeproj` in Xcode to run on an iPhone Simulator or signed device.
+
+To run a development-signed build against staging, select the `SindralAI Staging` scheme and the target device, then Run. Select `SindralAI` to return to the local stack.

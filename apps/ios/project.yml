@@ -14,7 +14,28 @@ settings:
     GENERATE_INFOPLIST_FILE: NO
 configs:
   Debug: debug
+  Staging: debug
   Release: release
+schemes:
+  SindralAI Staging:
+    build:
+      targets:
+        SindralAI: all
+    run:
+      config: Staging
+    test:
+      config: Staging
+      targets:
+        - SindralAITests
+    profile:
+      config: Staging
+    analyze:
+      config: Staging
+    archive:
+      config: Staging
+    management:
+      shared: true
+      orderHint: 1
 targets:
   SindralAI:
     type: application
@@ -23,6 +44,7 @@ targets:
       - path: SindralAI
     configFiles:
       Debug: Config/Debug.xcconfig
+      Staging: Config/Staging.xcconfig
       Release: Config/Release.xcconfig
     settings:
       base:
