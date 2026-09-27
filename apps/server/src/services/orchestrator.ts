@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import {
   DEFAULT_TROUBLESHOOT_STEP,
   START_EVENT,
+  TERMINAL_STATES,
   TransitionError,
   UNIVERSAL_EVENTS,
   chatTriggersFeedback,
@@ -234,8 +235,15 @@ export class Orchestrator {
     const version = expectedVersion ?? task.version;
     const key = idempotencyKey ?? `direct:${task.id}:${version}:${event}`;
     const replay = await this.repo.getTaskTransitionReplay(userId, key, transitionRequestHash(userId, task.id, version, event, 'user', undefined));
-    if (replay) return replay.task;
+    if (replay) {
+      await this.resumeManualClosureEffects(userId, replay.task, event);
+      return replay.task;
+    }
     if (task.version !== version) throw conflict(`Task version ${version} is stale; current version is ${task.version}`);
+    if (event === UNIVERSAL_EVENTS.MARK_DONE || event === UNIVERSAL_EVENTS.MARK_WONT_DO) {
+      const activeChildren = (await this.repo.listSubtasks(userId, task.id)).filter((child) => !TERMINAL_STATES.has(child.state));
+      if (activeChildren.length > 0) throw conflict('Close active subtasks before closing their parent task');
+    }
     return this.applyEvent(userId, task, event, {
       actor: 'user',
       expectedVersion: version,
@@ -291,12 +299,14 @@ export class Orchestrator {
   private async applyEvent(userId: string, task: Task, event: string, options: ApplyOptions): Promise<Task> {
     if (options.idempotencyKey) {
       const replay = await this.repo.getTaskTransitionReplayByKey(userId, options.idempotencyKey);
-      if (replay) return replay.task;
+      if (replay) {
+        await this.resumeManualClosureEffects(userId, replay.task, event);
+        return replay.task;
+      }
     }
     const live = await this.resolveWorkflow(userId, task);
-    if (!live) throw new TransitionError('Task has no workflow', 'NO_WORKFLOW');
-    const pinNow = task.pinnedWorkflow === null;
-    const workflow = pinNow ? snapshotWorkflow(live) : live;
+    const pinNow = task.pinnedWorkflow === null && live !== null;
+    const workflow = pinNow && live ? snapshotWorkflow(live) : live;
 
     if (task.plan && (!task.outcome.trim() || !task.acceptanceCriteria.trim())) {
       const recovered = extractTaskContract(task.plan);
@@ -308,10 +318,11 @@ export class Orchestrator {
     }
 
     const t: Transition = transition(task, workflow, event);
-    if (task.plan && (!task.outcome.trim() || !task.acceptanceCriteria.trim())) {
+    const manuallyClosing = event === UNIVERSAL_EVENTS.MARK_DONE || event === UNIVERSAL_EVENTS.MARK_WONT_DO;
+    if (!manuallyClosing && task.plan && (!task.outcome.trim() || !task.acceptanceCriteria.trim())) {
       const dispatchesNonPlanningAgent = t.effects.some((effect) => {
         if (effect.type !== 'dispatch') return false;
-        return getStep(workflow, effect.stepId)?.output !== 'plan';
+        return workflow ? getStep(workflow, effect.stepId)?.output !== 'plan' : false;
       });
       if (dispatchesNonPlanningAgent || t.effects.some((effect) => effect.type === 'complete-task')) {
         throw conflict('The plan needs an outcome and acceptance criteria before this task can advance. Send feedback to the planning agent to add them.');
@@ -327,6 +338,7 @@ export class Orchestrator {
     let parentDispatchStepId: string | null = null;
     for (const effect of t.effects) {
       if (effect.type === 'dispatch') {
+        if (!workflow) throw new TransitionError('Task has no workflow', 'NO_WORKFLOW');
         const step = getStep(workflow, effect.stepId);
         if (!step) throw new TransitionError(`Unknown step ${effect.stepId}`, 'NO_STEP');
         if (step.output === 'merge') {
@@ -336,6 +348,7 @@ export class Orchestrator {
           parentDispatchStepId = step.id;
         } else queuedJob = await this.buildAgentJob(userId, task, step, options.feedbackOverride);
       } else if (effect.type === 'dispatch-troubleshoot') {
+        if (!workflow) throw new TransitionError('Task has no workflow', 'NO_WORKFLOW');
         queuedJob = await this.buildAgentJob(userId, task, workflow.troubleshootStep ?? DEFAULT_TROUBLESHOOT_STEP, options.feedbackOverride);
       }
     }
@@ -356,9 +369,12 @@ export class Orchestrator {
         detail: { event, actor: options.actor, ...(options.detail ?? {}) },
       },
       job: queuedJob,
-      cancelQueuedJobs: event === UNIVERSAL_EVENTS.FAIL,
+      cancelQueuedJobs: event === UNIVERSAL_EVENTS.FAIL || event === UNIVERSAL_EVENTS.MARK_DONE || event === UNIVERSAL_EVENTS.MARK_WONT_DO,
     });
-    if (applied.replayed) return applied.task;
+    if (applied.replayed) {
+      await this.resumeManualClosureEffects(userId, applied.task, event);
+      return applied.task;
+    }
 
     let current = applied.task;
     for (const effect of t.effects) {
@@ -379,9 +395,9 @@ export class Orchestrator {
     return (await this.repo.getTask(userId, task.id)) ?? current;
   }
 
-  private isReviewOrDone(task: Task, workflow: Workflow): boolean {
-    if (task.state === 'done') return true;
-    const step = getStep(workflow, task.currentStepId);
+  private isReviewOrDone(task: Task, workflow: Workflow | null): boolean {
+    if (TERMINAL_STATES.has(task.state)) return true;
+    const step = workflow ? getStep(workflow, task.currentStepId) : null;
     return step?.type === 'human' && task.state === 'in-review';
   }
 
@@ -395,7 +411,9 @@ export class Orchestrator {
       await this.repo.createEvent(userId, { taskId: task.id, type: 'subtasks-started', stepId, detail: { count: children.length } });
       const first = children[0]!;
       if (first.state === 'todo') await this.applyEvent(userId, first, START_EVENT, { actor: 'system', detail: { reason: 'parent-implement' } });
-      else if (children.every((c) => c.state === 'done')) await this.completeParent(userId, task);
+      else if (children.every((c) => TERMINAL_STATES.has(c.state))) {
+        await this.settleParent(userId, task, children.some((c) => c.state === 'wont-do') ? 'wont-do' : 'done');
+      }
     }
     return (await this.repo.getTask(userId, task.id)) ?? task;
   }
@@ -513,9 +531,25 @@ export class Orchestrator {
     const attempt = expectedAttempt;
     const outcomeHash = this.jobOutcomeHash({ result });
     const claim = await this.beginJobOutcome(userId, job.id, attempt, outcomeHash, { result }, leaseToken);
-    if (claim.state === 'replay') return;
+    if (claim.state === 'replay') {
+      await this.reconcileParentFromChildren(userId, job.taskId);
+      return;
+    }
     if (claim.state === 'busy' || !claim.token) throw serviceUnavailable('Job outcome is already being applied; retry shortly');
     try {
+      const currentTask = await this.repo.getTask(userId, task.id);
+      if (currentTask && TERMINAL_STATES.has(currentTask.state)) {
+        this.log.warn({ userId, jobId: job.id, taskId: task.id }, 'job result arrived after task closure; discarded');
+        await this.repo.createEvent(userId, {
+          taskId: task.id,
+          type: 'stale-result',
+          stepId: job.stepId,
+          detail: { jobId: job.id, reason: 'task-closed' },
+          dedupeKey: `job:${job.id}:stale-result`,
+        });
+        await this.repo.finalizeJobOutcome(userId, job.id, attempt, outcomeHash, claim.token, 'completed');
+        return;
+      }
       if (result.kind === 'rebase') await this.applyRebaseResult(userId, claim.job, task, result);
       else if (result.kind === 'conflict-resolution') await this.applyConflictResolutionResult(userId, claim.job, task, result);
       else if (result.kind === 'merge') await this.applyMergeResult(userId, claim.job, task, result);
@@ -555,6 +589,7 @@ export class Orchestrator {
         this.hub.publish(userId, { type: 'task.updated', taskId: task.id });
       }
       await this.repo.finalizeJobOutcome(userId, job.id, attempt, outcomeHash, claim.token, 'completed');
+      await this.reconcileParentFromChildren(userId, job.taskId);
       this.recordResultMetrics(result);
       if (job.claimedAt) this.metrics?.observe('sindral_job_duration_seconds', Math.max(0, (this.now().getTime() - Date.parse(job.claimedAt)) / 1000), { kind: job.kind, outcome: 'completed' });
     } catch (error) {
@@ -572,11 +607,28 @@ export class Orchestrator {
     const attempt = expectedAttempt;
     const outcomeHash = this.jobOutcomeHash({ error });
     const claim = await this.beginJobOutcome(userId, job.id, attempt, outcomeHash, { error }, leaseToken);
-    if (claim.state === 'replay') return;
+    if (claim.state === 'replay') {
+      await this.reconcileParentFromChildren(userId, job.taskId);
+      return;
+    }
     if (claim.state === 'busy' || !claim.token) throw serviceUnavailable('Job outcome is already being applied; retry shortly');
     try {
+      const currentTask = await this.repo.getTask(userId, task.id);
+      if (currentTask && TERMINAL_STATES.has(currentTask.state)) {
+        this.log.warn({ userId, jobId: job.id, taskId: task.id }, 'job failure arrived after task closure; discarded');
+        await this.repo.createEvent(userId, {
+          taskId: task.id,
+          type: 'stale-result',
+          stepId: job.stepId,
+          detail: { jobId: job.id, reason: 'task-closed' },
+          dedupeKey: `job:${job.id}:stale-result`,
+        });
+        await this.repo.finalizeJobOutcome(userId, job.id, attempt, outcomeHash, claim.token, 'failed');
+        return;
+      }
       await this.failTask(userId, task, claim.job, error, attempt);
       await this.repo.finalizeJobOutcome(userId, job.id, attempt, outcomeHash, claim.token, 'failed');
+      await this.reconcileParentFromChildren(userId, job.taskId);
       if (job.kind === 'merge-pull-requests') this.metrics?.inc('sindral_merge_failures_total');
       if (job.kind === 'resolve-rebase-conflict') this.metrics?.inc('sindral_conflict_resolution_total', { outcome: 'escalated' });
       if (job.claimedAt) this.metrics?.observe('sindral_job_duration_seconds', Math.max(0, (this.now().getTime() - Date.parse(job.claimedAt)) / 1000), { kind: job.kind, outcome: 'failed' });
@@ -854,41 +906,63 @@ export class Orchestrator {
 
   private async startNextSibling(userId: string, child: Task): Promise<void> {
     if (!child.parentTaskId || child.sequence === null) return;
+    const parentEvents = await this.repo.listEvents(userId, child.parentTaskId);
+    if (!parentEvents.some((event) => event.type === 'subtasks-started')) return;
     const siblings = await this.repo.listSubtasks(userId, child.parentTaskId);
-    const next = siblings.find((s) => s.sequence === child.sequence! + 1);
-    if (next && next.state === 'todo') {
+    const next = siblings.find((candidate, index) => {
+      if (candidate.state !== 'todo') return false;
+      return siblings.slice(0, index).every((prior) => TERMINAL_STATES.has(prior.state) || prior.state === 'in-review');
+    });
+    if (next) {
       await this.applyEvent(userId, next, START_EVENT, { actor: 'system', detail: { reason: 'previous-subtask-in-review', previous: child.id } });
     }
   }
 
   private async onTaskCompleted(userId: string, task: Task): Promise<void> {
     if (!task.parentTaskId) return;
-    const siblings = await this.repo.listSubtasks(userId, task.parentTaskId);
-    if (!siblings.every((s) => s.state === 'done')) return;
-    const parent = await this.repo.getTask(userId, task.parentTaskId);
-    if (parent && parent.state !== 'done') await this.completeParent(userId, parent);
+    await this.reconcileParentFromChildren(userId, task.parentTaskId);
   }
 
-  private async completeParent(userId: string, parent: Task): Promise<void> {
-    const workflow = await this.resolveWorkflow(userId, parent);
-    const endStep = workflow?.steps.find((s) => s.type === 'end') ?? null;
-    await this.repo.updateTask(userId, parent.id, { state: 'done', currentStepId: endStep?.id ?? parent.currentStepId, failedStepId: null });
-    await this.repo.createEvent(userId, {
-      taskId: parent.id,
-      type: 'subtasks-complete',
-      fromState: parent.state,
-      toState: 'done',
-      stepId: endStep?.id ?? null,
-      detail: { actor: 'system' },
-    });
-    this.hub.publish(userId, { type: 'task.updated', taskId: parent.id });
+  /** Replays the idempotent follow-up work that happens after a manual child closure commits. */
+  private async resumeManualClosureEffects(userId: string, task: Task, event: string): Promise<void> {
+    if (event !== UNIVERSAL_EVENTS.MARK_DONE && event !== UNIVERSAL_EVENTS.MARK_WONT_DO) return;
+    if (!TERMINAL_STATES.has(task.state) || !task.parentTaskId) return;
+    await this.onTaskCompleted(userId, task);
+    await this.startNextSibling(userId, task);
+  }
+
+  private async reconcileParentFromChildren(userId: string, parentId: string): Promise<void> {
+    const parent = await this.repo.getTask(userId, parentId);
+    if (!parent || TERMINAL_STATES.has(parent.state)) return;
+    const siblings = await this.repo.listSubtasks(userId, parentId);
+    if (siblings.length === 0) return;
+    if (!siblings.every((s) => TERMINAL_STATES.has(s.state))) return;
+    await this.settleParent(userId, parent, siblings.some((s) => s.state === 'wont-do') ? 'wont-do' : 'done');
+  }
+
+  private async settleParent(userId: string, parent: Task, state: 'done' | 'wont-do'): Promise<void> {
+    if (TERMINAL_STATES.has(parent.state)) return;
+    const event = state === 'done' ? UNIVERSAL_EVENTS.MARK_DONE : UNIVERSAL_EVENTS.MARK_WONT_DO;
+    try {
+      await this.applyEvent(userId, parent, event, {
+        actor: 'system',
+        expectedVersion: parent.version,
+        idempotencyKey: `subtasks:${parent.id}:settled`,
+        detail: { reason: 'subtasks-complete' },
+      });
+    } catch (error) {
+      const current = await this.repo.getTask(userId, parent.id);
+      if (current && TERMINAL_STATES.has(current.state)) return;
+      if (error instanceof ConflictError && /active work/.test(error.message)) return;
+      throw error;
+    }
   }
 
   /** After a child pushes a PR, later siblings that already have PRs must be rebased on top of it. */
   private async enqueueStackRebase(userId: string, child: Task, dedupePrefix?: string): Promise<Job | null> {
     if (!child.parentTaskId || child.sequence === null || !child.branch) return null;
     const siblings = await this.repo.listSubtasks(userId, child.parentTaskId);
-    const later = siblings.filter((s) => (s.sequence ?? 0) > child.sequence! && s.prUrl && s.branch);
+    const later = siblings.filter((s) => (s.sequence ?? 0) > child.sequence! && !TERMINAL_STATES.has(s.state) && s.prUrl && s.branch);
     if (later.length === 0) return null;
     let previous = child.branch;
     const stack: RebaseStackJobPayload['stack'] = [];
@@ -929,6 +1003,7 @@ export class Orchestrator {
       if (entry.ok) continue;
       const sibling = await this.repo.getTask(userId, entry.taskId);
       if (!sibling || sibling.parentTaskId !== parent.id) continue;
+      if (TERMINAL_STATES.has(sibling.state)) continue;
       const error = entry.error ?? `Rebase of ${entry.branch} failed`;
       await this.repo.updateTask(userId, sibling.id, { lastError: error });
       await this.repo.createMessage(userId, {
@@ -938,7 +1013,7 @@ export class Orchestrator {
         source: 'worker',
         externalId: `job:${job.id}:rebase:${sibling.id}:failure`,
       });
-      if (entry.conflict && sibling.state !== 'failure' && sibling.state !== 'done') {
+      if (entry.conflict && sibling.state !== 'failure') {
         const resolverKey = `job:${job.id}:resolver:${sibling.id}`;
         const priorResolvers = (await this.repo.listJobsForTask(userId, sibling.id)).filter(
           (candidate) =>
@@ -973,7 +1048,7 @@ export class Orchestrator {
         await this.enqueueConflictResolution(userId, resolving, entry.conflict, resolverKey);
         continue;
       }
-      if (sibling.state !== 'failure' && sibling.state !== 'done') {
+      if (sibling.state !== 'failure') {
         const fresh = (await this.repo.getTask(userId, sibling.id)) ?? sibling;
         await this.applyEvent(userId, fresh, UNIVERSAL_EVENTS.FAIL, {
           actor: 'system',

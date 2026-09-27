@@ -21,6 +21,7 @@ export const STATE_CONFIG: Record<string, StateStyle> = {
   'conflict-resolution': { label: 'Resolving Conflict', color: '#fb923c', bg: 'rgba(251,146,60,0.08)', pulsing: true },
   merge: { label: 'Merging', color: '#34d399', bg: 'rgba(52,211,153,0.08)', pulsing: true },
   done: { label: 'Done', color: '#34d399', bg: 'rgba(52,211,153,0.08)', pulsing: false },
+  'wont-do': { label: "Won't do", color: '#8b92a8', bg: 'rgba(139,146,168,0.08)', pulsing: false },
   failure: { label: 'Failed', color: '#f87171', bg: 'rgba(248,113,113,0.08)', pulsing: false },
   troubleshoot: { label: 'Troubleshoot', color: '#fb923c', bg: 'rgba(251,146,60,0.08)', pulsing: true },
 };
@@ -45,7 +46,7 @@ export function getStateStyle(state: TaskState, step?: Pick<WorkflowStep, 'type'
 }
 
 /** States where the task is waiting for the user, i.e. no agent is running. */
-export const TERMINAL_STATES: ReadonlySet<string> = new Set(['done']);
+export const TERMINAL_STATES: ReadonlySet<string> = new Set(['done', 'wont-do']);
 
 /** States where no workflow step drives the task and the user must intervene. */
 export const OFF_PATH_STATES: ReadonlySet<string> = new Set(['failure', 'troubleshoot', 'conflict-resolution']);
@@ -57,7 +58,7 @@ export function isOffPath(state: TaskState): boolean {
 /** Grouping used by the dashboard stat cards. */
 export function dashboardBucket(state: TaskState, step?: Pick<WorkflowStep, 'type'> | null): 'todo' | 'in-progress' | 'in-review' | 'done' | 'failed' {
   if (state === 'todo') return 'todo';
-  if (state === 'done') return 'done';
+  if (TERMINAL_STATES.has(state)) return 'done';
   if (state === 'failure') return 'failed';
   if (state === 'in-review') return 'in-review';
   if (step?.type === 'human' && state !== 'plan-review') return 'in-review';

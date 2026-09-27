@@ -17,6 +17,7 @@ export const KNOWN_TASK_STATES = [
   'conflict-resolution',
   'merge',
   'done',
+  'wont-do',
   'failure',
   'troubleshoot',
 ] as const;

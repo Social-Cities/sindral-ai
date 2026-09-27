@@ -227,6 +227,27 @@ export class MemoryRepository implements Repository {
       throw new ConflictError(`Task version ${command.expectedVersion} is stale; current version is ${task.version}`);
     }
 
+    const closureEvent = command.event.detail?.event;
+    if (closureEvent === 'mark-done' || closureEvent === 'mark-wont-do') {
+      const activeJob = [...this.jobs.values()].find(
+        (job) =>
+          job.userId === userId &&
+          (job.taskId === command.taskId || (task.parentTaskId !== null && job.taskId === task.parentTaskId)) &&
+          ['claimed', 'running', 'applying'].includes(job.status),
+      );
+      if (activeJob) throw new ConflictError('Task has active work; wait for it to finish before closing the task');
+      if (task.parentTaskId) {
+        for (const job of this.jobs.values()) {
+          if (job.userId !== userId || job.taskId !== task.parentTaskId || job.status !== 'queued' || job.payload.kind !== 'rebase-stack') continue;
+          job.payload.stack = job.payload.stack.filter((entry) => entry.taskId !== task.id);
+          if (job.payload.stack.length === 0) {
+            job.status = 'cancelled';
+            job.finishedAt = this.now();
+          }
+        }
+      }
+    }
+
     Object.assign(task, clone(command.patch), { version: task.version + 1, updatedAt: this.now() });
     const event: Owned<TaskEvent> = {
       id: randomUUID(),

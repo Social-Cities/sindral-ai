@@ -7,6 +7,7 @@ import { Button } from '@/components/Button';
 import type { ButtonVariant } from '@/components/Button';
 import { EmptyState } from '@/components/EmptyState';
 import { ExternalLink } from '@/components/ExternalLink';
+import { Modal } from '@/components/Modal';
 import { PageLoader, Spinner } from '@/components/Spinner';
 import { StatusBadge } from '@/components/StatusBadge';
 import { useSendMessage, useTask, useTaskAction } from '@/hooks/useTasks';
@@ -42,7 +43,10 @@ export function variantForEvent(event: string): ButtonVariant {
       return 'primary';
     case 'approve':
     case 'accept':
+    case 'mark-done':
       return 'success';
+    case 'mark-wont-do':
+      return 'danger';
     case 'troubleshoot':
       return 'warning';
     case 'retry':
@@ -64,6 +68,7 @@ export function TaskDetail() {
   const taskQuery = useTask(id);
   const workflowsQuery = useWorkflows();
   const [tab, setTab] = useState<Tab>('summary');
+  const [pendingCloseEvent, setPendingCloseEvent] = useState<'mark-done' | 'mark-wont-do' | null>(null);
 
   const task = taskQuery.data ?? null;
   const workflows = useMemo(() => workflowsQuery.data ?? [], [workflowsQuery.data]);
@@ -96,6 +101,15 @@ export function TaskDetail() {
   const actionError = action.error ? errorMessage(action.error) : null;
   const canApprovePlan = actions.some((item) => item.event === 'approve');
   const approvePlan = () => action.mutate('approve');
+  const runAction = (event: string) => {
+    if (event === 'mark-done' || event === 'mark-wont-do') setPendingCloseEvent(event);
+    else action.mutate(event);
+  };
+  const confirmClose = () => {
+    if (!pendingCloseEvent) return;
+    action.mutate(pendingCloseEvent);
+    setPendingCloseEvent(null);
+  };
 
   return (
     <div className="h-full flex flex-col">
@@ -130,7 +144,7 @@ export function TaskDetail() {
             </ExternalLink>
           )}
           {actions.filter((a) => a.event !== 'approve' || (tab !== 'summary' && tab !== 'plan')).map((a) => (
-            <Button key={a.event} variant={variantForEvent(a.event)} onClick={() => action.mutate(a.event)} disabled={action.isPending} data-event={a.event}>
+            <Button key={a.event} variant={variantForEvent(a.event)} onClick={() => runAction(a.event)} disabled={action.isPending} data-event={a.event}>
               {a.label}
             </Button>
           ))}
@@ -248,6 +262,24 @@ export function TaskDetail() {
           </div>
         </div>
       </div>
+
+      <Modal
+        open={pendingCloseEvent !== null}
+        title={pendingCloseEvent === 'mark-done' ? 'Mark task done?' : "Mark task as won't do?"}
+        onClose={() => setPendingCloseEvent(null)}
+        footer={
+          <>
+            <Button variant="subtle" className="flex-1" onClick={() => setPendingCloseEvent(null)}>
+              Cancel
+            </Button>
+            <Button variant={pendingCloseEvent === 'mark-done' ? 'success' : 'danger'} className="flex-1" onClick={confirmClose} loading={action.isPending}>
+              {pendingCloseEvent === 'mark-done' ? 'Mark done' : "Won't do"}
+            </Button>
+          </>
+        }
+      >
+        This stops queued work for the task and hides it from the default Active task view. If an agent is already working, wait for it to finish first. You can still find the task with the status filter.
+      </Modal>
     </div>
   );
 }

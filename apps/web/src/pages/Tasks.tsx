@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import type { Task, Workflow } from '@sindral/shared';
-import { KNOWN_TASK_STATES, dashboardBucket, getStateStyle } from '@sindral/shared';
+import { KNOWN_TASK_STATES, TERMINAL_STATES, dashboardBucket, getStateStyle } from '@sindral/shared';
 import { StatusBadge } from '@/components/StatusBadge';
 import { RelativeTime } from '@/components/RelativeTime';
 import { EmptyState } from '@/components/EmptyState';
@@ -22,7 +22,7 @@ export function Tasks() {
   const [filterOpen, setFilterOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
 
-  const statusFilter = searchParams.get('state') ?? 'all';
+  const statusFilter = searchParams.get('state') ?? 'active';
   const bucketFilter = searchParams.get('bucket');
 
   const tasks = useMemo(() => tasksQuery.data ?? [], [tasksQuery.data]);
@@ -46,7 +46,7 @@ export function Tasks() {
   function setStatus(next: string) {
     const params = new URLSearchParams(searchParams);
     params.delete('bucket');
-    if (next === 'all') params.delete('state');
+    if (next === 'active') params.delete('state');
     else params.set('state', next);
     setSearchParams(params, { replace: true });
     setFilterOpen(false);
@@ -71,14 +71,24 @@ export function Tasks() {
   const q = search.trim().toLowerCase();
   const matches = (t: Task) => {
     const matchesSearch = !q || t.title.toLowerCase().includes(q) || t.key.toLowerCase().includes(q) || t.description.toLowerCase().includes(q);
-    const matchesStatus = statusFilter === 'all' || t.state === statusFilter;
+    const matchesStatus = bucketFilter
+      ? true
+      : statusFilter === 'all'
+        ? true
+        : statusFilter === 'active'
+          ? !TERMINAL_STATES.has(t.state)
+          : t.state === statusFilter;
     const matchesBucket = !bucketFilter || dashboardBucket(t.state, currentStep(t, workflows)) === bucketFilter;
     return matchesSearch && matchesStatus && matchesBucket;
   };
 
-  const filtered = parents.filter((p) => matches(p) || (childrenOf.get(p.id) ?? []).some(matches));
+  const filtered = parents.flatMap((parent) => {
+    if (matches(parent)) return [parent];
+    const matchingChildren = (childrenOf.get(parent.id) ?? []).filter(matches);
+    return TERMINAL_STATES.has(parent.state) ? matchingChildren : matchingChildren.length > 0 ? [parent] : [];
+  });
   const visibleCount = filtered.length;
-  const filterLabel = bucketFilter ? bucketFilter.replace('-', ' ') : statusFilter === 'all' ? 'All statuses' : getStateStyle(statusFilter).label;
+  const filterLabel = bucketFilter ? bucketFilter.replace('-', ' ') : statusFilter === 'active' ? 'Active' : statusFilter === 'all' ? 'All statuses' : getStateStyle(statusFilter).label;
 
   return (
     <div className="h-full flex flex-col md:flex-row">
@@ -107,7 +117,7 @@ export function Tasks() {
               aria-expanded={filterOpen}
               aria-label="Filter by status"
               className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs transition-colors bg-input border border-border ${
-                statusFilter === 'all' && !bucketFilter ? 'text-muted-foreground' : 'text-foreground'
+                statusFilter === 'active' && !bucketFilter ? 'text-muted-foreground' : 'text-foreground'
               }`}
             >
               <span className="flex items-center gap-1.5 capitalize">
@@ -123,13 +133,16 @@ export function Tasks() {
 
             {filterOpen && (
               <div role="listbox" aria-label="Status" className="absolute top-full left-0 right-0 mt-1 rounded-md overflow-hidden z-10 py-1 bg-card border border-border max-h-72 overflow-y-auto">
+                <FilterOption active={statusFilter === 'active' && !bucketFilter} onClick={() => setStatus('active')}>
+                  Active
+                </FilterOption>
                 <FilterOption active={statusFilter === 'all' && !bucketFilter} onClick={() => setStatus('all')}>
                   All statuses
                 </FilterOption>
                 {states.map((s) => (
                   <FilterOption key={s} active={statusFilter === s} onClick={() => setStatus(s)}>
                     <span className="inline-block w-1.5 h-1.5 rounded-full mr-1.5" style={{ background: getStateStyle(s).color }} aria-hidden="true" />
-                    {s}
+                    {getStateStyle(s).label}
                   </FilterOption>
                 ))}
               </div>
@@ -138,7 +151,7 @@ export function Tasks() {
           {bucketFilter && (
             <p className="text-[10px] text-muted-foreground">
               Showing the <span className="text-secondary-foreground">{bucketFilter.replace('-', ' ')}</span> bucket ·{' '}
-              <button type="button" className="text-accent" onClick={() => setStatus('all')}>
+              <button type="button" className="text-accent" onClick={() => setStatus('active')}>
                 clear
               </button>
             </p>
@@ -170,6 +183,8 @@ export function Tasks() {
                   </Link>
                   .
                 </>
+              ) : statusFilter === 'active' && !bucketFilter && !q ? (
+                <>Done and won&apos;t-do tasks are hidden. Use the status filter to show them.</>
               ) : undefined
             }
           />
@@ -177,12 +192,13 @@ export function Tasks() {
           <div className="grid grid-cols-1 gap-3 max-w-4xl">
             {filtered.map((task) => {
               const children = childrenOf.get(task.id) ?? [];
+              const visibleChildren = children.filter(matches);
               return (
                 <div key={task.id}>
                   <TaskRow task={task} workflows={workflows} subtaskCount={children.length} subtaskDone={children.filter((c) => c.state === 'done').length} />
-                  {children.length > 0 && (
+                  {visibleChildren.length > 0 && (
                     <div className="ml-6 mt-1.5 space-y-1.5 border-l border-border pl-3" aria-label={`Subtasks of ${task.key}`}>
-                      {children.map((child) => (
+                      {visibleChildren.map((child) => (
                         <TaskRow key={child.id} task={child} workflows={workflows} compact />
                       ))}
                     </div>

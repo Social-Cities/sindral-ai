@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, KeyboardEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
 import type { CreateTaskInput, TicketImport, Worker } from '@sindral/shared';
-import { dashboardBucket, detectTicket, normalizeRepo } from '@sindral/shared';
+import { TERMINAL_STATES, dashboardBucket, detectTicket, normalizeRepo } from '@sindral/shared';
 import { displayNameFor, useAuth } from '@/auth/AuthProvider';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Button } from '@/components/Button';
@@ -64,7 +64,7 @@ export function Home() {
   const activeTasks = useMemo(
     () =>
       tasks
-        .filter((t) => !t.parentTaskId && t.state !== 'todo' && t.state !== 'done')
+        .filter((t) => !t.parentTaskId && t.state !== 'todo' && !TERMINAL_STATES.has(t.state))
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
         .slice(0, 4),
     [tasks],

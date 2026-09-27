@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { UpdateWorkflowInput, Workflow, WorkflowEdge, WorkflowRecord, WorkflowStep } from '@sindral/shared';
-import { validateWorkflow } from '@sindral/shared';
+import { TERMINAL_STATES, validateWorkflow } from '@sindral/shared';
 import { Button } from '@/components/Button';
 import { Modal } from '@/components/Modal';
 import { PageLoader } from '@/components/Spinner';
@@ -84,10 +84,10 @@ export function Workflows() {
   const canSave = dirty && issues.length === 0 && !updateWorkflow.isPending;
 
   const taskCount = useCallback(
-    (wfId: string) => tasks.filter((t) => (t.workflowId === wfId || t.pinnedWorkflow?.id === wfId) && t.state !== 'done').length,
+    (wfId: string) => tasks.filter((t) => (t.workflowId === wfId || t.pinnedWorkflow?.id === wfId) && !TERMINAL_STATES.has(t.state)).length,
     [tasks],
   );
-  const pinnedCount = useCallback((wfId: string) => tasks.filter((t) => t.pinnedWorkflow?.id === wfId && t.state !== 'done').length, [tasks]);
+  const pinnedCount = useCallback((wfId: string) => tasks.filter((t) => t.pinnedWorkflow?.id === wfId && !TERMINAL_STATES.has(t.state)).length, [tasks]);
 
   const save = useCallback(async () => {
     if (!draft || !canSave) return;

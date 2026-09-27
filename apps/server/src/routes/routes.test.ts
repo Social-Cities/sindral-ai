@@ -86,6 +86,27 @@ describe('tasks API', () => {
     expect((await taskAction('00000000-0000-4000-8000-000000000000', 'start')).statusCode).toBe(404);
   });
 
+  it('marks tasks done or wont-do through audited actions and cancels queued work', async () => {
+    const wontDoTask = await createTask();
+    await taskAction(wontDoTask.id, 'start');
+    const closed = await taskAction(wontDoTask.id, 'mark-wont-do');
+    expect(closed.statusCode).toBe(200);
+    expect(closed.json<{ task: Task }>().task.state).toBe('wont-do');
+    expect((await ctx.repo.listJobsForTask(ctx.userA, wontDoTask.id))[0]?.status).toBe('cancelled');
+    expect((await ctx.repo.listEvents(ctx.userA, wontDoTask.id)).at(-1)).toMatchObject({
+      type: 'transition',
+      fromState: 'planning',
+      toState: 'wont-do',
+      detail: { event: 'mark-wont-do', actor: 'user' },
+    });
+    expect((await taskAction(wontDoTask.id, 'retry')).statusCode).toBe(409);
+
+    const doneTask = await createTask();
+    const done = await taskAction(doneTask.id, 'mark-done');
+    expect(done.statusCode).toBe(200);
+    expect(done.json<{ task: Task }>().task).toMatchObject({ state: 'done', currentStepId: 'done' });
+  });
+
   it('makes versioned task actions idempotent and rejects stale concurrent actions', async () => {
     const task = await createTask();
     const url = `/api/tasks/${task.id}/actions`;

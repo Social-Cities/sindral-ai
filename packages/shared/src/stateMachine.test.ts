@@ -78,8 +78,25 @@ describe('transition', () => {
 
   it('rejects invalid events', () => {
     expect(() => transition(at('plan-review', 'plan-review'), wf, 'accept')).toThrow(TransitionError);
-    expect(() => transition(at('done', 'done'), wf, 'start')).toThrow(/already complete/);
+    expect(() => transition(at('done', 'done'), wf, 'start')).toThrow(/already closed/);
     expect(() => transition(at('planning', 'nope'), wf, 'complete')).toThrow(TransitionError);
+  });
+
+  it('lets a user close an active task as done or wont-do and keeps terminal tasks closed', () => {
+    expect(transition(at('implement', 'implement'), wf, 'mark-done')).toMatchObject({
+      nextState: 'done',
+      nextStepId: 'done',
+      failedStepId: null,
+      effects: [{ type: 'complete-task' }],
+    });
+    expect(transition(at('planning', 'planning'), wf, 'mark-wont-do')).toMatchObject({
+      nextState: 'wont-do',
+      nextStepId: 'planning',
+      failedStepId: null,
+      effects: [{ type: 'complete-task' }],
+    });
+    expect(() => transition(at('done', 'done'), wf, 'fail')).toThrow(/already closed/);
+    expect(() => transition(at('wont-do', 'planning'), wf, 'start')).toThrow(/already closed/);
   });
 
   it('fail parks the task in failure and remembers the failed step', () => {
@@ -119,12 +136,14 @@ describe('transition', () => {
 
 describe('ui helpers', () => {
   it('offers human actions on human steps only', () => {
-    expect(availableActions(at('todo', 'todo'), wf)).toEqual([{ event: 'start', label: 'Start Planning' }]);
-    expect(availableActions(at('plan-review', 'plan-review'), wf)).toEqual([{ event: 'approve', label: 'Approve Plan' }]);
-    expect(availableActions(at('in-review', 'in-review'), wf)).toEqual([{ event: 'accept', label: 'Accept & merge' }]);
-    expect(availableActions(at('implement', 'implement'), wf)).toEqual([]);
-    expect(availableActions(at('failure', 'implement', 'implement'), wf).map((a) => a.event)).toEqual(['troubleshoot', 'retry']);
-    expect(availableActions(at('todo', null), null)).toEqual([]);
+    expect(availableActions(at('todo', 'todo'), wf).map((a) => a.event)).toEqual(['start', 'mark-done', 'mark-wont-do']);
+    expect(availableActions(at('plan-review', 'plan-review'), wf).map((a) => a.event)).toEqual(['approve', 'mark-done', 'mark-wont-do']);
+    expect(availableActions(at('in-review', 'in-review'), wf).map((a) => a.event)).toEqual(['accept', 'mark-done', 'mark-wont-do']);
+    expect(availableActions(at('implement', 'implement'), wf).map((a) => a.event)).toEqual(['mark-done', 'mark-wont-do']);
+    expect(availableActions(at('failure', 'implement', 'implement'), wf).map((a) => a.event)).toEqual(['troubleshoot', 'retry', 'mark-done', 'mark-wont-do']);
+    expect(availableActions(at('todo', null), null).map((a) => a.event)).toEqual(['mark-done', 'mark-wont-do']);
+    expect(availableActions(at('done', 'done'), wf)).toEqual([]);
+    expect(availableActions(at('wont-do', 'planning'), wf)).toEqual([]);
   });
 
   it('chat triggers feedback only on gates with a feedback edge', () => {

@@ -25,6 +25,8 @@ type TaskLike = Pick<Task, 'state' | 'currentStepId' | 'failedStepId'>;
 
 /** Universal events available regardless of workflow definition. */
 export const UNIVERSAL_EVENTS = {
+  MARK_DONE: 'mark-done',
+  MARK_WONT_DO: 'mark-wont-do',
   FAIL: 'fail',
   TROUBLESHOOT: 'troubleshoot',
   RETRY: 'retry',
@@ -45,7 +47,34 @@ function enterStep(step: WorkflowStep): { state: string; effects: TransitionEffe
  * Pure transition function. Given the task, its pinned workflow and an event,
  * returns the next state and side effects the orchestrator must perform.
  */
-export function transition(task: TaskLike, workflow: Workflow, event: string): Transition {
+export function transition(task: TaskLike, workflow: Workflow | null, event: string): Transition {
+  if (task.state === 'done' || task.state === 'wont-do') {
+    throw new TransitionError('Task is already closed');
+  }
+
+  if (event === UNIVERSAL_EVENTS.MARK_DONE) {
+    const endStep = workflow?.steps.find((step) => step.type === 'end');
+    return {
+      nextState: 'done',
+      nextStepId: endStep?.id ?? task.currentStepId,
+      failedStepId: null,
+      effects: [{ type: 'complete-task' }],
+      event,
+    };
+  }
+
+  if (event === UNIVERSAL_EVENTS.MARK_WONT_DO) {
+    return {
+      nextState: 'wont-do',
+      nextStepId: task.currentStepId,
+      failedStepId: null,
+      effects: [{ type: 'complete-task' }],
+      event,
+    };
+  }
+
+  if (!workflow) throw new TransitionError('Task has no workflow', 'NO_WORKFLOW');
+
   if (event === UNIVERSAL_EVENTS.REBASE_CONFLICT) {
     if (!task.currentStepId || task.state === 'done' || task.state === 'failure' || task.state === 'troubleshoot' || task.state === 'conflict-resolution') {
       throw new TransitionError('Task cannot enter conflict resolution from its current state');
@@ -129,21 +158,27 @@ export function transition(task: TaskLike, workflow: Workflow, event: string): T
 
 /** Actions the UI should offer for the task's current position. */
 export function availableActions(task: TaskLike, workflow: Workflow | null): { event: string; label: string }[] {
+  if (task.state === 'done' || task.state === 'wont-do') return [];
+  const closeActions = [
+    { event: UNIVERSAL_EVENTS.MARK_DONE, label: 'Mark done' },
+    { event: UNIVERSAL_EVENTS.MARK_WONT_DO, label: "Won't do" },
+  ];
   if (task.state === 'failure') {
     return [
       { event: UNIVERSAL_EVENTS.TROUBLESHOOT, label: 'Troubleshoot' },
       { event: UNIVERSAL_EVENTS.RETRY, label: 'Retry step' },
+      ...closeActions,
     ];
   }
-  if (task.state === 'troubleshoot' || !workflow) return [];
+  if (task.state === 'troubleshoot' || !workflow) return closeActions;
   const step = getStep(workflow, task.currentStepId ?? workflow.entryStepId);
-  if (!step || step.type !== 'human') return [];
-  return humanActions(workflow, step.id).map(({ event, label }) => ({ event, label }));
+  if (!step || step.type !== 'human') return closeActions;
+  return [...humanActions(workflow, step.id).map(({ event, label }) => ({ event, label })), ...closeActions];
 }
 
 /** Whether a chat message should kick off an agent revision on the task's current step. */
 export function chatTriggersFeedback(task: TaskLike, workflow: Workflow | null): boolean {
-  if (!workflow || task.state === 'failure' || task.state === 'troubleshoot') return false;
+  if (!workflow || task.state === 'failure' || task.state === 'troubleshoot' || task.state === 'done' || task.state === 'wont-do') return false;
   const step = getStep(workflow, task.currentStepId ?? workflow.entryStepId);
   if (!step || step.type !== 'human') return false;
   return findEdge(workflow, step.id, FEEDBACK_EVENT) !== null;
@@ -164,7 +199,7 @@ export function eventForResult(result: AgentResult): string {
 /** Whether an agent is expected to be running for a task in this state. */
 export function isAgentActive(task: TaskLike, workflow: Workflow | null): boolean {
   if (task.state === 'troubleshoot' || task.state === 'conflict-resolution') return true;
-  if (task.state === 'failure' || task.state === 'done' || !workflow) return false;
+  if (task.state === 'failure' || task.state === 'done' || task.state === 'wont-do' || !workflow) return false;
   const step = getStep(workflow, task.currentStepId);
   return step?.type === 'agent';
 }

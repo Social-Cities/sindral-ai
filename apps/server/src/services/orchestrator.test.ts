@@ -86,6 +86,22 @@ describe('atomic task commands', () => {
     expect(racing.filter((result) => result.status === 'rejected')).toHaveLength(1);
     expect(await queuedJobs(racingTask.id)).toHaveLength(1);
   });
+
+  it('serializes manual closure against claimed worker outcomes', async () => {
+    const task = await newTask();
+    await orch().applyUserEvent(userId, task.id, 'start');
+    const job = await claimNext(ctx, userId);
+    expect(job).not.toBeNull();
+
+    await expect(orch().applyUserEvent(userId, task.id, 'mark-wont-do')).rejects.toThrow(/active work/);
+    await orch().completeJob(userId, job!.id, plan('# completed plan'), job!.attempt, job!.leaseToken);
+    const planned = await reload(ctx, userId, task);
+    expect(planned).toMatchObject({ state: 'plan-review', plan: '# completed plan' });
+
+    await orch().applyUserEvent(userId, task.id, 'mark-wont-do');
+    const closed = await reload(ctx, userId, task);
+    expect(closed).toMatchObject({ state: 'wont-do', plan: '# completed plan' });
+  });
 });
 
 describe('full SDLC happy path', () => {
@@ -680,6 +696,152 @@ describe('subtask stacks', () => {
     expect(p.state).toBe('implement');
   });
 
+  it('requires active children to close first and settles a declined stack as wont-do', async () => {
+    const { parent, children } = await plannedParent();
+    await orch().applyUserEvent(userId, parent.id, 'approve');
+
+    await expect(orch().applyUserEvent(userId, parent.id, 'mark-wont-do')).rejects.toThrow(/Close active subtasks/);
+
+    for (const child of children) {
+      await orch().applyUserEvent(userId, child.id, 'mark-wont-do');
+    }
+
+    expect((await reload(ctx, userId, parent)).state).toBe('wont-do');
+    expect((await ctx.repo.listSubtasks(userId, parent.id)).map((child) => child.state)).toEqual(['wont-do', 'wont-do', 'wont-do']);
+    expect((await ctx.repo.listEvents(userId, parent.id)).at(-1)).toMatchObject({
+      type: 'transition',
+      toState: 'wont-do',
+      detail: { event: 'mark-wont-do', actor: 'system', reason: 'subtasks-complete' },
+    });
+  });
+
+  it('serializes child closure against active parent maintenance', async () => {
+    const { parent, children } = await plannedParent();
+    const maintenance = await ctx.repo.createJob(userId, {
+      taskId: parent.id,
+      kind: 'rebase-stack',
+      stepId: null,
+      payload: { kind: 'rebase-stack', repos: ['acme/app'], stack: [] },
+    });
+    const claim = (await ctx.repo.claimJobs(userId, 'maintenance-worker', 10)).find((job) => job.id === maintenance.id)!;
+    await orch().applyUserEvent(userId, parent.id, 'approve');
+
+    await expect(orch().applyUserEvent(userId, children[0]!.id, 'mark-wont-do')).rejects.toThrow(/active work/);
+
+    await orch().completeJob(userId, claim.id, { kind: 'rebase', summary: 'maintenance complete', rebased: [] }, claim.attempt, claim.leaseToken);
+    for (const child of children) await orch().applyUserEvent(userId, child.id, 'mark-wont-do');
+    expect((await reload(ctx, userId, parent)).state).toBe('wont-do');
+  });
+
+  it('reconciles a terminal child stack when a finalized parent outcome is replayed', async () => {
+    const { parent, children } = await plannedParent();
+    await orch().applyUserEvent(userId, parent.id, 'approve');
+    for (const child of children) await ctx.repo.updateTask(userId, child.id, { state: 'wont-do' });
+    const maintenance = await ctx.repo.createJob(userId, {
+      taskId: parent.id,
+      kind: 'rebase-stack',
+      stepId: null,
+      payload: { kind: 'rebase-stack', repos: ['acme/app'], stack: [] },
+    });
+    const claim = (await ctx.repo.claimJobs(userId, 'replay-worker', 10)).find((job) => job.id === maintenance.id)!;
+    const result = { kind: 'rebase' as const, summary: 'already applied', rebased: [] };
+    const outcomeHash = createHash('sha256').update(JSON.stringify({ result })).digest('hex');
+    const outcome = await ctx.repo.beginJobOutcome(userId, claim.id, claim.attempt, outcomeHash, { result }, claim.leaseToken);
+    expect(outcome.state).toBe('acquired');
+    await ctx.repo.finalizeJobOutcome(userId, claim.id, claim.attempt, outcomeHash, outcome.token!, 'completed');
+
+    await orch().completeJob(userId, claim.id, result, claim.attempt, claim.leaseToken);
+
+    expect((await reload(ctx, userId, parent)).state).toBe('wont-do');
+  });
+
+  it('ignores rebase failures for a sibling that is already wont-do', async () => {
+    const { parent, children } = await plannedParent();
+    const sibling = children[1]!;
+    await orch().applyUserEvent(userId, sibling.id, 'mark-wont-do');
+    const rebase = await ctx.repo.createJob(userId, {
+      taskId: parent.id,
+      kind: 'rebase-stack',
+      stepId: null,
+      payload: { kind: 'rebase-stack', repos: ['acme/app'], stack: [{ taskId: sibling.id, branch: sibling.branch!, baseBranch: sibling.baseBranch! }] },
+    });
+    const claim = (await ctx.repo.claimJobs(userId, 'rebase-worker', 10)).find((job) => job.id === rebase.id)!;
+
+    await orch().completeJob(userId, claim.id, {
+      kind: 'rebase',
+      summary: 'stale failure',
+      rebased: [{ taskId: sibling.id, branch: sibling.branch!, ok: false, error: 'ignore me' }],
+    }, claim.attempt, claim.leaseToken);
+
+    expect(await reload(ctx, userId, sibling)).toMatchObject({ state: 'wont-do', lastError: null });
+    expect(await ctx.repo.listMessages(userId, sibling.id)).toEqual([]);
+    expect((await ctx.repo.getJob(userId, rebase.id))?.status).toBe('completed');
+  });
+
+  it('prunes a closing child from queued parent rebase work', async () => {
+    const { parent, children } = await plannedParent();
+    const [closing, remaining] = children;
+    const onlyClosing = await ctx.repo.createJob(userId, {
+      taskId: parent.id,
+      kind: 'rebase-stack',
+      stepId: null,
+      payload: { kind: 'rebase-stack', repos: ['acme/app'], stack: [{ taskId: closing!.id, branch: closing!.branch!, baseBranch: 'main' }] },
+    });
+    const mixed = await ctx.repo.createJob(userId, {
+      taskId: parent.id,
+      kind: 'rebase-stack',
+      stepId: null,
+      payload: {
+        kind: 'rebase-stack',
+        repos: ['acme/app'],
+        stack: [
+          { taskId: closing!.id, branch: closing!.branch!, baseBranch: 'main' },
+          { taskId: remaining!.id, branch: remaining!.branch!, baseBranch: closing!.branch! },
+        ],
+      },
+    });
+
+    await orch().applyUserEvent(userId, closing!.id, 'mark-wont-do');
+
+    expect((await ctx.repo.getJob(userId, onlyClosing.id))?.status).toBe('cancelled');
+    expect((await ctx.repo.getJob(userId, mixed.id))?.payload).toMatchObject({ stack: [{ taskId: remaining!.id }] });
+    const claimed = await ctx.repo.claimJobs(userId, 'rebase-worker', 10);
+    expect(claimed.flatMap((job) => (job.payload.kind === 'rebase-stack' ? job.payload.stack.map((entry) => entry.taskId) : []))).not.toContain(closing!.id);
+  });
+
+  it('resumes parent settlement and sibling progression when a manual closure is replayed', async () => {
+    const { parent, children } = await plannedParent();
+    await orch().applyUserEvent(userId, parent.id, 'approve');
+    const service = orch();
+    const completion = vi.spyOn(
+      service as unknown as { onTaskCompleted(userId: string, task: Task): Promise<void> },
+      'onTaskCompleted',
+    );
+
+    const first = await reload(ctx, userId, children[0]!);
+    completion.mockRejectedValueOnce(new Error('simulated process exit after transition commit'));
+    await expect(service.applyUserEvent(userId, first.id, 'mark-wont-do', first.version, 'close-first')).rejects.toThrow(/simulated process exit/);
+    expect((await reload(ctx, userId, children[1]!)).state).toBe('todo');
+    completion.mockRestore();
+
+    await service.applyUserEvent(userId, first.id, 'mark-wont-do', first.version, 'close-first');
+    expect((await reload(ctx, userId, children[1]!)).state).toBe('planning');
+
+    await service.applyUserEvent(userId, children[1]!.id, 'mark-wont-do');
+    const last = await reload(ctx, userId, children[2]!);
+    const finalCompletion = vi.spyOn(
+      service as unknown as { onTaskCompleted(userId: string, task: Task): Promise<void> },
+      'onTaskCompleted',
+    );
+    finalCompletion.mockRejectedValueOnce(new Error('simulated process exit before parent settlement'));
+    await expect(service.applyUserEvent(userId, last.id, 'mark-done', last.version, 'close-last')).rejects.toThrow(/simulated process exit/);
+    expect((await reload(ctx, userId, parent)).state).toBe('implement');
+    finalCompletion.mockRestore();
+
+    await service.applyUserEvent(userId, last.id, 'mark-done', last.version, 'close-last');
+    expect((await reload(ctx, userId, parent)).state).toBe('wont-do');
+  });
+
   it('enqueues a rebase-stack job when an earlier child pushes while later children have PRs', async () => {
     const { parent, children } = await plannedParent();
     await orch().applyUserEvent(userId, parent.id, 'approve');
@@ -828,7 +990,7 @@ describe('subtask stacks', () => {
     expect(done.state).toBe('done');
     expect(done.currentStepId).toBe('done');
     const events = await ctx.repo.listEvents(userId, parent.id);
-    expect(events.at(-1)).toMatchObject({ type: 'subtasks-complete', toState: 'done' });
+    expect(events.at(-1)).toMatchObject({ type: 'transition', toState: 'done', detail: { event: 'mark-done', actor: 'system', reason: 'subtasks-complete' } });
   });
 });
 

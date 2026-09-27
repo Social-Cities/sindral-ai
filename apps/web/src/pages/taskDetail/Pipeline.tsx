@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { TaskWithRelations, Workflow } from '@sindral/shared';
-import { getStateStyle, getStep, happyPath, isOffPath } from '@sindral/shared';
+import { TERMINAL_STATES, getStateStyle, getStep, happyPath, isOffPath } from '@sindral/shared';
 
 interface PipelineProps {
   task: TaskWithRelations;
@@ -44,7 +44,7 @@ export function Pipeline({ task, workflow }: PipelineProps) {
   return (
     <ol className="flex items-center gap-0 mt-4 overflow-x-auto pb-1" aria-label="Pipeline" tabIndex={0}>
       {path.map((step, i) => {
-        const isCurrent = i === currentIdx && task.state !== 'done';
+        const isCurrent = i === currentIdx && !TERMINAL_STATES.has(task.state);
         const isPast = i < currentIdx || (task.state === 'done' && i <= currentIdx);
         return (
           <li key={step.id} className="flex items-center shrink-0" aria-current={isCurrent ? 'step' : undefined}>

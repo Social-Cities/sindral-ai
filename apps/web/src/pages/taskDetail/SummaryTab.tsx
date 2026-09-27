@@ -178,6 +178,13 @@ export function SummaryTab({ task, workflow, canApprove, approving, onApprove, o
             <p className="text-xs text-muted-foreground mt-0.5">All work has been accepted.</p>
           </div>
         )}
+
+        {task.state === 'wont-do' && (
+          <div className="p-4 rounded-lg bg-secondary border border-border">
+            <p className="text-sm font-medium text-secondary-foreground">Task closed</p>
+            <p className="text-xs text-muted-foreground mt-0.5">This task was marked as won&apos;t do.</p>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -17,6 +17,7 @@ describe('dashboardBucket', () => {
     expect(dashboardBucket('in-review')).toBe('in-review');
     expect(dashboardBucket('custom-gate', { type: 'human' })).toBe('in-review');
     expect(dashboardBucket('done')).toBe('done');
+    expect(dashboardBucket('wont-do')).toBe('done');
     expect(dashboardBucket('failure')).toBe('failed');
   });
 });

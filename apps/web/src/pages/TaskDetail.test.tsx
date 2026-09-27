@@ -71,14 +71,28 @@ describe('TaskDetail', () => {
     expect(api.runTaskAction).toHaveBeenCalledWith('t2', 'approve', 0);
   });
 
-  it('shows the spinner and no buttons while an agent is working', async () => {
+  it('shows the spinner and closure actions while an agent is working', async () => {
     setup(makeTaskWithRelations({ id: 't3', state: 'implement', currentStepId: 'implement', pinnedWorkflow: snapshotWorkflow(FULL_SDLC_WORKFLOW) }));
     expect(await screen.findByText('Agent working…')).toBeInTheDocument();
     const summaryStatus = screen.getByText('Agent is working');
     const description = screen.getByText('Description');
     expect(summaryStatus.compareDocumentPosition(description) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const actions = screen.getByTestId('task-actions');
-    expect(within(actions).queryAllByRole('button')).toHaveLength(0);
+    expect(within(actions).getByRole('button', { name: 'Mark done' })).toBeInTheDocument();
+    expect(within(actions).getByRole('button', { name: "Won't do" })).toBeInTheDocument();
+  });
+
+  it('confirms before marking a task as done or wont-do', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.runTaskAction).mockReturnValue(new Promise(() => undefined));
+    setup(makeTaskWithRelations({ id: 'close-me', state: 'todo', currentStepId: 'todo' }));
+
+    await user.click(await screen.findByRole('button', { name: "Won't do" }));
+    const dialog = screen.getByRole('dialog', { name: "Mark task as won't do?" });
+    expect(within(dialog).getByText(/hides it from the default Active task view/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: "Won't do" }));
+
+    expect(api.runTaskAction).toHaveBeenCalledWith('close-me', 'mark-wont-do', 0);
   });
 
   it('offers Troubleshoot and Retry on failure and shows the error', async () => {
