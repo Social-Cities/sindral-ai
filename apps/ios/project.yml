@@ -1,5 +1,6 @@
 name: SindralAI
 options:
+  xcodeVersion: "26.0"
   bundleIdPrefix: ai.sindral
   deploymentTarget:
     iOS: "17.0"

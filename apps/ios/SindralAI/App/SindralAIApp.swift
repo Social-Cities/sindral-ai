@@ -85,6 +85,7 @@ private enum AppSection: String, CaseIterable, Identifiable {
     var icon: String {
         switch self { case .home: "house"; case .tasks: "checklist"; case .workflows: "point.3.connected.trianglepath.dotted"; case .settings: "gearshape" }
     }
+    @MainActor
     @ViewBuilder var content: some View {
         switch self { case .home: DashboardView(); case .tasks: TasksView(); case .workflows: WorkflowsView(); case .settings: SettingsView() }
     }
