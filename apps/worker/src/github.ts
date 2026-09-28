@@ -57,13 +57,26 @@ function fail(what: string, result: RunResult): never {
 }
 
 /** Commits any uncommitted work (agents are asked to commit, but do not always) and pushes the branch. */
-export async function commitAndPush(git: GitRunner, opts: { taskKey: string; summary: string; branch: string }): Promise<{ committed: boolean }> {
+export async function commitAndPush(
+  git: GitRunner,
+  opts: { taskKey: string; summary: string; branch: string; baseBranch: string },
+): Promise<{ committed: boolean }> {
   const status = await git(['status', '--porcelain']);
   let committed = false;
   if (status.stdout.trim()) {
     await git(['add', '-A']);
     await git(['-c', 'user.name=Sindral AI', '-c', 'user.email=sindral@users.noreply.github.com', 'commit', '--no-verify', `--author=${COMMIT_AUTHOR}`, '-m', commitMessage(opts.taskKey, opts.summary)]);
     committed = true;
+  }
+  await git(['fetch', '--prune', 'origin']);
+  const rebase = await git.try([
+    '-c', 'user.name=Sindral AI',
+    '-c', 'user.email=sindral@users.noreply.github.com',
+    'rebase', `origin/${opts.baseBranch}`,
+  ]);
+  if (rebase.failed || rebase.exitCode !== 0) {
+    await git.try(['rebase', '--abort']);
+    fail(`rebase onto ${opts.baseBranch}`, rebase);
   }
   await git(['push', '--force-with-lease', '-u', 'origin', `${opts.branch}:${opts.branch}`]);
   return { committed };

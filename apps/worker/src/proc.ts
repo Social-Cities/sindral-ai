@@ -99,6 +99,24 @@ export async function runOrThrow(file: string, args: readonly string[], opts: Ru
   return result;
 }
 
+/** Runs an interactive command attached to the current terminal. */
+export async function runInteractive(file: string, args: readonly string[], opts: RunOptions = {}): Promise<RunResult> {
+  try {
+    const result = await execa(file, [...args], {
+      cwd: opts.cwd,
+      env: opts.env,
+      extendEnv: opts.extendEnv ?? true,
+      timeout: opts.timeoutMs,
+      cancelSignal: opts.signal,
+      reject: false,
+      stdio: 'inherit',
+    });
+    return normalise(result as unknown as Record<string, unknown>);
+  } catch (err) {
+    return fromThrown(err);
+  }
+}
+
 /**
  * Runs a long-lived command, forwarding stdout/stderr line by line while the
  * process runs. Used for agent CLIs so their output can be streamed to the

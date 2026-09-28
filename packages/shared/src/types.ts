@@ -410,6 +410,8 @@ export interface RebaseResult {
     taskId: string;
     branch: string;
     ok: boolean;
+    /** New remote head after a successful history rewrite. */
+    headSha?: string;
     error?: string;
     conflict?: {
       repository: string;

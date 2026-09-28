@@ -186,6 +186,7 @@ export const agentResultSchema = z.discriminatedUnion('kind', [
         taskId: z.string(),
         branch: z.string(),
         ok: z.boolean(),
+        headSha: z.string().regex(/^[0-9a-f]{40}$/i).optional(),
         error: z.string().optional(),
         conflict: z
           .object({

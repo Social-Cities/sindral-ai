@@ -29,10 +29,12 @@ describe('runRebaseStack', () => {
   it('rebases in order, stops at the first conflict, aborts it and skips the rest', async () => {
     const sourceSha = 'a'.repeat(40);
     const targetSha = 'b'.repeat(40);
+    const rebasedSha = 'c'.repeat(40);
     const git = fakeGit((args) => {
       if (args[0] === 'worktree' && args[1] === 'list') return ok('');
       if (args[0] === 'rev-parse' && args[1] === 'origin/sindral/eng-2') return ok(sourceSha);
       if (args[0] === 'rev-parse' && args[1] === 'origin/sindral/eng-1') return ok(targetSha);
+      if (args[0] === 'rev-parse' && args[1] === 'HEAD') return ok(rebasedSha);
       if (args.includes('rebase') && args.includes('origin/sindral/eng-1')) return failed('CONFLICT (content): Merge conflict in a.ts', 1);
       if (args[0] === 'diff' && args.includes('--diff-filter=U')) return ok('a.ts\0');
       return undefined;
@@ -44,7 +46,7 @@ describe('runRebaseStack', () => {
 
     expect(result.kind).toBe('rebase');
     expect(result.rebased).toEqual([
-      { taskId: 't1', branch: 'sindral/eng-1', ok: true },
+      { taskId: 't1', branch: 'sindral/eng-1', ok: true, headSha: rebasedSha },
       {
         taskId: 't2',
         branch: 'sindral/eng-2',
@@ -70,11 +72,12 @@ describe('runRebaseStack', () => {
     await fs.mkdir(existing, { recursive: true });
     const git = fakeGit((args) => {
       if (args[0] === 'worktree' && args[1] === 'list') return ok(`worktree ${existing}\nbranch refs/heads/sindral/eng-1\n`);
+      if (args[0] === 'rev-parse' && args[1] === 'HEAD') return ok('d'.repeat(40));
       return undefined;
     });
     const workspaces = new WorkspaceManager(workdir, { git: git.factory });
     const result = await runRebaseStack({ payload: { ...payload, stack: payload.stack.slice(0, 1) }, workspaces, githubToken: null, redactor: new Redactor(), git: git.factory });
-    expect(result.rebased).toEqual([{ taskId: 't1', branch: 'sindral/eng-1', ok: true }]);
+    expect(result.rebased).toEqual([{ taskId: 't1', branch: 'sindral/eng-1', ok: true, headSha: 'd'.repeat(40) }]);
     expect(result.summary).toBe('Rebased 1/1 branches successfully');
     expect(git.find('worktree', 'add')).toHaveLength(0);
     expect(git.calls.find((c) => c.args.includes('rebase'))?.cwd).toBe(existing);

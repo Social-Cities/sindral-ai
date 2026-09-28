@@ -50,6 +50,11 @@ export function expandHome(p: string, home: string = os.homedir()): string {
   return p;
 }
 
+/** Stable config location used to discover a worker whose data directory is elsewhere. */
+export function userConfigFile(home: string = os.homedir()): string {
+  return path.join(home, '.sindral', 'config.json');
+}
+
 /** Empty strings (e.g. `SINDRAL_WORKER_NAME=` in .env.example) count as unset. */
 function dropEmpty(source: Record<string, string | undefined>): Record<string, string> {
   const out: Record<string, string> = {};
