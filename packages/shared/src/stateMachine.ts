@@ -33,6 +33,7 @@ export const UNIVERSAL_EVENTS = {
   RESOLVED: 'resolved',
   UNRESOLVED: 'unresolved',
   REBASE_CONFLICT: 'rebase-conflict',
+  RESTACKED: 'restacked',
   CONFLICT_RESOLVED: 'conflict-resolved',
   CONFLICT_ESCALATED: 'conflict-escalated',
 } as const;
@@ -74,6 +75,15 @@ export function transition(task: TaskLike, workflow: Workflow | null, event: str
   }
 
   if (!workflow) throw new TransitionError('Task has no workflow', 'NO_WORKFLOW');
+
+  if (event === UNIVERSAL_EVENTS.RESTACKED) {
+    if (task.state !== 'in-review') throw new TransitionError('Only a task in implementation review can be restacked');
+    const validationStep = workflow.steps.find((step) => step.type === 'agent' && step.output === 'review')
+      ?? workflow.steps.find((step) => step.type === 'agent' && step.output === 'verdict');
+    if (!validationStep) throw new TransitionError('Task workflow has no review or verification step to rerun', 'NO_STEP');
+    const entered = enterStep(validationStep);
+    return { nextState: entered.state, nextStepId: validationStep.id, failedStepId: null, effects: entered.effects, event };
+  }
 
   if (event === UNIVERSAL_EVENTS.REBASE_CONFLICT) {
     if (!task.currentStepId || task.state === 'done' || task.state === 'failure' || task.state === 'troubleshoot' || task.state === 'conflict-resolution') {

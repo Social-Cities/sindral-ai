@@ -66,7 +66,8 @@ export async function runRebaseStack(opts: RebaseStackOptions): Promise<RebaseRe
         break;
       }
       await wt(['push', '--force-with-lease', 'origin', `${branch}:${branch}`]);
-      rebased.push({ taskId: entry.taskId, branch, ok: true });
+      const headSha = (await wt(['rev-parse', 'HEAD'])).stdout.trim();
+      rebased.push({ taskId: entry.taskId, branch, ok: true, ...(isSha(headSha) ? { headSha } : {}) });
     } catch (err) {
       rebased.push({ taskId: entry.taskId, branch, ok: false, error: opts.redactor.redactError(err).slice(0, 2000) });
       break;

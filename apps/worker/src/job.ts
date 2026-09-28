@@ -263,7 +263,12 @@ async function publishPr(opts: PublishOptions): Promise<Record<string, unknown>>
     if (opts.signal.aborted) throw new Error(String(opts.signal.reason ?? SHUTDOWN_REASON));
     opts.events.progress(`Pushing ${repo.branch} to ${repo.repo.full}`);
     const git = gitFactory(repo.dir, auth);
-    const { committed } = await commitAndPush(git, { taskKey: opts.taskKey, summary: opts.summary, branch: repo.branch });
+    const { committed } = await commitAndPush(git, {
+      taskKey: opts.taskKey,
+      summary: opts.summary,
+      branch: repo.branch,
+      baseBranch: repo.baseBranch,
+    });
     opts.write(`${repo.repo.full}: pushed ${repo.branch}${committed ? ' (committed leftover changes)' : ''}`);
     const pr = await ensurePr({
       gh,

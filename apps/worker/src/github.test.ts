@@ -116,20 +116,36 @@ describe('ensurePr', () => {
 describe('commitAndPush', () => {
   it('commits leftover changes as Sindral AI and force-pushes with lease', async () => {
     const git = fakeGit((args) => (args[0] === 'status' ? ok(' M src/a.ts') : undefined));
-    const result = await commitAndPush(git.factory('/wt', { configArgs: [], secrets: [] }), { taskKey: 'ENG-1', summary: 'Did it', branch: 'sindral/eng-1' });
+    const result = await commitAndPush(git.factory('/wt', { configArgs: [], secrets: [] }), {
+      taskKey: 'ENG-1', summary: 'Did it', branch: 'sindral/eng-1', baseBranch: 'main',
+    });
     expect(result.committed).toBe(true);
     expect(git.find('add', '-A')).toHaveLength(1);
     const commit = git.calls.find((c) => c.args.includes('commit'));
     expect(commit?.args).toContain('--author=Sindral AI <sindral@users.noreply.github.com>');
     expect(commit?.args).toContain('ENG-1: Did it');
+    expect(git.find('fetch', '--prune', 'origin')).toHaveLength(1);
+    expect(git.calls.filter((call) => call.args.includes('rebase') && call.args.includes('origin/main'))).toHaveLength(1);
     expect(git.find('push', '--force-with-lease', '-u', 'origin', 'sindral/eng-1:sindral/eng-1')).toHaveLength(1);
   });
 
   it('skips the commit when the tree is clean', async () => {
     const git = fakeGit();
-    const result = await commitAndPush(git.factory('/wt', { configArgs: [], secrets: [] }), { taskKey: 'ENG-1', summary: 'Did it', branch: 'b' });
+    const result = await commitAndPush(git.factory('/wt', { configArgs: [], secrets: [] }), {
+      taskKey: 'ENG-1', summary: 'Did it', branch: 'b', baseBranch: 'develop',
+    });
     expect(result.committed).toBe(false);
     expect(git.calls.some((c) => c.args.includes('commit'))).toBe(false);
+    expect(git.calls.filter((call) => call.args.includes('rebase') && call.args.includes('origin/develop'))).toHaveLength(1);
     expect(git.find('push')).toHaveLength(1);
+  });
+
+  it('aborts a conflicted base sync and does not push stale code', async () => {
+    const git = fakeGit((args) => (args.includes('rebase') && args.includes('origin/main') ? failed('CONFLICT') : undefined));
+    await expect(commitAndPush(git.factory('/wt', { configArgs: [], secrets: [] }), {
+      taskKey: 'ENG-1', summary: 'Did it', branch: 'b', baseBranch: 'main',
+    })).rejects.toThrow(/rebase onto main failed.*CONFLICT/);
+    expect(git.find('rebase', '--abort')).toHaveLength(1);
+    expect(git.find('push')).toHaveLength(0);
   });
 });

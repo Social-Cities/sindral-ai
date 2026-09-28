@@ -127,6 +127,19 @@ describe('transition', () => {
     expect(escalated).toMatchObject({ nextState: 'failure', failedStepId: 'in-review' });
   });
 
+  it('invalidates implementation review after a successful restack', () => {
+    expect(transition(at('in-review', 'in-review'), wf, 'restacked')).toMatchObject({
+      nextState: 'adversarial-review',
+      nextStepId: 'adversarial-review',
+      effects: [{ type: 'dispatch', stepId: 'adversarial-review' }],
+    });
+    expect(() => transition(at('implement', 'implement'), wf, 'restacked')).toThrow(/implementation review/);
+    expect(transition(at('in-review', 'in-review'), FAST_TRACK_WORKFLOW, 'restacked')).toMatchObject({
+      nextState: 'verify',
+      effects: [{ type: 'dispatch', stepId: 'verify' }],
+    });
+  });
+
   it('retry from failure re-dispatches the failed step', () => {
     const t = transition(at('failure', 'planning', 'planning'), wf, 'retry');
     expect(t).toMatchObject({ nextState: 'planning', effects: [{ type: 'dispatch', stepId: 'planning' }] });

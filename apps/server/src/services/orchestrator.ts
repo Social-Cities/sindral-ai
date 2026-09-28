@@ -232,6 +232,8 @@ export class Orchestrator {
 
   async applyUserEvent(userId: string, taskId: string, event: string, expectedVersion?: number, idempotencyKey?: string): Promise<Task> {
     const task = await this.getTask(userId, taskId);
+    if (event === UNIVERSAL_EVENTS.RESTACKED) throw badRequest('The restacked event is reserved for stack maintenance');
+    if (task.parentTaskId && task.state === 'in-review') await this.assertNoActiveStackMaintenance(userId, task);
     const version = expectedVersion ?? task.version;
     const key = idempotencyKey ?? `direct:${task.id}:${version}:${event}`;
     const replay = await this.repo.getTaskTransitionReplay(userId, key, transitionRequestHash(userId, task.id, version, event, 'user', undefined));
@@ -261,6 +263,9 @@ export class Orchestrator {
     githubFeedback?: GitHubFeedbackReference,
   ): Promise<{ message: Message | null; task: Task }> {
     let task = await this.getTask(userId, taskId);
+    const workflow = await this.resolveWorkflow(userId, task);
+    const triggersFeedback = workflow !== null && chatTriggersFeedback(task, workflow);
+    if (triggersFeedback && task.parentTaskId) await this.prepareChildFeedback(userId, task);
     const message = await this.repo.createMessage(userId, {
       taskId,
       role: 'user',
@@ -269,8 +274,7 @@ export class Orchestrator {
       externalId: externalId ?? null,
       githubFeedback: githubFeedback ?? null,
     });
-    const workflow = await this.resolveWorkflow(userId, task);
-    if (workflow && chatTriggersFeedback(task, workflow)) {
+    if (triggersFeedback) {
       task = await this.applyEvent(userId, task, 'feedback', {
         actor: 'user',
         detail: { source },
@@ -294,6 +298,37 @@ export class Orchestrator {
       this.hub.publish(userId, { type: 'task.updated', taskId });
     }
     return { message, task };
+  }
+
+  private async stackMaintenanceForTask(userId: string, task: Task): Promise<Job[]> {
+    if (!task.parentTaskId) return [];
+    return (await this.repo.listJobsForTask(userId, task.parentTaskId)).filter(
+      (job) =>
+        job.payload.kind === 'rebase-stack' &&
+        ['queued', 'claimed', 'running', 'applying'].includes(job.status) &&
+        job.payload.stack.some((entry) => entry.taskId === task.id),
+    );
+  }
+
+  private async assertNoActiveStackMaintenance(userId: string, task: Task): Promise<void> {
+    if ((await this.stackMaintenanceForTask(userId, task)).length > 0) {
+      throw conflict('Stack maintenance is updating this pull request; retry when it finishes');
+    }
+  }
+
+  /** A feedback writer will synchronize its own base before push, so queued background restacks can yield to it. */
+  private async prepareChildFeedback(userId: string, task: Task): Promise<void> {
+    const maintenance = await this.stackMaintenanceForTask(userId, task);
+    if (maintenance.some((job) => job.status !== 'queued')) {
+      throw conflict('Stack maintenance is updating this pull request; retry feedback when it finishes');
+    }
+    if (maintenance.length === 0 || !task.parentTaskId) return;
+    await this.repo.cancelQueuedJobs(userId, task.parentTaskId);
+    await this.repo.createEvent(userId, {
+      taskId: task.id,
+      type: 'stack-rebase-cancelled-for-feedback',
+      detail: { jobIds: maintenance.map((job) => job.id) },
+    });
   }
 
   private async applyEvent(userId: string, task: Task, event: string, options: ApplyOptions): Promise<Task> {
@@ -389,7 +424,10 @@ export class Orchestrator {
           break;
       }
     }
-    if (current.parentTaskId && this.isReviewOrDone(current, workflow)) await this.startNextSibling(userId, current);
+    if (current.parentTaskId && this.isReviewOrDone(current, workflow)) {
+      await this.startNextSibling(userId, current);
+      await this.resumeDeferredStackRebase(userId, current);
+    }
 
     this.hub.publish(userId, { type: 'task.updated', taskId: task.id });
     return (await this.repo.getTask(userId, task.id)) ?? current;
@@ -591,6 +629,7 @@ export class Orchestrator {
             dedupeKey: `job:${job.id}:stale-result`,
           });
         }
+        if (result.kind === 'plan') current = await this.inheritParentPlanApproval(userId, current, job.id);
         if (result.kind === 'pr' && current.parentTaskId) await this.enqueueStackRebase(userId, current, `job:${job.id}:stack-rebase`);
         this.hub.publish(userId, { type: 'task.updated', taskId: task.id });
       }
@@ -932,6 +971,49 @@ export class Orchestrator {
     }
   }
 
+  /** A parent implementation approval also approves each just-in-time subtask plan. */
+  private async inheritParentPlanApproval(userId: string, task: Task, jobId: string): Promise<Task> {
+    if (!task.parentTaskId || task.state !== 'plan-review') return task;
+    const parentEvents = await this.repo.listEvents(userId, task.parentTaskId);
+    if (!parentEvents.some((event) => event.type === 'subtasks-started')) return task;
+    const workflow = await this.resolveWorkflow(userId, task);
+    const currentStep = workflow ? getStep(workflow, task.currentStepId) : null;
+    const implementationEdge = currentStep && workflow
+      ? workflow.edges.find((edge) => edge.from === currentStep.id && getStep(workflow, edge.to)?.output === 'pr')
+      : null;
+    if (!implementationEdge) return task;
+    return this.applyEvent(userId, task, implementationEdge.event, {
+      actor: 'system',
+      detail: { reason: 'parent-plan-approved', parentTaskId: task.parentTaskId },
+      idempotencyKey: `job:${jobId}:inherited-plan-approval`,
+    });
+  }
+
+  /** Resume a restack that was postponed while this task's automated review was running. */
+  private async resumeDeferredStackRebase(userId: string, task: Task): Promise<void> {
+    if (!task.parentTaskId || task.sequence === null || task.state !== 'in-review') return;
+    const events = await this.repo.listEvents(userId, task.id);
+    const resumed = new Set(
+      events
+        .filter((event) => event.type === 'stack-rebase-resumed')
+        .map((event) => event.detail?.['deferredEventId'])
+        .filter((id): id is string => typeof id === 'string'),
+    );
+    const pending = [...events].reverse().find((event) => event.type === 'stack-rebase-deferred' && !resumed.has(event.id));
+    if (!pending) return;
+    const siblings = await this.repo.listSubtasks(userId, task.parentTaskId);
+    const previous = siblings.find((candidate) => candidate.sequence === task.sequence! - 1);
+    if (!previous) return;
+    const job = await this.enqueueStackRebase(userId, previous, `deferred:${pending.id}`);
+    if (!job) return;
+    await this.repo.createEvent(userId, {
+      taskId: task.id,
+      type: 'stack-rebase-resumed',
+      detail: { deferredEventId: pending.id, jobId: job.id },
+      dedupeKey: `deferred:${pending.id}:resumed`,
+    });
+  }
+
   private async onTaskCompleted(userId: string, task: Task): Promise<void> {
     if (!task.parentTaskId) return;
     await this.reconcileParentFromChildren(userId, task.parentTaskId);
@@ -972,11 +1054,31 @@ export class Orchestrator {
     }
   }
 
-  /** After a child pushes a PR, later siblings that already have PRs must be rebased on top of it. */
+  /** After a child changes, rebase the contiguous review-ready portion of the later PR stack. */
   private async enqueueStackRebase(userId: string, child: Task, dedupePrefix?: string): Promise<Job | null> {
     if (!child.parentTaskId || child.sequence === null || !child.branch) return null;
     const siblings = await this.repo.listSubtasks(userId, child.parentTaskId);
-    const later = siblings.filter((s) => (s.sequence ?? 0) > child.sequence! && !TERMINAL_STATES.has(s.state) && s.prUrl && s.branch);
+    const later: Task[] = [];
+    for (const sibling of siblings.filter((candidate) => (candidate.sequence ?? 0) > child.sequence!).sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))) {
+      if (TERMINAL_STATES.has(sibling.state)) continue;
+      if (sibling.state === 'in-review' && sibling.prUrl && sibling.branch) {
+        later.push(sibling);
+        continue;
+      }
+      if (sibling.prUrl) {
+        const workflow = await this.resolveWorkflow(userId, sibling);
+        const step = workflow ? getStep(workflow, sibling.currentStepId) : null;
+        if (step?.type === 'agent' && (step.output === 'review' || step.output === 'verdict')) {
+          await this.repo.createEvent(userId, {
+            taskId: sibling.id,
+            type: 'stack-rebase-deferred',
+            detail: { triggerTaskId: child.id },
+            dedupeKey: dedupePrefix ? `${dedupePrefix}:${sibling.id}:deferred` : null,
+          });
+        }
+      }
+      break;
+    }
     if (later.length === 0) return null;
     let previous = child.branch;
     const stack: RebaseStackJobPayload['stack'] = [];
@@ -1014,7 +1116,26 @@ export class Orchestrator {
       externalId: `job:${job.id}:summary`,
     });
     for (const entry of result.rebased) {
-      if (entry.ok) continue;
+      if (entry.ok) {
+        const repository = job.payload.kind === 'rebase-stack' ? job.payload.repos[0] : undefined;
+        if (repository && entry.headSha) {
+          const pullRequest = (await this.repo.listPullRequests(userId, entry.taskId)).find((candidate) => candidate.repository === repository);
+          if (pullRequest) {
+            await this.repo.upsertPullRequest(userId, entry.taskId, {
+              taskRepositoryId: pullRequest.taskRepositoryId,
+              repository: pullRequest.repository,
+              url: pullRequest.url,
+              number: pullRequest.number,
+              branch: pullRequest.branch,
+              baseBranch: pullRequest.baseBranch,
+              headSha: entry.headSha,
+              status: pullRequest.status,
+              mergedAt: pullRequest.mergedAt,
+            });
+          }
+        }
+        continue;
+      }
       const sibling = await this.repo.getTask(userId, entry.taskId);
       if (!sibling || sibling.parentTaskId !== parent.id) continue;
       if (TERMINAL_STATES.has(sibling.state)) continue;
@@ -1071,7 +1192,37 @@ export class Orchestrator {
         });
       }
     }
+    if (result.rebased.length > 0 && result.rebased.every((entry) => entry.ok) && await this.isCompletedRebaseGroup(userId, job)) {
+      for (const entry of result.rebased) {
+        const sibling = await this.repo.getTask(userId, entry.taskId);
+        if (!sibling || sibling.parentTaskId !== parent.id || sibling.state !== 'in-review') continue;
+        await this.applyEvent(userId, sibling, UNIVERSAL_EVENTS.RESTACKED, {
+          actor: 'system',
+          detail: { jobId: job.id, reason: 'stack-rebased' },
+          idempotencyKey: `${this.rebaseGroupKey(job)}:${sibling.id}:review-invalidated`,
+        });
+      }
+    }
     this.hub.publish(userId, { type: 'task.updated', taskId: parent.id });
+  }
+
+  private rebaseGroupKey(job: Job): string {
+    if (!job.dedupeKey) return `job:${job.id}`;
+    const separator = job.dedupeKey.lastIndexOf(':');
+    return separator === -1 ? job.dedupeKey : job.dedupeKey.slice(0, separator);
+  }
+
+  /** The current applying job counts as complete; every other repository job must already have succeeded. */
+  private async isCompletedRebaseGroup(userId: string, current: Job): Promise<boolean> {
+    if (!current.dedupeKey) return true;
+    const prefix = `${this.rebaseGroupKey(current)}:`;
+    const group = (await this.repo.listJobsForTask(userId, current.taskId)).filter(
+      (candidate) => candidate.kind === 'rebase-stack' && candidate.dedupeKey?.startsWith(prefix),
+    );
+    return group.every((candidate) => {
+      if (candidate.id === current.id) return true;
+      return candidate.status === 'completed' && candidate.result?.kind === 'rebase' && candidate.result.rebased.every((entry) => entry.ok);
+    });
   }
 
   private async enqueueConflictResolution(

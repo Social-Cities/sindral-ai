@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ConfigError, expandHome, loadConfig, workdirPaths } from './config.js';
+import { ConfigError, expandHome, loadConfig, userConfigFile, workdirPaths } from './config.js';
 import { WORKER_KEY } from './test/fixtures.js';
 
 const base = { SINDRAL_SERVER_URL: 'http://localhost:8787/', SINDRAL_WORKER_KEY: WORKER_KEY };
@@ -69,5 +69,6 @@ describe('loadConfig', () => {
     expect(paths.repos).toBe(path.join('/w', 'repos'));
     expect(paths.worktrees).toBe(path.join('/w', 'worktrees'));
     expect(paths.workerFile).toBe(path.join('/w', 'worker.json'));
+    expect(userConfigFile('/home/dev')).toBe(path.join('/home/dev', '.sindral', 'config.json'));
   });
 });
