@@ -221,11 +221,14 @@ async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx:
     const summary = summaryOf(raw);
     if (!summary) throw new Error(describeFailure(`the result has no summary${exitNote}`, run.tail, ctx.redactor));
     if (workspace.repos.length === 0) throw new Error('A "pr" step requires at least one repository on the task');
+    const agentMotivation = typeof raw['motivation'] === 'string' ? raw['motivation'].trim() : '';
     candidate = await publishPr({
       ...ctx,
       workspace,
       taskKey,
       taskTitle: payload.context.task_title,
+      motivation: agentMotivation || payload.context.task_description.trim() || undefined,
+      assumptions: typeof raw['assumptions'] === 'string' ? raw['assumptions'] : undefined,
       summary,
       token: credentials.githubToken,
       redactor: ctx.redactor,
@@ -246,6 +249,8 @@ interface PublishOptions extends AgentJobContext {
   workspace: Awaited<ReturnType<WorkspaceManager['prepare']>>;
   taskKey: string;
   taskTitle: string;
+  motivation?: string;
+  assumptions?: string;
   summary: string;
   token: string | null;
   jobId: string;
@@ -278,6 +283,8 @@ async function publishPr(opts: PublishOptions): Promise<Record<string, unknown>>
       baseBranch: repo.baseBranch,
       taskKey: opts.taskKey,
       taskTitle: opts.taskTitle,
+      motivation: opts.motivation,
+      assumptions: opts.assumptions,
       summary: opts.summary,
       jobId: opts.jobId,
       githubFeedback: opts.githubFeedback,

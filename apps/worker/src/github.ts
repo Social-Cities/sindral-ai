@@ -6,6 +6,8 @@ import type { RepoRef } from './workspace.js';
 /** Marker embedded in PR bodies/comments so the server can recognise Sindral's own posts. */
 export const SINDRAL_MARKER = '<!-- sindral -->';
 export const COMMIT_AUTHOR = 'Sindral AI <sindral@users.noreply.github.com>';
+const MAX_PR_SECTION_LENGTH = 5_000;
+const TRUNCATION_NOTICE = '\n\n_Section truncated for readability._';
 
 export type GhRunner = (args: readonly string[], opts?: RunOptions) => Promise<RunResult>;
 
@@ -23,11 +25,19 @@ export function prTitle(taskKey: string, taskTitle: string): string {
   return `${taskKey}: ${title}`.slice(0, 250);
 }
 
-export function prBody(opts: { taskKey: string; summary: string; taskUrl?: string }): string {
+export function prBody(opts: { taskKey: string; motivation?: string; assumptions?: string; summary: string; taskUrl?: string }): string {
   return [
-    '## Summary',
+    '## Motivation',
     '',
-    opts.summary.trim() || '_No summary provided._',
+    prSection(opts.motivation, '_No motivation provided._'),
+    '',
+    '## Assumptions',
+    '',
+    prSection(opts.assumptions, '_No additional assumptions were identified._'),
+    '',
+    '## Outcomes',
+    '',
+    prSection(opts.summary, '_No outcomes provided._'),
     '',
     `Task ${opts.taskKey}${opts.taskUrl ? ` (${opts.taskUrl})` : ''}`,
     '',
@@ -35,6 +45,12 @@ export function prBody(opts: { taskKey: string; summary: string; taskUrl?: strin
     '',
     SINDRAL_MARKER,
   ].join('\n');
+}
+
+function prSection(value: string | undefined, fallback: string): string {
+  const text = value?.trim() || fallback;
+  if (text.length <= MAX_PR_SECTION_LENGTH) return text;
+  return `${text.slice(0, MAX_PR_SECTION_LENGTH - TRUNCATION_NOTICE.length).trimEnd()}${TRUNCATION_NOTICE}`;
 }
 
 export function prComment(summary: string, jobId?: string, sourceUrl?: string | null): string {
@@ -90,6 +106,8 @@ export interface EnsurePrOptions {
   baseBranch: string;
   taskKey: string;
   taskTitle: string;
+  motivation?: string;
+  assumptions?: string;
   summary: string;
   jobId?: string;
   githubFeedback?: GitHubFeedbackReference;
@@ -135,7 +153,7 @@ export async function ensurePr(opts: EnsurePrOptions): Promise<EnsurePrResult> {
       '--title',
       prTitle(opts.taskKey, opts.taskTitle),
       '--body',
-      prBody({ taskKey: opts.taskKey, summary: opts.summary }),
+      prBody({ taskKey: opts.taskKey, motivation: opts.motivation, assumptions: opts.assumptions, summary: opts.summary }),
     ],
     { cwd: opts.cwd },
   );

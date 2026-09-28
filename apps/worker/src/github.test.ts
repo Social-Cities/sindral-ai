@@ -17,12 +17,37 @@ function fakeGh(respond: (args: string[]) => RunResult | undefined) {
 describe('PR text', () => {
   it('builds title, body with marker and task key, and comment', () => {
     expect(prTitle('ENG-1', 'Add thing')).toBe('ENG-1: Add thing');
-    const body = prBody({ taskKey: 'ENG-1', summary: 'Did the thing.' });
+    const body = prBody({
+      taskKey: 'ENG-1',
+      motivation: 'Reviewers need useful context.',
+      assumptions: '- Existing callers remain compatible.',
+      summary: 'Did the thing.',
+    });
+    expect(body).toContain('## Motivation\n\nReviewers need useful context.');
+    expect(body).toContain('## Assumptions\n\n- Existing callers remain compatible.');
+    expect(body).toContain('## Outcomes\n\nDid the thing.');
     expect(body).toContain('Did the thing.');
     expect(body).toContain('Task ENG-1');
     expect(body.trim().endsWith(SINDRAL_MARKER)).toBe(true);
     expect(prComment('Fixed it').startsWith(`${SINDRAL_MARKER}\n`)).toBe(true);
     expect(prComment('Fixed it')).toContain('Fixed it');
+  });
+
+  it('uses reviewer-friendly fallbacks when optional PR context is missing', () => {
+    const body = prBody({ taskKey: 'ENG-1', summary: '' });
+    expect(body).toContain('## Motivation\n\n_No motivation provided._');
+    expect(body).toContain('## Assumptions\n\n_No additional assumptions were identified._');
+    expect(body).toContain('## Outcomes\n\n_No outcomes provided._');
+  });
+
+  it('bounds long PR sections while preserving the reviewer template and marker', () => {
+    const body = prBody({ taskKey: 'ENG-1', motivation: 'm'.repeat(100_000), assumptions: 'a'.repeat(100_000), summary: 'o'.repeat(100_000) });
+    expect(body.length).toBeLessThan(16_000);
+    expect(body).toContain('## Motivation');
+    expect(body).toContain('## Assumptions');
+    expect(body).toContain('## Outcomes');
+    expect(body.match(/_Section truncated for readability\._/g)).toHaveLength(3);
+    expect(body.trim().endsWith(SINDRAL_MARKER)).toBe(true);
   });
 
   it('uses the first non-empty summary line as the commit subject', () => {
@@ -37,7 +62,10 @@ describe('PR text', () => {
 });
 
 describe('ensurePr', () => {
-  const base = { cwd: '/wt', repo, branch: 'sindral/eng-1', baseBranch: 'main', taskKey: 'ENG-1', taskTitle: 'Add thing', summary: 'Did it' };
+  const base = {
+    cwd: '/wt', repo, branch: 'sindral/eng-1', baseBranch: 'main', taskKey: 'ENG-1', taskTitle: 'Add thing',
+    motivation: 'The old behavior is confusing.', assumptions: '- The API remains stable.', summary: 'Did it',
+  };
 
   it('creates a PR when none exists', async () => {
     const { gh, calls } = fakeGh((args) => {
@@ -53,6 +81,9 @@ describe('ensurePr', () => {
     const body = create?.[create.indexOf('--body') + 1] ?? '';
     expect(body).toContain(SINDRAL_MARKER);
     expect(body).toContain('Task ENG-1');
+    expect(body).toContain('## Motivation\n\nThe old behavior is confusing.');
+    expect(body).toContain('## Assumptions\n\n- The API remains stable.');
+    expect(body).toContain('## Outcomes\n\nDid it');
     expect(calls.some((c) => c[1] === 'comment')).toBe(false);
   });
 

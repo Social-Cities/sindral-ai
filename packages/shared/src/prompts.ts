@@ -24,7 +24,9 @@ const RESULT_SHAPES: Record<StepOutputKind, string> = {
 }`,
   pr: `{
   "kind": "pr",
-  "summary": "one paragraph describing what you implemented and how you verified it",
+  "motivation": "a concise reviewer-friendly explanation of why this change was needed",
+  "assumptions": "a markdown list of implementation assumptions and constraints, or 'None.'",
+  "summary": "a concise reviewer-friendly explanation of what changed and how it was verified",
   "outcome": "required only when the current task outcome is empty",
   "acceptanceCriteria": "required only when the current task acceptance criteria are empty"
 }

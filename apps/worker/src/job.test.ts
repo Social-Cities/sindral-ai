@@ -197,7 +197,11 @@ describe('runJob', () => {
     };
     const engine = fakeEngine(async (opts) => {
       expect(opts.cwd).toBe(wt);
-      await fs.writeFile(opts.env['SINDRAL_RESULT_FILE']!, JSON.stringify({ summary: 'Implemented limiter' }));
+      await fs.writeFile(opts.env['SINDRAL_RESULT_FILE']!, JSON.stringify({
+        motivation: '   ',
+        assumptions: '- Limits are scoped per authenticated user.',
+        summary: 'Implemented and tested a per-user limiter.',
+      }));
       return {};
     });
     const git = fakeGit((args) => (args[0] === 'status' ? ok(' M a.ts') : undefined));
@@ -217,7 +221,7 @@ describe('runJob', () => {
       status: 'completed',
       result: {
         kind: 'pr',
-        summary: 'Implemented limiter',
+        summary: 'Implemented and tested a per-user limiter.',
         prUrl: 'https://github.com/acme/widgets/pull/9',
         branch: 'sindral/eng-142',
         pullRequests: [
@@ -235,6 +239,11 @@ describe('runJob', () => {
     expect(git.find('push', '--force-with-lease')).toHaveLength(1);
     expect(git.calls[0]?.auth.configArgs[1]).toContain('extraheader');
     expect(ghCalls.find((c) => c[1] === 'create')).toContain('ENG-142: Add rate limiting');
+    const create = ghCalls.find((c) => c[1] === 'create');
+    const body = create?.[create.indexOf('--body') + 1] ?? '';
+    expect(body).toContain('## Motivation\n\nLimit requests per user.');
+    expect(body).toContain('## Assumptions\n\n- Limits are scoped per authenticated user.');
+    expect(body).toContain('## Outcomes\n\nImplemented and tested a per-user limiter.');
     expect(api.events.some((e) => e.type === 'message' && e.message.includes('pull/9'))).toBe(true);
   });
 
