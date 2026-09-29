@@ -52,7 +52,7 @@ export interface ApiRoutes {
   'DELETE /api/settings/secrets/:provider': { response: { ok: true } };
   'GET /api/me': { response: { user: { id: string; email: string | null; displayName: string | null } } };
   'GET /api/github/catalog': { response: GitHubCatalog };
-  'POST /api/github/connect': { response: { url: string } };
+  'POST /api/github/connect': { request: { returnTo?: 'web' | 'ios' }; response: { url: string } };
   // tickets
   'POST /api/tickets/import': { response: { ticket: TicketImport } };
   // realtime (SSE)

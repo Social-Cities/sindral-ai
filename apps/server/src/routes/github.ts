@@ -11,24 +11,32 @@ const callbackQuerySchema = z.object({
   error: z.string().max(200).optional(),
 });
 
+const connectBodySchema = z.object({
+  returnTo: z.enum(['web', 'ios']).default('web'),
+}).default({ returnTo: 'web' });
+
 export const githubRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx }) => {
   const userOnly = { onRequest: requireUser(ctx.userVerifier) };
 
   app.get('/api/github/catalog', userOnly, async (request) => ctx.github.catalog(request.user!.id));
 
-  app.post('/api/github/connect', userOnly, async (request) => ({ url: ctx.githubOAuth.authorizationUrl(request.user!.id) }));
+  app.post('/api/github/connect', userOnly, async (request) => {
+    const { returnTo } = validate(connectBodySchema, request.body);
+    return { url: ctx.githubOAuth.authorizationUrl(request.user!.id, returnTo) };
+  });
 
   app.get('/api/github/callback', async (request, reply) => {
     const query = validate(callbackQuerySchema, request.query);
+    const returnTo = ctx.githubOAuth.callbackReturnTo(query.state);
     if (query.error || !query.code || !query.state) {
-      return reply.redirect(ctx.githubOAuth.settingsRedirect({ error: query.error ? 'denied' : 'missing' }));
+      return reply.redirect(ctx.githubOAuth.settingsRedirect({ error: query.error ? 'denied' : 'missing' }, returnTo));
     }
     try {
       await ctx.githubOAuth.complete(query.code, query.state);
-      return reply.redirect(ctx.githubOAuth.settingsRedirect({ connected: true }));
+      return reply.redirect(ctx.githubOAuth.settingsRedirect({ connected: true }, returnTo));
     } catch (error) {
       request.log.warn({ err: error }, 'GitHub OAuth callback failed');
-      return reply.redirect(ctx.githubOAuth.settingsRedirect({ error: error instanceof GitHubOAuthError ? error.reason : 'exchange' }));
+      return reply.redirect(ctx.githubOAuth.settingsRedirect({ error: error instanceof GitHubOAuthError ? error.reason : 'exchange' }, returnTo));
     }
   });
 };

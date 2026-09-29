@@ -17,6 +17,7 @@ struct JobsResponse: Decodable { let jobs: [Job] }
 struct LogsResponse: Decodable { let logs: [JobLog] }
 struct DiffResponse: Decodable { let files: [DiffFile] }
 struct MessageResponse: Decodable { let message: Message; let task: SindralTask }
+struct GitHubConnectResponse: Decodable { let url: String }
 
 @MainActor @Observable
 final class APIClient {
@@ -92,6 +93,12 @@ final class APIClient {
     func secrets() async throws -> [SecretStatus] { let response: SecretsResponse = try await request("api/settings/secrets"); return response.secrets }
     func setSecret(provider: String, token: String, email: String?) async throws -> SecretStatus { struct Body: Encodable { let provider: String; let token: String; let email: String? }; let response: SecretResponse = try await request("api/settings/secrets", method: "PUT", body: Body(provider: provider, token: token, email: email)); return response.secret }
     func deleteSecret(_ provider: String) async throws { let _: EmptyResponse = try await request("api/settings/secrets/\(provider)", method: "DELETE") }
+    func githubAuthorizationURL() async throws -> URL {
+        struct Body: Encodable { let returnTo = "ios" }
+        let response: GitHubConnectResponse = try await request("api/github/connect", method: "POST", body: Body())
+        guard let url = URL(string: response.url) else { throw APIError.invalidURL }
+        return url
+    }
     func profile() async throws -> Profile { let response: ProfileResponse = try await request("api/me"); return response.user }
     func importTicket(_ url: String) async throws -> TicketImport { struct Body: Encodable { let url: String }; let response: TicketResponse = try await request("api/tickets/import", method: "POST", body: Body(url: url)); return response.ticket }
 

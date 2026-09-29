@@ -20,6 +20,7 @@
 		906D267BFBCB4DD007C2D945 /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10CEE358E7DCF93C2A0B9FF /* Components.swift */; };
 		90F9CF17DA30BC1D89F01C65 /* TaskLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4874CC3FE96E740ED22DCE17 /* TaskLogicTests.swift */; };
 		9BD5992A3A3BE8C21650A8F0 /* AppRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF9CAA611D5B5BA9172DB0AB /* AppRouter.swift */; };
+		A47FECD6ED969DAD3CD7BD99 /* GitHubOAuthSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B96B391AA787C99BC77855EC /* GitHubOAuthSession.swift */; };
 		A48058C560E7FA72326AA7E8 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = D804C0D438256FF667619E4F /* Models.swift */; };
 		BE81891A198F98F34653D824 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 215C6F822B517E389FF49A08 /* APIClient.swift */; };
 		C325F7E5778599536129D02A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2ABF6AC38E7879FC1E808A1B /* SettingsView.swift */; };
@@ -64,6 +65,7 @@
 		A5948A715F553FB9EC4156A3 /* SindralAITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = SindralAITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		AD8F0AD4DA58AF808065B58F /* TaskLogic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskLogic.swift; sourceTree = "<group>"; };
 		B441AB9AFABE1F518FF1C407 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
+		B96B391AA787C99BC77855EC /* GitHubOAuthSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubOAuthSession.swift; sourceTree = "<group>"; };
 		D4B85A512DF7A0A00BE87823 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		D804C0D438256FF667619E4F /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		DF9CAA611D5B5BA9172DB0AB /* AppRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRouter.swift; sourceTree = "<group>"; };
@@ -165,6 +167,7 @@
 			children = (
 				215C6F822B517E389FF49A08 /* APIClient.swift */,
 				02C1A1F70F0D46A81C45B320 /* AuthService.swift */,
+				B96B391AA787C99BC77855EC /* GitHubOAuthSession.swift */,
 			);
 			path = Networking;
 			sourceTree = "<group>";
@@ -292,6 +295,7 @@
 				FAAEE55E809B4B5290C99FF2 /* Configuration.swift in Sources */,
 				86F90861EA628B65D28D6CD3 /* DashboardView.swift in Sources */,
 				08015E6493F7B422C7BC4382 /* DemoMode.swift in Sources */,
+				A47FECD6ED969DAD3CD7BD99 /* GitHubOAuthSession.swift in Sources */,
 				EE3EEECE68467E52CEC3A6A6 /* KeychainStore.swift in Sources */,
 				A48058C560E7FA72326AA7E8 /* Models.swift in Sources */,
 				C325F7E5778599536129D02A /* SettingsView.swift in Sources */,

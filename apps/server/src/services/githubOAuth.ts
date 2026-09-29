@@ -9,6 +9,8 @@ type JsonObject = Record<string, unknown>;
 const STATE_TTL_MS = 10 * 60_000;
 const GITHUB_SCOPES = 'repo read:org';
 
+export type GitHubOAuthReturnTo = 'web' | 'ios';
+
 export type GitHubOAuthFailureReason = 'state' | 'credentials' | 'callback' | 'code' | 'scope' | 'account' | 'storage' | 'exchange';
 
 export class GitHubOAuthError extends Error {
@@ -29,9 +31,9 @@ export class GitHubOAuthService {
     private readonly fetchImpl: FetchLike,
   ) {}
 
-  authorizationUrl(userId: string): string {
+  authorizationUrl(userId: string, returnTo: GitHubOAuthReturnTo = 'web'): string {
     const { clientId, callbackUrl } = this.credentials();
-    const { state, codeChallenge } = this.createState(userId);
+    const { state, codeChallenge } = this.createState(userId, returnTo);
     const url = new URL('https://github.com/login/oauth/authorize');
     url.search = new URLSearchParams({
       client_id: clientId,
@@ -99,8 +101,20 @@ export class GitHubOAuthService {
     return { userId, login };
   }
 
-  settingsRedirect(result: { connected?: boolean; error?: GitHubOAuthFailureReason | 'denied' | 'missing' }): string {
-    const url = new URL('/settings', this.config.webOrigins[0]);
+  callbackReturnTo(state: string | undefined): GitHubOAuthReturnTo {
+    if (!state) return 'web';
+    try {
+      return this.verifyState(state).returnTo;
+    } catch {
+      return 'web';
+    }
+  }
+
+  settingsRedirect(
+    result: { connected?: boolean; error?: GitHubOAuthFailureReason | 'denied' | 'missing' },
+    returnTo: GitHubOAuthReturnTo = 'web',
+  ): string {
+    const url = returnTo === 'ios' ? new URL('sindral://github/callback') : new URL('/settings', this.config.webOrigins[0]);
     if (result.connected) url.searchParams.set('github', 'connected');
     if (result.error) {
       url.searchParams.set('github', 'error');
@@ -117,18 +131,18 @@ export class GitHubOAuthService {
     return { clientId, clientSecret, callbackUrl };
   }
 
-  private createState(userId: string): { state: string; codeChallenge: string } {
+  private createState(userId: string, returnTo: GitHubOAuthReturnTo): { state: string; codeChallenge: string } {
     const codeVerifier = randomBytes(32).toString('base64url');
     const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
     const iv = randomBytes(12);
     const cipher = createCipheriv('aes-256-gcm', this.config.secretsEncryptionKey, iv);
     cipher.setAAD(Buffer.from('github-oauth-state\0'));
-    const plaintext = JSON.stringify({ userId, expiresAt: Date.now() + STATE_TTL_MS, nonce: randomBytes(16).toString('hex'), codeVerifier });
+    const plaintext = JSON.stringify({ userId, expiresAt: Date.now() + STATE_TTL_MS, nonce: randomBytes(16).toString('hex'), codeVerifier, returnTo });
     const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
     return { state: `${iv.toString('base64url')}.${ciphertext.toString('base64url')}.${cipher.getAuthTag().toString('base64url')}`, codeChallenge };
   }
 
-  private verifyState(state: string): { userId: string; codeVerifier: string } {
+  private verifyState(state: string): { userId: string; codeVerifier: string; returnTo: GitHubOAuthReturnTo } {
     const [ivValue, ciphertextValue, tagValue, extra] = state.split('.');
     if (!ivValue || !ciphertextValue || !tagValue || extra) throw new GitHubOAuthError('state', 'Invalid GitHub authorization state');
     let parsed: unknown;
@@ -149,7 +163,7 @@ export class GitHubOAuthService {
     if (!/^[0-9a-f-]{36}$/i.test(userId) || !/^[A-Za-z0-9_-]{43,128}$/.test(codeVerifier) || typeof expiresAt !== 'number' || !Number.isFinite(expiresAt) || expiresAt < Date.now()) {
       throw new GitHubOAuthError('state', 'GitHub authorization state has expired');
     }
-    return { userId, codeVerifier };
+    return { userId, codeVerifier, returnTo: value['returnTo'] === 'ios' ? 'ios' : 'web' };
   }
 }
 

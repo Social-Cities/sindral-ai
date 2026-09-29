@@ -6,7 +6,7 @@ enum Provider: String, CaseIterable, Identifiable {
     var title: String { self == .github ? "GitHub" : rawValue.capitalized }
     var description: String {
         switch self {
-        case .github: "Personal access token used to open PRs, read diffs and ingest PR comments. Needs repo scope."
+        case .github: "Connect an account to choose repositories, create new ones, open PRs and read review feedback."
         case .linear: "API key used to import tickets from linear.app URLs."
         case .jira: "Account email and API token used to import tickets from atlassian.net URLs."
         }
@@ -127,7 +127,11 @@ struct SettingsView: View {
         switch pane {
         case .integration(let provider):
             section(provider.title, provider.description) {
-                SecretForm(provider: provider, status: status(provider)) { await load() }
+                if provider == .github {
+                    GitHubConnectionCard(status: status(provider)) { await load() }
+                } else {
+                    SecretForm(provider: provider, status: status(provider)) { await load() }
+                }
             }
         case .workerKeys:
             VStack(alignment: .leading, spacing: 40) {
@@ -189,11 +193,133 @@ struct SettingsView: View {
     private func reload() async { await load(); await store.refreshWorkers() }
 }
 
+private struct GitHubConnectionCard: View {
+    @Environment(APIClient.self) private var api
+    @Environment(AppStore.self) private var store
+    let status: SecretStatus?
+    let didChange: () async -> Void
+    @State private var busy = false
+    @State private var confirmingDisconnect = false
+    @State private var showingTokenForm = false
+    @State private var feedback: String?
+    @State private var feedbackIsError = false
+
+    private var isConnected: Bool { status?.configured == true }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 16) {
+                    connectionStatus
+                    Spacer(minLength: 16)
+                    actions
+                }
+                VStack(alignment: .leading, spacing: 16) {
+                    connectionStatus
+                    actions
+                }
+            }
+
+            if let feedback {
+                Label(feedback, systemImage: feedbackIsError ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
+                    .font(Theme.font(13))
+                    .foregroundStyle(feedbackIsError ? Theme.dangerText : Theme.emerald)
+            }
+
+            Divider().overlay(Theme.border)
+
+            DisclosureGroup(isExpanded: $showingTokenForm) {
+                SecretForm(provider: .github, status: status, embedded: true) { await didChange() }
+                    .padding(.top, 16)
+            } label: {
+                Label("Use a personal access token instead", systemImage: "key")
+                    .font(Theme.font(14))
+                    .foregroundStyle(Theme.secondaryForeground)
+            }
+            .tint(Theme.mutedForeground)
+        }
+        .padding(24)
+        .surface(Theme.card, radius: Theme.Radius.card)
+        .confirmationDialog("Disconnect GitHub?", isPresented: $confirmingDisconnect, titleVisibility: .visible) {
+            Button("Disconnect", role: .destructive) { Task { await disconnect() } }
+        } message: {
+            Text("Sindral will no longer be able to access repositories until GitHub is connected again.")
+        }
+    }
+
+    private var connectionStatus: some View {
+        HStack(spacing: 9) {
+            Circle().fill(isConnected ? Theme.emerald : Theme.mutedForeground).frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(isConnected ? "GitHub connected" : "Not connected")
+                    .font(Theme.font(15, .medium)).foregroundStyle(Theme.foreground)
+                if isConnected, let hint = status?.hint {
+                    Text(hint).font(Theme.mono(12)).foregroundStyle(Theme.mutedForeground)
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var actions: some View {
+        HStack(spacing: 10) {
+            if isConnected {
+                Button { confirmingDisconnect = true } label: {
+                    Label("Disconnect", systemImage: "xmark")
+                }
+                .buttonStyle(.sindral(.danger))
+                .disabled(busy)
+            }
+            Button { Task { await connect() } } label: {
+                if busy {
+                    HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Connecting") }
+                } else {
+                    Label(isConnected ? "Reconnect" : "Connect GitHub", systemImage: isConnected ? "arrow.clockwise" : "link")
+                }
+            }
+            .buttonStyle(.sindral(.primary))
+            .disabled(busy)
+        }
+    }
+
+    private func connect() async {
+        busy = true
+        feedback = nil
+        defer { busy = false }
+        do {
+            let authorizationURL = try await api.githubAuthorizationURL()
+            let callbackURL = try await GitHubOAuthSession().authenticate(at: authorizationURL)
+            guard let result = GitHubOAuthCallbackResult(url: callbackURL) else { throw GitHubOAuthSessionError.missingCallback }
+            feedback = result.message
+            feedbackIsError = !result.isSuccess
+            await didChange()
+        } catch {
+            feedback = error.localizedDescription
+            feedbackIsError = true
+        }
+    }
+
+    private func disconnect() async {
+        busy = true
+        feedback = nil
+        defer { busy = false }
+        do {
+            try await api.deleteSecret(Provider.github.rawValue)
+            feedback = "GitHub disconnected."
+            feedbackIsError = false
+            await didChange()
+        } catch {
+            store.present(error)
+        }
+    }
+}
+
 private struct SecretForm: View {
     @Environment(APIClient.self) private var api
     @Environment(AppStore.self) private var store
     let provider: Provider
     let status: SecretStatus?
+    var embedded = false
     let didChange: () async -> Void
     @State private var token = ""
     @State private var email = ""
@@ -201,8 +327,17 @@ private struct SecretForm: View {
     @State private var confirmingRemove = false
 
     var body: some View {
+        Group {
+            if embedded { fields } else { fields.padding(24).surface(Theme.card, radius: Theme.Radius.card) }
+        }
+        .confirmationDialog("Remove the \(provider.title) credential?", isPresented: $confirmingRemove, titleVisibility: .visible) {
+            Button("Remove", role: .destructive) { Task { await remove() } }
+        }
+    }
+
+    private var fields: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if status?.configured == true {
+            if status?.configured == true && !embedded {
                 HStack(spacing: 8) {
                     Circle().fill(Theme.emerald).frame(width: 7, height: 7)
                     Text("Connected · \(status?.hint ?? "credential saved")").font(Theme.mono(13)).foregroundStyle(Theme.emerald)
@@ -226,11 +361,6 @@ private struct SecretForm: View {
                     .disabled(token.count < 8 || (provider == .jira && !email.contains("@")) || busy)
             }
             Text(provider.hint).font(Theme.font(14)).foregroundStyle(Theme.secondaryForeground)
-        }
-        .padding(24)
-        .surface(Theme.card, radius: Theme.Radius.card)
-        .confirmationDialog("Remove the \(provider.title) credential?", isPresented: $confirmingRemove, titleVisibility: .visible) {
-            Button("Remove", role: .destructive) { Task { await remove() } }
         }
     }
 

@@ -627,6 +627,42 @@ describe('settings API', () => {
     expect(await ctx.app.ctx.secrets.get(ctx.userA, 'github')).toBeNull();
   });
 
+  it('returns GitHub OAuth callbacks to the iOS app when requested', async () => {
+    await ctx.app.close();
+    ctx = await createTestApp({
+      config: testConfig({
+        githubOAuthClientId: 'github-client-id',
+        githubOAuthClientSecret: 'github-client-secret',
+        githubOAuthCallbackUrl: 'http://localhost:5173/api/github/callback',
+      }),
+      fetch: fetchMock,
+    });
+
+    const connect = await ctx.app.inject({
+      method: 'POST',
+      url: '/api/github/connect',
+      headers: asA(),
+      payload: { returnTo: 'ios' },
+    });
+    expect(connect.statusCode).toBe(200);
+    const state = new URL(connect.json<{ url: string }>().url).searchParams.get('state');
+
+    const callback = await ctx.app.inject({
+      method: 'GET',
+      url: `/api/github/callback?error=access_denied&state=${encodeURIComponent(state!)}`,
+    });
+    expect(callback.statusCode).toBe(302);
+    expect(callback.headers.location).toBe('sindral://github/callback?github=error&github_error=denied');
+
+    const invalidTarget = await ctx.app.inject({
+      method: 'POST',
+      url: '/api/github/connect',
+      headers: asA(),
+      payload: { returnTo: 'https://attacker.example' },
+    });
+    expect(invalidTarget.statusCode).toBe(400);
+  });
+
   it('reports unavailable when GitHub repository authorization is not configured', async () => {
     const response = await ctx.app.inject({ method: 'POST', url: '/api/github/connect', headers: asA() });
     expect(response.statusCode).toBe(503);

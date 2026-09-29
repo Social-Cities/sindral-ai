@@ -77,6 +77,18 @@ final class SharedLogicTests: XCTestCase {
         XCTAssertEqual(ButtonVariant.forEvent("custom"), .primary)
     }
 
+    func testGitHubOAuthCallbackResult() {
+        XCTAssertEqual(
+            GitHubOAuthCallbackResult(url: URL(string: "sindral://github/callback?github=connected")!),
+            .connected
+        )
+        XCTAssertEqual(
+            GitHubOAuthCallbackResult(url: URL(string: "sindral://github/callback?github=error&github_error=scope")!),
+            .failed(reason: "scope")
+        )
+        XCTAssertNil(GitHubOAuthCallbackResult(url: URL(string: "https://example.com/callback?github=connected")!))
+    }
+
     func testTaskListActiveFilterKeepsParentsWithActiveChildren() {
         let parent = fixture(id: "p", state: "done", step: "done")
         let child = fixture(id: "c", state: "planning", step: "plan", parent: "p")
