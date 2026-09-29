@@ -494,6 +494,32 @@ export interface SecretStatus {
   hint: string | null;
 }
 
+export interface GitHubRepository {
+  id: number;
+  name: string;
+  fullName: string;
+  private: boolean;
+  description: string | null;
+  url: string;
+  defaultBranch: string;
+  pushedAt: string | null;
+  owner: string;
+}
+
+export interface GitHubOwner {
+  login: string;
+  type: 'user' | 'organization';
+  avatarUrl: string | null;
+  role: 'owner' | 'admin' | 'member';
+}
+
+export interface GitHubCatalog {
+  connected: boolean;
+  source: 'oauth' | 'pat' | null;
+  repositories: GitHubRepository[];
+  owners: GitHubOwner[];
+}
+
 export interface TicketImport {
   provider: 'linear' | 'jira' | 'github';
   id: string;

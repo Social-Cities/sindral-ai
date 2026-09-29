@@ -112,13 +112,13 @@ pnpm dev
 
 Open `http://localhost:5173`. Local email confirmation is disabled, so you can create an account and sign in immediately. Local Supabase Studio is available at `http://127.0.0.1:55323`.
 
-If you want GitHub OAuth locally, create a GitHub OAuth App whose callback is:
+To connect GitHub locally, create a GitHub OAuth App whose callback is:
 
 ```text
-http://127.0.0.1:55321/auth/v1/callback
+http://localhost:5173/api/github/callback
 ```
 
-Then configure that client ID and secret in the local Supabase Auth provider settings. Email/password is sufficient for the first run.
+Then set `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, and `GITHUB_OAUTH_CALLBACK_URL` in `.env`. Keep GitHub disabled in Supabase Auth; email/password remains the app login method.
 
 ### 3.4 Configure GitHub for a local/internal run
 
@@ -236,9 +236,11 @@ Under **Authentication → URL Configuration**:
 Under **Authentication → Providers**:
 
 - Email/password is already supported by the UI. For hosted projects, email confirmation should remain enabled; configure custom SMTP for reliable production delivery.
-- To enable the **Continue with GitHub** button, create a GitHub OAuth App and use the callback URL shown by Supabase, normally `https://<project-ref>.supabase.co/auth/v1/callback`. Enter that OAuth App's client ID and client secret in the GitHub provider panel.
+- GitHub does not need to be enabled as a Supabase Auth provider. Sindral app accounts always authenticate through Supabase email/password.
 
-The GitHub OAuth App used for user login is separate from the GitHub App used to grant workers short-lived repository credentials.
+Create a GitHub OAuth App for repository access after login. Set its authorization callback URL to `https://<portal-origin>/api/github/callback`, then configure `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, and the same URL as `GITHUB_OAUTH_CALLBACK_URL`. For local development, use `http://localhost:5173/api/github/callback`; Vite proxies it to the API server. Sindral requests `repo read:org`, validates the connected GitHub account on the server, and stores its access token encrypted against the current Supabase user.
+
+This GitHub OAuth App is separate from the GitHub App used to grant workers short-lived repository credentials.
 
 ### 4.3 Storage
 
@@ -316,6 +318,9 @@ SUPABASE_JWT_SECRET=
 
 SECRETS_ENCRYPTION_KEY=<64 hex characters>
 GITHUB_WEBHOOK_SECRET=<32+ random characters>
+GITHUB_OAUTH_CLIENT_ID=<oauth app client id>
+GITHUB_OAUTH_CLIENT_SECRET=<oauth app client secret>
+GITHUB_OAUTH_CALLBACK_URL=https://sindral.example.com/api/github/callback
 GITHUB_APP_ID=<app id>
 GITHUB_APP_PRIVATE_KEY=<PEM or escaped PEM>
 GITHUB_APP_INSTALLATIONS={"<sindral-user-uuid>":<installation-id>}
@@ -427,7 +432,11 @@ The server release is ahead of the database. Link the intended Supabase project,
 
 ### Login redirects to the wrong host
 
-Set the Supabase Auth Site URL to the portal's exact public origin and add that origin to Redirect URLs. GitHub OAuth uses Supabase's `/auth/v1/callback`, while the browser ultimately returns to the portal origin.
+Set the Supabase Auth Site URL to the portal's exact public origin and add that origin to Redirect URLs.
+
+### GitHub authorization returns to the wrong host
+
+Make `GITHUB_OAUTH_CALLBACK_URL` exactly match the callback URL configured on the GitHub OAuth App. It should be the portal origin followed by `/api/github/callback`.
 
 ### Login works locally but hosted API requests return 401
 

@@ -42,7 +42,7 @@ export const settingsRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ct
   app.put('/api/settings/secrets', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (request) => {
     const input = validate(setSecretSchema, request.body);
     if (input.provider === 'jira' && !input.email) throw badRequest('Jira requires the account email');
-    const metadata = input.provider === 'jira' ? { email: input.email } : {};
+    const metadata = input.provider === 'jira' ? { email: input.email } : input.provider === 'github' ? { source: 'pat' } : {};
     const secret = await secrets.set(request.user!.id, input.provider, input.token, metadata);
     return { secret };
   });

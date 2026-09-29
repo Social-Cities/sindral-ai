@@ -6,6 +6,7 @@ import { WORKER_PROTOCOL_HEADER, WORKER_PROTOCOL_VERSION, type Task, type Workfl
 import { claimNext, completeMerge, completeNext, createTestApp, plan, pr, review, testConfig, verdict, type TestContext } from '../test/helpers.js';
 
 const fetchMock = vi.fn<typeof fetch>();
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 let ctx: TestContext;
 
 beforeEach(async () => {
@@ -42,6 +43,14 @@ describe('tasks API', () => {
     expect((await ctx.app.inject({ method: 'POST', url: '/api/tasks', headers: asA(), payload: { title: '' } })).statusCode).toBe(400);
     expect((await ctx.app.inject({ method: 'POST', url: '/api/tasks', headers: asA(), payload: { title: 'x', repos: ['not a repo'] } })).statusCode).toBe(400);
     expect((await ctx.app.inject({ method: 'POST', url: '/api/tasks', headers: asA(), payload: { title: 'x', key: 'lower-1' } })).statusCode).toBe(400);
+    const unknownWorkflow = await ctx.app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      headers: asA(),
+      payload: { title: 'x', workflowId: 'missing', newRepository: { owner: 'acme', name: 'new-service' } },
+    });
+    expect(unknownWorkflow.statusCode).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
     expect((await ctx.app.inject({ method: 'GET', url: '/api/tasks/not-a-uuid', headers: asA() })).statusCode).toBe(400);
     expect((await ctx.app.inject({ method: 'GET', url: '/api/tasks?parentTaskId=abc', headers: asA() })).statusCode).toBe(400);
     const res = await ctx.app.inject({ method: 'POST', url: '/api/tasks', headers: { ...asA(), 'content-type': 'application/json' }, payload: '{nope' });
@@ -72,6 +81,45 @@ describe('tasks API', () => {
     const listB = await ctx.app.inject({ method: 'GET', url: '/api/tasks', headers: asB() });
     expect(listB.json()).toEqual({ tasks: [] });
     expect((await ctx.repo.getTask(ctx.userA, task.id))?.title).toBe('Task');
+  });
+
+  it('creates and initializes a GitHub repository before attaching it to a task', async () => {
+    await ctx.app.ctx.secrets.set(ctx.userA, 'github', 'github-oauth-token', { source: 'oauth' });
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === 'https://api.github.com/user') return json({ login: 'lucas' });
+      if (url === 'https://api.github.com/orgs/acme/repos') {
+        expect(JSON.parse(String(init?.body))).toEqual({
+          name: 'billing-service',
+          private: true,
+          auto_init: true,
+        });
+        return json({
+          id: 42,
+          name: 'billing-service',
+          full_name: 'acme/billing-service',
+          private: true,
+          html_url: 'https://github.com/acme/billing-service',
+          default_branch: 'master',
+          owner: { login: 'acme' },
+        }, 201);
+      }
+      if (url === 'https://api.github.com/repos/acme/billing-service/branches/master/rename') {
+        expect(JSON.parse(String(init?.body))).toEqual({ new_name: 'main' });
+        return json({ name: 'main' }, 201);
+      }
+      return json({ message: 'not found' }, 404);
+    });
+
+    const task = await createTask(asA(), {
+      title: 'Build billing',
+      repos: [],
+      newRepository: { owner: 'acme', name: 'billing-service', visibility: 'private' },
+    });
+
+    expect(task.repos).toEqual(['acme/billing-service']);
+    expect(task.branch).toMatch(/^sindral\//);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it('returns 409 for invalid transitions and 404 for unknown tasks', async () => {
@@ -430,11 +478,133 @@ describe('settings API', () => {
     expect(put.body).not.toContain('ghp_abcdefgh1234');
     const stored = await ctx.repo.getSecret(ctx.userA, 'github');
     expect(stored?.ciphertext).not.toContain('ghp_');
-    expect(await ctx.app.ctx.secrets.get(ctx.userA, 'github')).toEqual({ token: 'ghp_abcdefgh1234', metadata: {} });
+    expect(await ctx.app.ctx.secrets.get(ctx.userA, 'github')).toEqual({ token: 'ghp_abcdefgh1234', metadata: { source: 'pat' } });
     expect(await ctx.app.ctx.secrets.get(ctx.userB, 'github')).toBeNull();
     expect((await ctx.app.inject({ method: 'DELETE', url: '/api/settings/secrets/github', headers: asA() })).json()).toEqual({ ok: true });
     expect((await ctx.app.inject({ method: 'DELETE', url: '/api/settings/secrets/slack', headers: asA() })).statusCode).toBe(400);
     expect(await ctx.repo.getSecret(ctx.userA, 'github')).toBeNull();
+  });
+
+  it('lists writable GitHub repositories and repository owners for a connected account', async () => {
+    const disconnected = await ctx.app.inject({ method: 'GET', url: '/api/github/catalog', headers: asA() });
+    expect(disconnected.json()).toEqual({ connected: false, source: null, repositories: [], owners: [] });
+
+    await ctx.app.ctx.secrets.set(ctx.userA, 'github', 'github-oauth-token', { source: 'oauth' });
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === 'https://api.github.com/user') return json({ login: 'lucas', avatar_url: 'https://avatars.example/lucas' });
+      if (url.includes('/user/repos?')) return json([
+        {
+          id: 1,
+          name: 'api',
+          full_name: 'acme/api',
+          private: true,
+          html_url: 'https://github.com/acme/api',
+          default_branch: 'main',
+          pushed_at: '2026-09-28T00:00:00Z',
+          owner: { login: 'acme' },
+          permissions: { push: true },
+        },
+        {
+          id: 2,
+          name: 'read-only',
+          full_name: 'elsewhere/read-only',
+          private: false,
+          html_url: 'https://github.com/elsewhere/read-only',
+          default_branch: 'main',
+          owner: { login: 'elsewhere' },
+          permissions: { pull: true, push: false },
+        },
+      ]);
+      if (url.endsWith('/user/memberships/orgs?state=active&per_page=100')) {
+        return json([{ role: 'admin', organization: { login: 'acme', avatar_url: 'https://avatars.example/acme' } }]);
+      }
+      return json({ message: 'not found' }, 404);
+    });
+
+    const response = await ctx.app.inject({ method: 'GET', url: '/api/github/catalog', headers: asA() });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      connected: true,
+      source: 'oauth',
+      repositories: [expect.objectContaining({ id: 1, fullName: 'acme/api', defaultBranch: 'main' })],
+      owners: [
+        { login: 'lucas', type: 'user', avatarUrl: 'https://avatars.example/lucas', role: 'owner' },
+        { login: 'acme', type: 'organization', avatarUrl: 'https://avatars.example/acme', role: 'admin' },
+      ],
+    });
+  });
+
+  it('connects GitHub to the authenticated Supabase user through a separate OAuth callback', async () => {
+    await ctx.app.close();
+    ctx = await createTestApp({
+      config: testConfig({
+        githubOAuthClientId: 'github-client-id',
+        githubOAuthClientSecret: 'github-client-secret',
+        githubOAuthCallbackUrl: 'http://localhost:5173/api/github/callback',
+      }),
+      fetch: fetchMock,
+    });
+
+    expect((await ctx.app.inject({ method: 'POST', url: '/api/github/connect' })).statusCode).toBe(401);
+    const connect = await ctx.app.inject({ method: 'POST', url: '/api/github/connect', headers: asA() });
+    expect(connect.statusCode).toBe(200);
+
+    const authorizationUrl = new URL(connect.json<{ url: string }>().url);
+    expect(authorizationUrl.origin + authorizationUrl.pathname).toBe('https://github.com/login/oauth/authorize');
+    expect(authorizationUrl.searchParams.get('client_id')).toBe('github-client-id');
+    expect(authorizationUrl.searchParams.get('redirect_uri')).toBe('http://localhost:5173/api/github/callback');
+    expect(authorizationUrl.searchParams.get('scope')).toBe('repo read:org');
+    expect(authorizationUrl.searchParams.get('code_challenge_method')).toBe('S256');
+    const state = authorizationUrl.searchParams.get('state');
+    expect(state).toBeTruthy();
+    expect(state).not.toContain(ctx.userA);
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === 'https://github.com/login/oauth/access_token') {
+        const body = JSON.parse(String(init?.body)) as Record<string, string>;
+        expect(body).toMatchObject({
+          client_id: 'github-client-id',
+          client_secret: 'github-client-secret',
+          code: 'github-code',
+          redirect_uri: 'http://localhost:5173/api/github/callback',
+        });
+        expect(body.code_verifier).toMatch(/^[A-Za-z0-9_-]{43}$/);
+        return json({ access_token: 'github-user-token', scope: 'repo,read:org', token_type: 'bearer' });
+      }
+      if (url === 'https://api.github.com/user') {
+        expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer github-user-token');
+        return json({ login: 'octocat' });
+      }
+      return json({ message: 'not found' }, 404);
+    });
+
+    const callback = await ctx.app.inject({
+      method: 'GET',
+      url: `/api/github/callback?code=github-code&state=${encodeURIComponent(state!)}`,
+    });
+    expect(callback.statusCode).toBe(302);
+    expect(callback.headers.location).toBe('http://localhost:5173/settings?github=connected');
+    expect(await ctx.app.ctx.secrets.get(ctx.userA, 'github')).toEqual({
+      token: 'github-user-token',
+      metadata: { source: 'oauth', login: 'octocat' },
+    });
+    expect(await ctx.app.ctx.secrets.get(ctx.userB, 'github')).toBeNull();
+
+    const tampered = await ctx.app.inject({
+      method: 'GET',
+      url: `/api/github/callback?code=other-code&state=${encodeURIComponent(`${state}x`)}`,
+    });
+    expect(tampered.statusCode).toBe(302);
+    expect(tampered.headers.location).toBe('http://localhost:5173/settings?github=error');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports unavailable when GitHub repository authorization is not configured', async () => {
+    const response = await ctx.app.inject({ method: 'POST', url: '/api/github/connect', headers: asA() });
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toMatchObject({ error: { message: 'GitHub repository authorization is not configured' } });
   });
 });
 

@@ -21,11 +21,14 @@ import { webhookRoutes } from './routes/webhooks.js';
 import { workerRoutes } from './routes/worker.js';
 import { workerListRoutes } from './routes/workers.js';
 import { workflowRoutes } from './routes/workflows.js';
+import { githubRoutes } from './routes/github.js';
 import type { FetchLike } from './services/github.js';
 import { Orchestrator } from './services/orchestrator.js';
 import { SecretService } from './services/secrets.js';
 import { TicketService } from './services/tickets.js';
 import { WorkflowService } from './services/workflows.js';
+import { GitHubConnectionService } from './services/githubConnection.js';
+import { GitHubOAuthService } from './services/githubOAuth.js';
 import './fastify.js';
 
 export interface AppOptions {
@@ -135,6 +138,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     workflows,
     secrets,
     tickets: new TicketService(secrets, fetchImpl),
+    github: new GitHubConnectionService(secrets, fetchImpl),
+    githubOAuth: new GitHubOAuthService(config, secrets, fetchImpl),
     orchestrator,
     claim: options.claim ?? { waitMs: 20_000, pollMs: 2_000 },
     ssePingMs: options.ssePingMs ?? 25_000,
@@ -147,6 +152,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   await app.register(workflowRoutes, { ctx });
   await app.register(workerListRoutes, { ctx });
   await app.register(settingsRoutes, { ctx });
+  await app.register(githubRoutes, { ctx });
   await app.register(ticketRoutes, { ctx });
   await app.register(eventRoutes, { ctx });
   await app.register(webhookRoutes, { ctx });

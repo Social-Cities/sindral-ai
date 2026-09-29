@@ -14,6 +14,7 @@ vi.mock('@/lib/api', async (importOriginal) => {
     listWorkflows: vi.fn(),
     listWorkers: vi.fn(),
     getMe: vi.fn(),
+    getGitHubCatalog: vi.fn(),
     importTicket: vi.fn(),
     createTask: vi.fn(),
   };
@@ -25,6 +26,7 @@ describe('Home', () => {
     vi.mocked(api.listWorkflows).mockResolvedValue({ workflows: [workflowRecord()] });
     vi.mocked(api.listWorkers).mockResolvedValue({ workers: [] });
     vi.mocked(api.getMe).mockResolvedValue({ user: { id: 'user-1', email: 'lucas@example.com', displayName: 'Lucas' } });
+    vi.mocked(api.getGitHubCatalog).mockResolvedValue({ connected: false, source: null, repositories: [], owners: [] });
     vi.mocked(api.createTask).mockReset();
     vi.mocked(api.importTicket).mockReset();
   });
@@ -96,5 +98,34 @@ describe('Home', () => {
       repos: [],
       workflowId: 'wf-default',
     });
+  });
+
+  it('creates a repository with the task under a connected GitHub owner', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getGitHubCatalog).mockResolvedValue({
+      connected: true,
+      source: 'oauth',
+      repositories: [],
+      owners: [
+        { login: 'lucas', type: 'user', avatarUrl: null, role: 'owner' },
+        { login: 'acme', type: 'organization', avatarUrl: null, role: 'admin' },
+      ],
+    });
+    vi.mocked(api.createTask).mockResolvedValue({ task: makeTask({ repos: ['acme/billing-service'] }) });
+    renderWithProviders(<Home />);
+
+    await user.type(await screen.findByLabelText('Task description'), 'Build the billing service');
+    await user.click(await screen.findByRole('button', { name: 'New repo' }));
+    await user.selectOptions(screen.getByLabelText('Repository owner'), 'acme');
+    await user.type(screen.getByLabelText('New repository name'), 'billing-service');
+    await user.click(screen.getByRole('button', { name: /Create task/ }));
+
+    await waitFor(() => expect(api.createTask).toHaveBeenCalledWith({
+      title: 'Build the billing service',
+      description: 'Build the billing service',
+      repos: [],
+      workflowId: 'wf-default',
+      newRepository: { owner: 'acme', name: 'billing-service', visibility: 'private' },
+    }));
   });
 });

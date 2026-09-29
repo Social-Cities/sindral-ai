@@ -13,6 +13,7 @@ import type {
   TaskEvent,
   TaskWithRelations,
   TicketImport,
+  GitHubCatalog,
   Worker,
   WorkerKey,
   WorkflowRecord,
@@ -50,6 +51,8 @@ export interface ApiRoutes {
   'PUT /api/settings/secrets': { response: { secret: SecretStatus } };
   'DELETE /api/settings/secrets/:provider': { response: { ok: true } };
   'GET /api/me': { response: { user: { id: string; email: string | null; displayName: string | null } } };
+  'GET /api/github/catalog': { response: GitHubCatalog };
+  'POST /api/github/connect': { response: { url: string } };
   // tickets
   'POST /api/tickets/import': { response: { ticket: TicketImport } };
   // realtime (SSE)

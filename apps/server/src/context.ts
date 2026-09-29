@@ -9,6 +9,8 @@ import type { Orchestrator } from './services/orchestrator.js';
 import type { SecretService } from './services/secrets.js';
 import type { TicketService } from './services/tickets.js';
 import type { WorkflowService } from './services/workflows.js';
+import type { GitHubConnectionService } from './services/githubConnection.js';
+import type { GitHubOAuthService } from './services/githubOAuth.js';
 
 export interface ClaimOptions {
   /** How long `POST /api/worker/jobs/claim` waits for work before returning an empty list. */
@@ -28,6 +30,8 @@ export interface AppContext {
   workflows: WorkflowService;
   secrets: SecretService;
   tickets: TicketService;
+  github: GitHubConnectionService;
+  githubOAuth: GitHubOAuthService;
   orchestrator: Orchestrator;
   claim: ClaimOptions;
   ssePingMs: number;

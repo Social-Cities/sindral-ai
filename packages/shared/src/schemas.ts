@@ -48,6 +48,13 @@ export const updateWorkflowSchema = workflowSchema.omit({ id: true });
 
 const repo = z.string().trim().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, 'Repositories must be owner/name');
 
+export const createGitHubRepositorySchema = z.object({
+  owner: z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9_.-]+$/, 'Invalid GitHub owner'),
+  name: z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9_.-]+$/, 'Invalid repository name'),
+  visibility: z.enum(['private', 'public']).default('private'),
+  description: z.string().trim().max(350).optional(),
+});
+
 export const createTaskSchema = z.object({
   title: shortText,
   description: longText.default(''),
@@ -55,6 +62,10 @@ export const createTaskSchema = z.object({
   key: z.string().trim().regex(/^[A-Z][A-Z0-9]*-\d+$/).optional(),
   workflowId: z.string().max(64).optional(),
   repos: z.array(repo).max(10).default([]),
+  newRepository: createGitHubRepositorySchema.optional(),
+}).refine((input) => input.repos.length + (input.newRepository ? 1 : 0) <= 10, {
+  message: 'Tasks support at most 10 repositories',
+  path: ['repos'],
 });
 
 export const updateTaskSchema = z.object({
@@ -237,6 +248,7 @@ export const workerJobFailSchema = z.object({ attempt: z.number().int().positive
 export const rawAgentResultFileSchema = z.object({ kind: z.string().optional() }).passthrough();
 
 export type CreateTaskInput = z.infer<typeof createTaskSchema>;
+export type CreateGitHubRepositoryInput = z.infer<typeof createGitHubRepositorySchema>;
 export type UpdateTaskInput = z.infer<typeof updateTaskSchema>;
 export type CreateWorkflowInput = z.infer<typeof createWorkflowSchema>;
 export type UpdateWorkflowInput = z.infer<typeof updateWorkflowSchema>;

@@ -121,13 +121,19 @@ export const workerRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx 
     if (jobs.length === 0) return { jobs: [] as JobDispatch[] };
 
     const useGitHubApp = hasGitHubAppCredentials(ctx.config, userId);
-    const github = useGitHubApp ? null : await ctx.secrets.get(userId, 'github');
+    const github = await ctx.secrets.get(userId, 'github');
     const dispatches: JobDispatch[] = [];
     for (const claimed of jobs) {
       const { leaseToken, ...job } = claimed;
-      const appToken = useGitHubApp
-        ? await mintGitHubInstallationToken(ctx.config, userId, repositoriesForJob(job), ctx.fetch)
-        : null;
+      let appToken: string | null = null;
+      if (useGitHubApp) {
+        try {
+          appToken = await mintGitHubInstallationToken(ctx.config, userId, repositoriesForJob(job), ctx.fetch);
+        } catch (error) {
+          if (!github) throw error;
+          ctx.log.warn({ err: error, jobId: job.id }, 'GitHub App cannot access job repositories; using connected user credential');
+        }
+      }
       dispatches.push({
         job,
         lease: { token: leaseToken, expiresAt: job.leaseExpiresAt! },

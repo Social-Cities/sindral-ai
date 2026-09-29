@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Sign in / Create account. GitHub login was removed from iOS on purpose (commit e064cdd), so the
-/// design's "or" divider and "Continue with GitHub" button are intentionally left out.
+/// GitHub is connected after sign-in for repository access, so authentication stays email/password only.
 struct AuthView: View {
     @Environment(SessionStore.self) private var session
     @State private var mode = Mode.signIn

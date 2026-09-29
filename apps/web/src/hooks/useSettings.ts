@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { SecretStatus, SetSecretInput, WorkerKey } from '@sindral/shared';
-import { createWorkerKey, deleteSecret, getMe, listSecrets, listWorkerKeys, revokeWorkerKey, setSecret } from '@/lib/api';
+import { connectGitHub, createWorkerKey, deleteSecret, getGitHubCatalog, getMe, listSecrets, listWorkerKeys, revokeWorkerKey, setSecret } from '@/lib/api';
 import { queryKeys } from './queryKeys';
 
 export function useMe() {
@@ -19,6 +19,19 @@ export function useSecrets() {
   });
 }
 
+export function useGitHubCatalog() {
+  return useQuery({
+    queryKey: queryKeys.githubCatalog,
+    queryFn: getGitHubCatalog,
+    staleTime: 60_000,
+    retry: false,
+  });
+}
+
+export function useConnectGitHub() {
+  return useMutation({ mutationFn: connectGitHub });
+}
+
 export function useSetSecret() {
   const qc = useQueryClient();
   return useMutation({
@@ -29,6 +42,7 @@ export function useSetSecret() {
         return [...rest, secret];
       });
       void qc.invalidateQueries({ queryKey: queryKeys.secrets });
+      if (secret.provider === 'github') void qc.invalidateQueries({ queryKey: queryKeys.githubCatalog });
     },
   });
 }
@@ -42,6 +56,7 @@ export function useDeleteSecret() {
         (prev ?? []).map((s) => (s.provider === provider ? { ...s, configured: false, hint: null, updatedAt: null } : s)),
       );
       void qc.invalidateQueries({ queryKey: queryKeys.secrets });
+      if (provider === 'github') void qc.invalidateQueries({ queryKey: queryKeys.githubCatalog });
     },
   });
 }

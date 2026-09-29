@@ -214,6 +214,14 @@ export function getMe() {
   return apiFetch<ResponseOf<'GET /api/me'>>('/api/me');
 }
 
+export function getGitHubCatalog() {
+  return apiFetch<ResponseOf<'GET /api/github/catalog'>>('/api/github/catalog');
+}
+
+export function connectGitHub() {
+  return apiFetch<ResponseOf<'POST /api/github/connect'>>('/api/github/connect', { method: 'POST' });
+}
+
 // ---- tickets ---------------------------------------------------------------
 
 export function importTicket(url: string) {

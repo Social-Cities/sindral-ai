@@ -9,4 +9,5 @@ export const queryKeys = {
   secrets: ['secrets'] as const,
   workerKeys: ['worker-keys'] as const,
   me: ['me'] as const,
+  githubCatalog: ['github-catalog'] as const,
 };

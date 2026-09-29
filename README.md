@@ -46,8 +46,9 @@ pnpm dev:web                        # http://localhost:5173 (proxies /api to the
 
 Sign up in the UI, then open **Settings**:
 
-1. For production, configure `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, and `GITHUB_APP_INSTALLATIONS` (a JSON map from Sindral user UUIDs to installation IDs); the server mints repository-scoped installation tokens only for the matching tenant's jobs. A saved fine-grained PAT remains available for local/internal use and is encrypted at rest.
-2. Create a **worker key**. Copy the one-time secret.
+1. Sign in with email and password through Supabase, then select **Connect GitHub** in Settings to authorize repository access. GitHub is an integration, not an app login method. Sindral stores the returned GitHub token encrypted, uses it to list writable repositories and organizations, and can create a repository with an initialized `main` branch as part of task creation. Configure the dedicated GitHub OAuth App with the `repo` and `read:org` scopes through `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, and `GITHUB_OAUTH_CALLBACK_URL`.
+2. For production, configure `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, and `GITHUB_APP_INSTALLATIONS` (a JSON map from Sindral user UUIDs to installation IDs); the server mints repository-scoped installation tokens only for the matching tenant's jobs. The connected user credential is used when a newly created repository is not yet included in a selected-repository installation. A saved fine-grained PAT remains available for local/internal use and is encrypted at rest.
+3. Create a **worker key**. Copy the one-time secret.
 
 Start the worker on the machine that has your repos, `git`, `gh` and the agent CLIs:
 
@@ -68,7 +69,7 @@ pnpm build            # builds shared, server, web (dist served by the server) a
 cd apps/server && node dist/index.js
 ```
 
-Run the server behind TLS. Use a hosted Supabase project, apply migrations with `supabase db push`, set `SINDRAL_ENV=production`, and set `WEB_ORIGIN` to the exact HTTPS origin of the UI. Configure Supabase Auth providers (email/password or GitHub OAuth) in the Supabase dashboard. The server refuses to listen when it cannot reach Supabase, the schema version is incompatible, production origins are not HTTPS, or the production webhook secret is missing/weak.
+Run the server behind TLS. Use a hosted Supabase project, apply migrations with `supabase db push`, set `SINDRAL_ENV=production`, and set `WEB_ORIGIN` to the exact HTTPS origin of the UI. Configure email/password in Supabase Auth, and configure a separate GitHub OAuth App for repository access after login. The server refuses to listen when it cannot reach Supabase, the schema version is incompatible, production origins are not HTTPS, or the production webhook secret is missing/weak.
 
 Production merge is deliberately opt-in: set `SINDRAL_AUTO_MERGE_ENABLED=true` only after validating the GitHub App and repository allow-list. `SINDRAL_JOB_DISPATCH_ENABLED=false` is the emergency stop for new worker leases; queued jobs and read/review access remain intact until it is re-enabled. Disabling automatic merge also prevents already-queued merge jobs from being leased.
 

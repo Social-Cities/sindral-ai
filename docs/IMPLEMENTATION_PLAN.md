@@ -293,7 +293,7 @@ The portal is production-ready only when all of the following evidence exists:
 
 ### Low-risk assumptions
 
-- Email/password and GitHub OAuth through Supabase Auth are sufficient for the first release.
+- Email/password through Supabase Auth is sufficient for app login. Repository access uses a separate GitHub OAuth connection after login.
 - SSE plus query invalidation is sufficient for portal live updates; workers may use authenticated long polling with leases.
 - Text/Markdown artifacts are sufficient initially; binary artifact support can wait until scanning and storage policy are defined.
 - macOS and Linux are the supported worker hosts for v1; Windows support is deferred.

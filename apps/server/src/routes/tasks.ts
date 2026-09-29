@@ -19,7 +19,15 @@ export const taskRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx })
 
   app.post('/api/tasks', async (request, reply) => {
     const input = validate(createTaskSchema, request.body);
-    const task = await orchestrator.createTask(request.user!.id, input);
+    if (input.newRepository && input.workflowId && !(await ctx.workflows.get(request.user!.id, input.workflowId))) {
+      throw badRequest('Unknown workflow');
+    }
+    const { newRepository, ...taskInput } = input;
+    if (newRepository) {
+      const created = await ctx.github.createRepository(request.user!.id, newRepository);
+      if (!taskInput.repos.includes(created.fullName)) taskInput.repos.push(created.fullName);
+    }
+    const task = await orchestrator.createTask(request.user!.id, taskInput);
     return reply.code(201).send({ task });
   });
 

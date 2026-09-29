@@ -9,7 +9,6 @@ export interface AuthContextValue {
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<{ needsConfirmation: boolean }>;
-  signInWithGitHub: () => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -52,22 +51,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { needsConfirmation: !data.session };
   }, []);
 
-  const signInWithGitHub = useCallback(async () => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'github',
-      options: { redirectTo: `${window.location.origin}/` },
-    });
-    if (error) throw error;
-  }, []);
-
   const signOut = useCallback(async () => {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
   }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ session, user: session?.user ?? null, loading, signIn, signUp, signInWithGitHub, signOut }),
-    [session, loading, signIn, signUp, signInWithGitHub, signOut],
+    () => ({ session, user: session?.user ?? null, loading, signIn, signUp, signOut }),
+    [session, loading, signIn, signUp, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

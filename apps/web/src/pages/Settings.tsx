@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import type { SecretProvider, SecretStatus, WorkerKey } from '@sindral/shared';
+import { useSearchParams } from 'react-router';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Modal } from '@/components/Modal';
 import { RelativeTime } from '@/components/RelativeTime';
-import { useCreateWorkerKey, useDeleteSecret, useRevokeWorkerKey, useSecrets, useSetSecret, useWorkerKeys } from '@/hooks/useSettings';
+import { useConnectGitHub, useCreateWorkerKey, useDeleteSecret, useRevokeWorkerKey, useSecrets, useSetSecret, useWorkerKeys } from '@/hooks/useSettings';
 import { useWorkers } from '@/hooks/useWorkers';
 import { formatDateTime } from '@/lib/format';
 import { WorkerPanel } from './Home';
@@ -246,9 +247,33 @@ function WorkerKeysSection() {
 }
 
 export function Settings() {
+  const [searchParams] = useSearchParams();
+  const connectGitHub = useConnectGitHub();
+  const disconnectGitHub = useDeleteSecret();
   const secrets = useSecrets();
   const workers = useWorkers();
   const byProvider = useMemo(() => new Map((secrets.data ?? []).map((s) => [s.provider, s])), [secrets.data]);
+  const [githubError, setGitHubError] = useState<string | null>(null);
+  const githubStatus = byProvider.get('github');
+
+  async function connect() {
+    setGitHubError(null);
+    try {
+      const { url } = await connectGitHub.mutateAsync();
+      window.location.assign(url);
+    } catch (error) {
+      setGitHubError(errorText(error));
+    }
+  }
+
+  async function disconnect() {
+    setGitHubError(null);
+    try {
+      await disconnectGitHub.mutateAsync('github');
+    } catch (error) {
+      setGitHubError(errorText(error));
+    }
+  }
 
   return (
     <div className="h-full overflow-y-auto">
@@ -264,8 +289,34 @@ export function Settings() {
           </p>
         )}
 
-        <Section title="GitHub" description="Personal access token used to open PRs, read diffs and ingest PR comments. Needs repo scope.">
-          <SecretForm provider="github" status={byProvider.get('github')} tokenLabel="Token" placeholder="ghp_…" hint="Stored encrypted; only the last characters are shown." />
+        <Section title="GitHub" description="Connect an account to choose repositories, create new ones, open PRs and read review feedback.">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-2 text-xs">
+                <span className={`w-1.5 h-1.5 rounded-full ${githubStatus?.configured ? 'bg-emerald-400' : 'bg-muted-foreground'}`} aria-hidden="true" />
+                <span className="text-secondary-foreground">{githubStatus?.configured ? 'GitHub connected' : 'Not connected'}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                {githubStatus?.configured && (
+                  <Button type="button" variant="danger" onClick={() => void disconnect()} loading={disconnectGitHub.isPending}>
+                    Disconnect
+                  </Button>
+                )}
+                <Button type="button" onClick={() => void connect()} loading={connectGitHub.isPending}>
+                  {githubStatus?.configured ? 'Reconnect' : 'Connect GitHub'}
+                </Button>
+              </div>
+            </div>
+            {searchParams.get('github') === 'connected' && <p className="text-xs text-[#34d399]" role="status">GitHub account connected.</p>}
+            {searchParams.get('github') === 'error' && <p className="text-xs text-[#f87171]" role="alert">GitHub authorization did not complete. Try connecting again.</p>}
+            {githubError && <p className="text-xs text-[#f87171]" role="alert">{githubError}</p>}
+            <details className="border-t border-border pt-3">
+              <summary className="text-xs text-muted-foreground cursor-pointer hover:text-secondary-foreground">Use a personal access token instead</summary>
+              <div className="pt-3">
+                <SecretForm provider="github" status={githubStatus} tokenLabel="Token" placeholder="ghp_…" hint="Stored encrypted; requires repo and read:org scopes." />
+              </div>
+            </details>
+          </div>
         </Section>
 
         <Section title="Linear" description="API key used to import tickets from linear.app URLs.">

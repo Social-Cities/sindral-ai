@@ -21,6 +21,7 @@ describe('config', () => {
     expect(config.secretsEncryptionKey).toHaveLength(32);
     expect(config.webDistDir.endsWith('/apps/web/dist')).toBe(true);
     expect(config.githubAppInstallations).toEqual({});
+    expect(config.githubOAuthClientId).toBeUndefined();
     expect(config.jobDispatchEnabled).toBe(true);
     expect(config.autoMergeEnabled).toBe(false);
     expect(parseConfig({ ...valid, SINDRAL_JOB_DISPATCH_ENABLED: 'false', SINDRAL_AUTO_MERGE_ENABLED: 'true' })).toMatchObject({
@@ -47,6 +48,13 @@ describe('config', () => {
       expect((err as Error).message).toContain('openssl rand -hex 32');
     }
     expect(() => parseConfig({ ...valid, GITHUB_APP_ID: '1' })).toThrow(/configured together/);
+    expect(() => parseConfig({ ...valid, GITHUB_OAUTH_CLIENT_ID: 'client' })).toThrow(/configured together/);
+    expect(() => parseConfig({ ...valid, GITHUB_OAUTH_CALLBACK_URL: 'https://app.example.com/api/github/callback' })).toThrow(/requires/);
+    expect(parseConfig({ ...valid, GITHUB_OAUTH_CLIENT_ID: 'client', GITHUB_OAUTH_CLIENT_SECRET: 'secret' })).toMatchObject({
+      githubOAuthClientId: 'client',
+      githubOAuthClientSecret: 'secret',
+      githubOAuthCallbackUrl: 'http://localhost:5173/api/github/callback',
+    });
     expect(() => parseConfig({ ...valid, GITHUB_APP_ID: '1', GITHUB_APP_PRIVATE_KEY: 'key', GITHUB_APP_INSTALLATIONS: '[]' })).toThrow(/JSON object/);
     expect(() => parseConfig({ ...valid, SINDRAL_JOB_DISPATCH_ENABLED: 'yes' })).toThrow(ConfigError);
     expect(() => parseConfig({ ...valid, WEB_ORIGIN: 'https://app.example.com/path' })).toThrow(/exact HTTP\(S\) origins/);

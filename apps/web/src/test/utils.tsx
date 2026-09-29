@@ -29,7 +29,6 @@ export function makeAuth(overrides: Partial<AuthContextValue> = {}): AuthContext
     loading: false,
     signIn: vi.fn().mockResolvedValue(undefined),
     signUp: vi.fn().mockResolvedValue({ needsConfirmation: false }),
-    signInWithGitHub: vi.fn().mockResolvedValue(undefined),
     signOut: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };

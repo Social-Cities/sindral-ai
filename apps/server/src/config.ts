@@ -28,6 +28,9 @@ const envSchema = z.object({
     .string()
     .regex(/^[0-9a-fA-F]{64}$/, 'must be 32 bytes hex encoded (openssl rand -hex 32)'),
   GITHUB_WEBHOOK_SECRET: optionalString,
+  GITHUB_OAUTH_CLIENT_ID: optionalString,
+  GITHUB_OAUTH_CLIENT_SECRET: optionalString,
+  GITHUB_OAUTH_CALLBACK_URL: optionalString,
   GITHUB_APP_ID: optionalString,
   GITHUB_APP_PRIVATE_KEY: optionalString,
   GITHUB_APP_INSTALLATIONS: optionalString,
@@ -51,6 +54,9 @@ export interface AppConfig {
   webOrigins: string[];
   secretsEncryptionKey: Buffer;
   githubWebhookSecret: string | undefined;
+  githubOAuthClientId: string | undefined;
+  githubOAuthClientSecret: string | undefined;
+  githubOAuthCallbackUrl: string | undefined;
   githubAppId: string | undefined;
   githubAppPrivateKey: string | undefined;
   githubAppInstallations: Record<string, number>;
@@ -88,6 +94,28 @@ export function parseConfig(env: NodeJS.ProcessEnv): AppConfig {
   if (githubAppValues.some((value) => value !== undefined) && githubAppValues.some((value) => value === undefined)) {
     throw new ConfigError('GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, and GITHUB_APP_INSTALLATIONS must be configured together');
   }
+  const githubOAuthValues = [e.GITHUB_OAUTH_CLIENT_ID, e.GITHUB_OAUTH_CLIENT_SECRET];
+  if (githubOAuthValues.some((value) => value !== undefined) && githubOAuthValues.some((value) => value === undefined)) {
+    throw new ConfigError('GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET must be configured together');
+  }
+  let githubOAuthCallbackUrl: string | undefined;
+  if (e.GITHUB_OAUTH_CLIENT_ID) {
+    githubOAuthCallbackUrl = e.GITHUB_OAUTH_CALLBACK_URL ?? `${webOrigins[0]}/api/github/callback`;
+    let callback: URL;
+    try {
+      callback = new URL(githubOAuthCallbackUrl);
+    } catch {
+      throw new ConfigError('GITHUB_OAUTH_CALLBACK_URL must be a valid HTTP(S) URL');
+    }
+    if (!['http:', 'https:'].includes(callback.protocol) || callback.username || callback.password || callback.hash) {
+      throw new ConfigError('GITHUB_OAUTH_CALLBACK_URL must be an HTTP(S) URL without credentials or a fragment');
+    }
+    if (e.SINDRAL_ENV === 'production' && callback.protocol !== 'https:') {
+      throw new ConfigError('GITHUB_OAUTH_CALLBACK_URL must use HTTPS in production');
+    }
+  } else if (e.GITHUB_OAUTH_CALLBACK_URL) {
+    throw new ConfigError('GITHUB_OAUTH_CALLBACK_URL requires GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET');
+  }
   let githubAppInstallations: Record<string, number> = {};
   if (e.GITHUB_APP_INSTALLATIONS) {
     try {
@@ -107,6 +135,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): AppConfig {
     webOrigins,
     secretsEncryptionKey: Buffer.from(e.SECRETS_ENCRYPTION_KEY, 'hex'),
     githubWebhookSecret: e.GITHUB_WEBHOOK_SECRET,
+    githubOAuthClientId: e.GITHUB_OAUTH_CLIENT_ID,
+    githubOAuthClientSecret: e.GITHUB_OAUTH_CLIENT_SECRET,
+    githubOAuthCallbackUrl,
     githubAppId: e.GITHUB_APP_ID,
     githubAppPrivateKey: e.GITHUB_APP_PRIVATE_KEY?.replaceAll('\\n', '\n'),
     githubAppInstallations,
