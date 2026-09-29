@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import type { AppConfig } from '../config.js';
-import { badRequest, serviceUnavailable } from '../errors.js';
+import { serviceUnavailable } from '../errors.js';
 import type { SecretService } from './secrets.js';
 
 type FetchLike = typeof fetch;
@@ -8,6 +8,19 @@ type JsonObject = Record<string, unknown>;
 
 const STATE_TTL_MS = 10 * 60_000;
 const GITHUB_SCOPES = 'repo read:org';
+
+export type GitHubOAuthFailureReason = 'state' | 'credentials' | 'callback' | 'code' | 'scope' | 'account' | 'storage' | 'exchange';
+
+export class GitHubOAuthError extends Error {
+  constructor(
+    readonly reason: GitHubOAuthFailureReason,
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+    this.name = 'GitHubOAuthError';
+  }
+}
 
 export class GitHubOAuthService {
   constructor(
@@ -36,43 +49,63 @@ export class GitHubOAuthService {
   async complete(code: string, state: string): Promise<{ userId: string; login: string }> {
     const { userId, codeVerifier } = this.verifyState(state);
     const { clientId, clientSecret, callbackUrl } = this.credentials();
-    const tokenResponse = await this.fetchImpl('https://github.com/login/oauth/access_token', {
-      method: 'POST',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'sindral-server' },
-      redirect: 'error',
-      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code, redirect_uri: callbackUrl, code_verifier: codeVerifier }),
-    });
-    const tokenBody = await readJson(tokenResponse, 'GitHub OAuth token exchange');
-    if (!tokenResponse.ok) throw badRequest(githubMessage(tokenBody, 'GitHub authorization failed'));
-    const token = stringField(tokenBody, 'access_token');
-    if (!token) throw badRequest(githubMessage(tokenBody, 'GitHub authorization returned no access token'));
-    const scopes = new Set(stringField(tokenBody, 'scope').split(/[\s,]+/).filter(Boolean));
-    if (!scopes.has('repo') || !scopes.has('read:org')) {
-      throw badRequest('GitHub authorization must grant repository and organization read access');
+    let tokenResponse: Response;
+    let tokenBody: JsonObject;
+    try {
+      tokenResponse = await this.fetchImpl('https://github.com/login/oauth/access_token', {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'sindral-server' },
+        redirect: 'error',
+        body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code, redirect_uri: callbackUrl, code_verifier: codeVerifier }),
+      });
+      tokenBody = await readJson(tokenResponse, 'GitHub OAuth token exchange');
+    } catch (error) {
+      throw new GitHubOAuthError('exchange', 'GitHub token exchange could not be completed', { cause: error });
     }
+    const githubError = stringField(tokenBody, 'error');
+    if (!tokenResponse.ok || githubError) {
+      throw new GitHubOAuthError(tokenFailureReason(githubError), githubMessage(tokenBody, 'GitHub authorization failed'));
+    }
+    const token = stringField(tokenBody, 'access_token');
+    if (!token) throw new GitHubOAuthError('exchange', githubMessage(tokenBody, 'GitHub authorization returned no access token'));
+    const scopes = new Set(stringField(tokenBody, 'scope').split(/[\s,]+/).filter(Boolean));
+    if (!scopes.has('repo')) throw new GitHubOAuthError('scope', 'GitHub authorization must grant repository access');
 
-    const userResponse = await this.fetchImpl('https://api.github.com/user', {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-        'User-Agent': 'sindral-server',
-      },
-      redirect: 'error',
-    });
-    const userBody = await readJson(userResponse, 'GitHub user validation');
-    if (!userResponse.ok) throw badRequest(githubMessage(userBody, 'GitHub could not validate the connected account'));
+    let userResponse: Response;
+    let userBody: JsonObject;
+    try {
+      userResponse = await this.fetchImpl('https://api.github.com/user', {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+          'User-Agent': 'sindral-server',
+        },
+        redirect: 'error',
+      });
+      userBody = await readJson(userResponse, 'GitHub user validation');
+    } catch (error) {
+      throw new GitHubOAuthError('account', 'GitHub account validation could not be completed', { cause: error });
+    }
+    if (!userResponse.ok) throw new GitHubOAuthError('account', githubMessage(userBody, 'GitHub could not validate the connected account'));
     const login = stringField(userBody, 'login');
-    if (!login) throw badRequest('GitHub returned an invalid user profile');
+    if (!login) throw new GitHubOAuthError('account', 'GitHub returned an invalid user profile');
 
-    await this.secrets.set(userId, 'github', token, { source: 'oauth', login });
+    try {
+      await this.secrets.set(userId, 'github', token, { source: 'oauth', login });
+    } catch (error) {
+      throw new GitHubOAuthError('storage', 'GitHub credential could not be stored', { cause: error });
+    }
     return { userId, login };
   }
 
-  settingsRedirect(result: { connected?: boolean; error?: string }): string {
+  settingsRedirect(result: { connected?: boolean; error?: GitHubOAuthFailureReason | 'denied' | 'missing' }): string {
     const url = new URL('/settings', this.config.webOrigins[0]);
     if (result.connected) url.searchParams.set('github', 'connected');
-    if (result.error) url.searchParams.set('github', 'error');
+    if (result.error) {
+      url.searchParams.set('github', 'error');
+      url.searchParams.set('github_error', result.error);
+    }
     return url.toString();
   }
 
@@ -97,7 +130,7 @@ export class GitHubOAuthService {
 
   private verifyState(state: string): { userId: string; codeVerifier: string } {
     const [ivValue, ciphertextValue, tagValue, extra] = state.split('.');
-    if (!ivValue || !ciphertextValue || !tagValue || extra) throw badRequest('Invalid GitHub authorization state');
+    if (!ivValue || !ciphertextValue || !tagValue || extra) throw new GitHubOAuthError('state', 'Invalid GitHub authorization state');
     let parsed: unknown;
     try {
       const decipher = createDecipheriv('aes-256-gcm', this.config.secretsEncryptionKey, Buffer.from(ivValue, 'base64url'));
@@ -106,15 +139,15 @@ export class GitHubOAuthService {
       const plaintext = Buffer.concat([decipher.update(Buffer.from(ciphertextValue, 'base64url')), decipher.final()]).toString('utf8');
       parsed = JSON.parse(plaintext) as unknown;
     } catch {
-      throw badRequest('Invalid GitHub authorization state');
+      throw new GitHubOAuthError('state', 'Invalid GitHub authorization state');
     }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw badRequest('Invalid GitHub authorization state');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new GitHubOAuthError('state', 'Invalid GitHub authorization state');
     const value = parsed as JsonObject;
     const userId = stringField(value, 'userId');
     const codeVerifier = stringField(value, 'codeVerifier');
     const expiresAt = value['expiresAt'];
     if (!/^[0-9a-f-]{36}$/i.test(userId) || !/^[A-Za-z0-9_-]{43,128}$/.test(codeVerifier) || typeof expiresAt !== 'number' || !Number.isFinite(expiresAt) || expiresAt < Date.now()) {
-      throw badRequest('GitHub authorization state has expired');
+      throw new GitHubOAuthError('state', 'GitHub authorization state has expired');
     }
     return { userId, codeVerifier };
   }
@@ -137,4 +170,11 @@ function stringField(value: JsonObject, key: string): string {
 
 function githubMessage(value: JsonObject, fallback: string): string {
   return stringField(value, 'error_description') || stringField(value, 'message') || stringField(value, 'error') || fallback;
+}
+
+function tokenFailureReason(error: string): GitHubOAuthFailureReason {
+  if (error === 'incorrect_client_credentials') return 'credentials';
+  if (error === 'redirect_uri_mismatch') return 'callback';
+  if (error === 'bad_verification_code') return 'code';
+  return 'exchange';
 }

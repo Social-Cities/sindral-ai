@@ -110,13 +110,18 @@ export class GitHubConnectionService {
       });
     } catch (error) {
       if (!(error instanceof HttpError) || (error.statusCode !== 403 && error.statusCode !== 404)) throw error;
-      const rows = await this.requestArray(token, '/user/orgs?per_page=100');
-      return rows.flatMap((row) => {
-        const login = stringField(row, 'login');
-        return login
-          ? [{ login, type: 'organization' as const, avatarUrl: nullableStringField(row, 'avatar_url'), role: 'member' as const }]
-          : [];
-      });
+      try {
+        const rows = await this.requestArray(token, '/user/orgs?per_page=100');
+        return rows.flatMap((row) => {
+          const login = stringField(row, 'login');
+          return login
+            ? [{ login, type: 'organization' as const, avatarUrl: nullableStringField(row, 'avatar_url'), role: 'member' as const }]
+            : [];
+        });
+      } catch (fallbackError) {
+        if (fallbackError instanceof HttpError && (fallbackError.statusCode === 403 || fallbackError.statusCode === 404)) return [];
+        throw fallbackError;
+      }
     }
   }
 

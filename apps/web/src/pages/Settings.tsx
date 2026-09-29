@@ -13,6 +13,19 @@ import { WorkerPanel } from './Home';
 
 const API_ORIGIN = import.meta.env.VITE_API_URL || (typeof window !== 'undefined' ? window.location.origin : '');
 
+const GITHUB_ERROR_MESSAGES: Record<string, string> = {
+  credentials: 'GitHub rejected the OAuth client credentials. Verify the client ID and secret in Railway.',
+  callback: 'The GitHub callback URL does not match the URL configured for the OAuth App.',
+  code: 'The GitHub authorization code expired or was already used. Try connecting again.',
+  scope: 'Repository access was not granted. Reconnect and approve the requested repository permission.',
+  state: 'The GitHub authorization session expired or could not be verified. Try connecting again.',
+  account: 'GitHub issued a token, but the connected account could not be validated.',
+  storage: 'GitHub authorized successfully, but Sindral could not save the credential.',
+  denied: 'GitHub authorization was cancelled or denied.',
+  missing: 'GitHub returned an incomplete authorization response. Try connecting again.',
+  exchange: 'GitHub authorization could not be completed. Verify the OAuth configuration and try again.',
+};
+
 function Section({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
   return (
     <section className="rounded-lg bg-card border border-border">
@@ -255,6 +268,7 @@ export function Settings() {
   const byProvider = useMemo(() => new Map((secrets.data ?? []).map((s) => [s.provider, s])), [secrets.data]);
   const [githubError, setGitHubError] = useState<string | null>(null);
   const githubStatus = byProvider.get('github');
+  const githubCallbackError = searchParams.get('github_error');
 
   async function connect() {
     setGitHubError(null);
@@ -308,7 +322,11 @@ export function Settings() {
               </div>
             </div>
             {searchParams.get('github') === 'connected' && <p className="text-xs text-[#34d399]" role="status">GitHub account connected.</p>}
-            {searchParams.get('github') === 'error' && <p className="text-xs text-[#f87171]" role="alert">GitHub authorization did not complete. Try connecting again.</p>}
+            {searchParams.get('github') === 'error' && (
+              <p className="text-xs text-[#f87171]" role="alert">
+                {GITHUB_ERROR_MESSAGES[githubCallbackError ?? ''] ?? GITHUB_ERROR_MESSAGES.exchange}
+              </p>
+            )}
             {githubError && <p className="text-xs text-[#f87171]" role="alert">{githubError}</p>}
             <details className="border-t border-border pt-3">
               <summary className="text-xs text-muted-foreground cursor-pointer hover:text-secondary-foreground">Use a personal access token instead</summary>

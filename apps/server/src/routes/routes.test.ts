@@ -571,7 +571,7 @@ describe('settings API', () => {
           redirect_uri: 'http://localhost:5173/api/github/callback',
         });
         expect(body.code_verifier).toMatch(/^[A-Za-z0-9_-]{43}$/);
-        return json({ access_token: 'github-user-token', scope: 'repo,read:org', token_type: 'bearer' });
+        return json({ access_token: 'github-user-token', scope: 'repo', token_type: 'bearer' });
       }
       if (url === 'https://api.github.com/user') {
         expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer github-user-token');
@@ -597,8 +597,34 @@ describe('settings API', () => {
       url: `/api/github/callback?code=other-code&state=${encodeURIComponent(`${state}x`)}`,
     });
     expect(tampered.statusCode).toBe(302);
-    expect(tampered.headers.location).toBe('http://localhost:5173/settings?github=error');
+    expect(tampered.headers.location).toBe('http://localhost:5173/settings?github=error&github_error=state');
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns a safe callback reason when GitHub rejects the OAuth credentials', async () => {
+    await ctx.app.close();
+    ctx = await createTestApp({
+      config: testConfig({
+        githubOAuthClientId: 'github-client-id',
+        githubOAuthClientSecret: 'wrong-secret',
+        githubOAuthCallbackUrl: 'http://localhost:5173/api/github/callback',
+      }),
+      fetch: fetchMock,
+    });
+    const connect = await ctx.app.inject({ method: 'POST', url: '/api/github/connect', headers: asA() });
+    const state = new URL(connect.json<{ url: string }>().url).searchParams.get('state');
+    fetchMock.mockResolvedValue(json({
+      error: 'incorrect_client_credentials',
+      error_description: 'The client credentials are invalid.',
+    }));
+
+    const callback = await ctx.app.inject({
+      method: 'GET',
+      url: `/api/github/callback?code=github-code&state=${encodeURIComponent(state!)}`,
+    });
+    expect(callback.statusCode).toBe(302);
+    expect(callback.headers.location).toBe('http://localhost:5173/settings?github=error&github_error=credentials');
+    expect(await ctx.app.ctx.secrets.get(ctx.userA, 'github')).toBeNull();
   });
 
   it('reports unavailable when GitHub repository authorization is not configured', async () => {

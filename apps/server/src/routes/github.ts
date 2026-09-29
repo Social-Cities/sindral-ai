@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../auth/user.js';
 import type { RouteOptions } from '../context.js';
+import { GitHubOAuthError } from '../services/githubOAuth.js';
 import { validate } from '../validate.js';
 
 const callbackQuerySchema = z.object({
@@ -19,13 +20,15 @@ export const githubRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx 
 
   app.get('/api/github/callback', async (request, reply) => {
     const query = validate(callbackQuerySchema, request.query);
-    if (query.error || !query.code || !query.state) return reply.redirect(ctx.githubOAuth.settingsRedirect({ error: query.error ?? 'missing_code' }));
+    if (query.error || !query.code || !query.state) {
+      return reply.redirect(ctx.githubOAuth.settingsRedirect({ error: query.error ? 'denied' : 'missing' }));
+    }
     try {
       await ctx.githubOAuth.complete(query.code, query.state);
       return reply.redirect(ctx.githubOAuth.settingsRedirect({ connected: true }));
     } catch (error) {
       request.log.warn({ err: error }, 'GitHub OAuth callback failed');
-      return reply.redirect(ctx.githubOAuth.settingsRedirect({ error: 'authorization_failed' }));
+      return reply.redirect(ctx.githubOAuth.settingsRedirect({ error: error instanceof GitHubOAuthError ? error.reason : 'exchange' }));
     }
   });
 };
