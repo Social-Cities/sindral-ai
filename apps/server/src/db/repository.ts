@@ -8,6 +8,7 @@ import type {
   MessageRole,
   MessageSource,
   MergeMethod,
+  Project,
   PullRequest,
   PullRequestStatus,
   SecretProvider,
@@ -62,6 +63,7 @@ export interface TaskInsert {
   key: string;
   title: string;
   description: string;
+  projectId: string | null;
   outcome: string;
   acceptanceCriteria: string;
   state: string;
@@ -81,6 +83,7 @@ export type TaskPatch = Partial<
     Task,
     | 'title'
     | 'description'
+    | 'projectId'
     | 'outcome'
     | 'acceptanceCriteria'
     | 'state'
@@ -100,9 +103,22 @@ export type TaskPatch = Partial<
 export interface TaskFilter {
   state?: string;
   workflowId?: string;
+  projectId?: string;
   search?: string;
   parentTaskId?: string;
   includeSubtasks?: boolean;
+}
+
+export interface ProjectInsert {
+  name: string;
+  description: string;
+  repositories: string[];
+}
+
+export interface ProjectPatch {
+  name?: string;
+  description?: string;
+  repositories?: string[];
 }
 
 export interface TaskRepositoryUpsert {
@@ -277,6 +293,13 @@ export interface Repository {
   createWorkflow(userId: string, input: WorkflowInsert): Promise<WorkflowRecord>;
   updateWorkflow(userId: string, id: string, patch: WorkflowPatch): Promise<WorkflowRecord | null>;
   deleteWorkflow(userId: string, id: string): Promise<boolean>;
+
+  // projects
+  createProject(userId: string, input: ProjectInsert): Promise<Project>;
+  getProject(userId: string, id: string): Promise<Project | null>;
+  listProjects(userId: string): Promise<Project[]>;
+  updateProject(userId: string, id: string, patch: ProjectPatch): Promise<Project | null>;
+  deleteProject(userId: string, id: string): Promise<boolean>;
 
   // tasks
   createTask(userId: string, input: TaskInsert): Promise<Task>;

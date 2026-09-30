@@ -24,6 +24,7 @@ export function makeTask(overrides: Partial<Task> = {}): Task {
     key: `SIN-${counter}`,
     title: `Task ${counter}`,
     description: 'Some description',
+    projectId: null,
     outcome: '',
     acceptanceCriteria: '',
     state: 'todo',

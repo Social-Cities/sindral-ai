@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import type { Task, Workflow } from '@sindral/shared';
+import type { Project, Task, Workflow } from '@sindral/shared';
 import { KNOWN_TASK_STATES, TERMINAL_STATES, dashboardBucket, getStateStyle } from '@sindral/shared';
 import { StatusBadge } from '@/components/StatusBadge';
 import { RelativeTime } from '@/components/RelativeTime';
 import { EmptyState } from '@/components/EmptyState';
 import { PageLoader } from '@/components/Spinner';
 import { useTasks } from '@/hooks/useTasks';
+import { useProjects } from '@/hooks/useProjects';
 import { useWorkflows } from '@/hooks/useWorkflows';
 import { currentStep, resolveWorkflow } from '@/lib/taskWorkflow';
 
@@ -16,6 +17,7 @@ const BUCKETS: Bucket[] = ['todo', 'in-progress', 'in-review', 'done', 'failed']
 
 export function Tasks() {
   const tasksQuery = useTasks();
+  const projectsQuery = useProjects();
   const workflowsQuery = useWorkflows();
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState('');
@@ -24,8 +26,11 @@ export function Tasks() {
 
   const statusFilter = searchParams.get('state') ?? 'active';
   const bucketFilter = searchParams.get('bucket');
+  const projectFilter = searchParams.get('projectId') ?? '';
 
   const tasks = useMemo(() => tasksQuery.data ?? [], [tasksQuery.data]);
+  const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data]);
+  const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
   const workflows = useMemo(() => workflowsQuery.data ?? [], [workflowsQuery.data]);
 
   const states = useMemo(() => {
@@ -50,6 +55,13 @@ export function Tasks() {
     else params.set('state', next);
     setSearchParams(params, { replace: true });
     setFilterOpen(false);
+  }
+
+  function setProject(next: string) {
+    const params = new URLSearchParams(searchParams);
+    if (next) params.set('projectId', next);
+    else params.delete('projectId');
+    setSearchParams(params, { replace: true });
   }
 
   const { parents, childrenOf } = useMemo(() => {
@@ -79,7 +91,8 @@ export function Tasks() {
           ? !TERMINAL_STATES.has(t.state)
           : t.state === statusFilter;
     const matchesBucket = !bucketFilter || dashboardBucket(t.state, currentStep(t, workflows)) === bucketFilter;
-    return matchesSearch && matchesStatus && matchesBucket;
+    const matchesProject = !projectFilter || t.projectId === projectFilter;
+    return matchesSearch && matchesStatus && matchesBucket && matchesProject;
   };
 
   const filtered = parents.flatMap((parent) => {
@@ -156,6 +169,19 @@ export function Tasks() {
               </button>
             </p>
           )}
+          <select
+            aria-label="Filter by project"
+            value={projectFilter}
+            onChange={(event) => setProject(event.target.value)}
+            className="w-full rounded-md outline-none text-xs text-foreground bg-input border border-border px-2.5 py-1.5 focus:border-accent/40"
+          >
+            <option value="">All projects</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="px-4 pb-2 hidden md:block">
@@ -195,11 +221,11 @@ export function Tasks() {
               const visibleChildren = children.filter(matches);
               return (
                 <div key={task.id}>
-                  <TaskRow task={task} workflows={workflows} subtaskCount={children.length} subtaskDone={children.filter((c) => c.state === 'done').length} />
+                  <TaskRow task={task} workflows={workflows} project={task.projectId ? projectById.get(task.projectId) : undefined} subtaskCount={children.length} subtaskDone={children.filter((c) => c.state === 'done').length} />
                   {visibleChildren.length > 0 && (
                     <div className="ml-6 mt-1.5 space-y-1.5 border-l border-border pl-3" aria-label={`Subtasks of ${task.key}`}>
                       {visibleChildren.map((child) => (
-                        <TaskRow key={child.id} task={child} workflows={workflows} compact />
+                        <TaskRow key={child.id} task={child} workflows={workflows} project={child.projectId ? projectById.get(child.projectId) : undefined} compact />
                       ))}
                     </div>
                   )}
@@ -230,12 +256,13 @@ function FilterOption({ active, onClick, children }: { active: boolean; onClick:
 interface TaskRowProps {
   task: Task;
   workflows: Workflow[];
+  project?: Project;
   compact?: boolean;
   subtaskCount?: number;
   subtaskDone?: number;
 }
 
-export function TaskRow({ task, workflows, compact = false, subtaskCount = 0, subtaskDone = 0 }: TaskRowProps) {
+export function TaskRow({ task, workflows, project, compact = false, subtaskCount = 0, subtaskDone = 0 }: TaskRowProps) {
   const wf = resolveWorkflow(task, workflows);
   const isPinned = !!task.pinnedWorkflow;
   const step = currentStep(task, workflows);
@@ -250,6 +277,7 @@ export function TaskRow({ task, workflows, compact = false, subtaskCount = 0, su
           <div className="flex items-center gap-2 mb-1 flex-wrap">
             {compact && task.sequence != null && <span className="text-[10px] font-mono text-muted-foreground">↳ {task.sequence}</span>}
             <span className="text-xs font-mono text-muted-foreground">{task.key}</span>
+            {project && <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground">{project.name}</span>}
             {task.ticketUrl && <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-secondary text-muted-foreground">linked</span>}
             {task.prUrl && (
               <span className="text-[10px] font-mono px-1.5 py-0.5 rounded text-accent" style={{ background: '#818cf810' }}>

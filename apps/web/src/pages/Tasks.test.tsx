@@ -5,10 +5,12 @@ import { renderWithProviders } from '@/test/utils';
 import { makeTask, workflowRecord } from '@/test/fixtures';
 import { useTasks } from '@/hooks/useTasks';
 import { useWorkflows } from '@/hooks/useWorkflows';
+import { useProjects } from '@/hooks/useProjects';
 import { Tasks } from './Tasks';
 
 vi.mock('@/hooks/useTasks', () => ({ useTasks: vi.fn() }));
 vi.mock('@/hooks/useWorkflows', () => ({ useWorkflows: vi.fn() }));
+vi.mock('@/hooks/useProjects', () => ({ useProjects: vi.fn() }));
 
 const parent = makeTask({ id: 'p1', key: 'ENG-1', title: 'Add OAuth login', state: 'in-review', currentStepId: 'in-review', prUrl: 'https://github.com/acme/app/pull/12' });
 const child = makeTask({ id: 'c1', key: 'ENG-1.1', title: 'Add token store', state: 'done', currentStepId: 'done', parentTaskId: 'p1', sequence: 1 });
@@ -19,6 +21,7 @@ const declined = makeTask({ id: 'w1', key: 'ENG-4', title: 'Old experiment', sta
 function mockData(tasks = [parent, child, other, completed, declined]) {
   vi.mocked(useTasks).mockReturnValue({ data: tasks, isLoading: false, isError: false, error: null } as unknown as ReturnType<typeof useTasks>);
   vi.mocked(useWorkflows).mockReturnValue({ data: [workflowRecord()], isLoading: false, isError: false, error: null } as unknown as ReturnType<typeof useWorkflows>);
+  vi.mocked(useProjects).mockReturnValue({ data: [], isLoading: false, isError: false, error: null } as unknown as ReturnType<typeof useProjects>);
 }
 
 describe('Tasks page', () => {

@@ -120,6 +120,7 @@ struct SindralTask: Codable, Identifiable, Hashable, Sendable {
     let key: String
     var title: String
     var description: String
+    let projectId: String?
     let outcome: String
     let acceptanceCriteria: String
     let state: String
@@ -147,6 +148,7 @@ struct TaskDetail: Codable, Identifiable, Hashable, Sendable {
     let key: String
     var title: String
     var description: String
+    let projectId: String?
     let outcome: String
     let acceptanceCriteria: String
     let state: String
@@ -172,7 +174,7 @@ struct TaskDetail: Codable, Identifiable, Hashable, Sendable {
     let repositories: [TaskRepository]
     let pullRequests: [PullRequest]
 
-    var summary: SindralTask { SindralTask(id: id, userId: userId, version: version, key: key, title: title, description: description, outcome: outcome, acceptanceCriteria: acceptanceCriteria, state: state, currentStepId: currentStepId, workflowId: workflowId, pinnedWorkflow: pinnedWorkflow, repos: repos, ticketUrl: ticketUrl, prUrl: prUrl, branch: branch, baseBranch: baseBranch, plan: plan, parentTaskId: parentTaskId, sequence: sequence, failedStepId: failedStepId, lastError: lastError, createdAt: createdAt, updatedAt: updatedAt) }
+    var summary: SindralTask { SindralTask(id: id, userId: userId, version: version, key: key, title: title, description: description, projectId: projectId, outcome: outcome, acceptanceCriteria: acceptanceCriteria, state: state, currentStepId: currentStepId, workflowId: workflowId, pinnedWorkflow: pinnedWorkflow, repos: repos, ticketUrl: ticketUrl, prUrl: prUrl, branch: branch, baseBranch: baseBranch, plan: plan, parentTaskId: parentTaskId, sequence: sequence, failedStepId: failedStepId, lastError: lastError, createdAt: createdAt, updatedAt: updatedAt) }
 }
 
 struct Worker: Codable, Identifiable, Hashable, Sendable {

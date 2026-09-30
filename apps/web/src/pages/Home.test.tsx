@@ -11,11 +11,13 @@ vi.mock('@/lib/api', async (importOriginal) => {
   return {
     ...actual,
     listTasks: vi.fn(),
+    listProjects: vi.fn(),
     listWorkflows: vi.fn(),
     listWorkers: vi.fn(),
     getMe: vi.fn(),
     getGitHubCatalog: vi.fn(),
     importTicket: vi.fn(),
+    createProject: vi.fn(),
     createTask: vi.fn(),
   };
 });
@@ -23,11 +25,13 @@ vi.mock('@/lib/api', async (importOriginal) => {
 describe('Home', () => {
   beforeEach(() => {
     vi.mocked(api.listTasks).mockResolvedValue({ tasks: [makeTask({ state: 'todo' }), makeTask({ state: 'in-review', currentStepId: 'in-review' })] });
+    vi.mocked(api.listProjects).mockResolvedValue({ projects: [] });
     vi.mocked(api.listWorkflows).mockResolvedValue({ workflows: [workflowRecord()] });
     vi.mocked(api.listWorkers).mockResolvedValue({ workers: [] });
     vi.mocked(api.getMe).mockResolvedValue({ user: { id: 'user-1', email: 'lucas@example.com', displayName: 'Lucas' } });
     vi.mocked(api.getGitHubCatalog).mockResolvedValue({ connected: false, source: null, repositories: [], owners: [] });
     vi.mocked(api.createTask).mockReset();
+    vi.mocked(api.createProject).mockReset();
     vi.mocked(api.importTicket).mockReset();
   });
 

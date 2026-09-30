@@ -1,9 +1,11 @@
 import type {
   ApiRoutes,
+  CreateProjectInput,
   CreateTaskInput,
   CreateWorkflowInput,
   Job,
   SetSecretInput,
+  UpdateProjectInput,
   UpdateTaskInput,
   UpdateWorkflowInput,
 } from '@sindral/shared';
@@ -81,6 +83,7 @@ export async function apiFetch<T>(path: string, init: RequestInit & { json?: unk
 export interface ListTasksParams {
   state?: string;
   workflowId?: string;
+  projectId?: string;
   search?: string;
   parentTaskId?: string;
   includeSubtasks?: boolean;
@@ -90,6 +93,7 @@ export function listTasks(params: ListTasksParams = {}) {
   const qs = new URLSearchParams();
   if (params.state) qs.set('state', params.state);
   if (params.workflowId) qs.set('workflowId', params.workflowId);
+  if (params.projectId) qs.set('projectId', params.projectId);
   if (params.search) qs.set('search', params.search);
   if (params.parentTaskId) qs.set('parentTaskId', params.parentTaskId);
   if (params.includeSubtasks) qs.set('includeSubtasks', 'true');
@@ -154,6 +158,28 @@ export interface DiffFile {
 export function getTaskDiff(id: string, repository?: string) {
   const query = repository ? `?repository=${encodeURIComponent(repository)}` : '';
   return apiFetch<{ files: DiffFile[] }>(`/api/tasks/${encodeURIComponent(id)}/diff${query}`);
+}
+
+// ---- projects --------------------------------------------------------------
+
+export function listProjects() {
+  return apiFetch<ResponseOf<'GET /api/projects'>>('/api/projects');
+}
+
+export function getProject(id: string) {
+  return apiFetch<ResponseOf<'GET /api/projects/:id'>>(`/api/projects/${encodeURIComponent(id)}`);
+}
+
+export function createProject(input: CreateProjectInput) {
+  return apiFetch<ResponseOf<'POST /api/projects'>>('/api/projects', { method: 'POST', json: input });
+}
+
+export function updateProject(id: string, input: UpdateProjectInput) {
+  return apiFetch<ResponseOf<'PATCH /api/projects/:id'>>(`/api/projects/${encodeURIComponent(id)}`, { method: 'PATCH', json: input });
+}
+
+export function deleteProject(id: string) {
+  return apiFetch<ResponseOf<'DELETE /api/projects/:id'>>(`/api/projects/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 // ---- workflows -------------------------------------------------------------

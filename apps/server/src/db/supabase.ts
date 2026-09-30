@@ -11,6 +11,8 @@ import type {
   MessageRole,
   MessageSource,
   MergeMethod,
+  Project,
+  ProjectRepository,
   PullRequest,
   PullRequestStatus,
   SecretProvider,
@@ -41,6 +43,8 @@ import {
   type JobPatch,
   type MessageInsert,
   type Profile,
+  type ProjectInsert,
+  type ProjectPatch,
   type Repository,
   type SecretUpsert,
   type StoredSecret,
@@ -67,7 +71,7 @@ export function createSupabaseClient(url: string, serviceRoleKey: string): Supab
   });
 }
 
-export const EXPECTED_SCHEMA_VERSION = '20260927000000';
+export const EXPECTED_SCHEMA_VERSION = '20260930153931';
 
 // ---- row shapes (snake_case, as stored) ----
 interface ProfileRow {
@@ -91,6 +95,7 @@ interface TaskRow {
   key: string;
   title: string;
   description: string;
+  project_id: string | null;
   outcome: string;
   acceptance_criteria: string;
   state: string;
@@ -107,6 +112,22 @@ interface TaskRow {
   sequence: number | null;
   failed_step_id: string | null;
   last_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+interface ProjectRow {
+  id: string;
+  user_id: string;
+  name: string;
+  description: string;
+  created_at: string;
+  updated_at: string;
+}
+interface ProjectRepositoryRow {
+  id: string;
+  user_id: string;
+  project_id: string;
+  repository: string;
   created_at: string;
   updated_at: string;
 }
@@ -267,6 +288,7 @@ const mapTask = (r: TaskRow): Task => ({
   key: r.key,
   title: r.title,
   description: r.description,
+  projectId: r.project_id,
   outcome: r.outcome,
   acceptanceCriteria: r.acceptance_criteria,
   state: r.state,
@@ -285,6 +307,25 @@ const mapTask = (r: TaskRow): Task => ({
   lastError: r.last_error,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
+});
+
+const mapProjectRepository = (r: ProjectRepositoryRow): ProjectRepository => ({
+  id: r.id,
+  userId: r.user_id,
+  projectId: r.project_id,
+  repository: r.repository,
+  createdAt: r.created_at,
+  updatedAt: r.updated_at,
+});
+
+const mapProject = (r: ProjectRow, repositories: ProjectRepository[] = []): Project => ({
+  id: r.id,
+  userId: r.user_id,
+  name: r.name,
+  description: r.description,
+  createdAt: r.created_at,
+  updatedAt: r.updated_at,
+  repositories,
 });
 
 const mapTaskRepository = (r: TaskRepositoryRow): TaskRepository => ({
@@ -420,6 +461,7 @@ function taskPatchToRow(patch: TaskPatch): Record<string, unknown> {
   const row: Record<string, unknown> = {};
   if (patch.title !== undefined) row.title = patch.title;
   if (patch.description !== undefined) row.description = patch.description;
+  if (patch.projectId !== undefined) row.project_id = patch.projectId;
   if (patch.outcome !== undefined) row.outcome = patch.outcome;
   if (patch.acceptanceCriteria !== undefined) row.acceptance_criteria = patch.acceptanceCriteria;
   if (patch.state !== undefined) row.state = patch.state;
@@ -600,6 +642,86 @@ export class SupabaseRepository implements Repository {
     return rows.length > 0;
   }
 
+  // ---- projects ----
+  private async repositoriesForProjects(userId: string, projectIds: string[]): Promise<Map<string, ProjectRepository[]>> {
+    const grouped = new Map<string, ProjectRepository[]>();
+    if (projectIds.length === 0) return grouped;
+    const rows = await run<ProjectRepositoryRow[]>(
+      this.client.from('project_repositories').select('*').eq('user_id', userId).in('project_id', projectIds).order('created_at', { ascending: true }),
+    );
+    for (const row of rows) {
+      const repo = mapProjectRepository(row);
+      const list = grouped.get(repo.projectId) ?? [];
+      list.push(repo);
+      grouped.set(repo.projectId, list);
+    }
+    return grouped;
+  }
+
+  private async replaceProjectRepositories(userId: string, projectId: string, repositories: string[]): Promise<void> {
+    const existing = await run<ProjectRepositoryRow[]>(
+      this.client.from('project_repositories').select('*').eq('user_id', userId).eq('project_id', projectId),
+    );
+    const keep = new Set(repositories);
+    const removeIds = existing.filter((row) => !keep.has(row.repository)).map((row) => row.id);
+    if (removeIds.length > 0) {
+      await run(this.client.from('project_repositories').delete().eq('user_id', userId).eq('project_id', projectId).in('id', removeIds));
+    }
+    for (const repository of repositories) {
+      await run(
+        this.client
+          .from('project_repositories')
+          .upsert({ user_id: userId, project_id: projectId, repository }, { onConflict: 'project_id,repository' }),
+      );
+    }
+  }
+
+  async createProject(userId: string, input: ProjectInsert): Promise<Project> {
+    const row = await run<ProjectRow>(
+      this.client.from('projects').insert({ user_id: userId, name: input.name, description: input.description }).select('*').single(),
+    );
+    await this.replaceProjectRepositories(userId, row.id, input.repositories);
+    const repositories = (await this.repositoriesForProjects(userId, [row.id])).get(row.id) ?? [];
+    return mapProject(row, repositories);
+  }
+
+  async getProject(userId: string, id: string): Promise<Project | null> {
+    const row = await run<ProjectRow | null>(this.client.from('projects').select('*').eq('user_id', userId).eq('id', id).maybeSingle());
+    if (!row) return null;
+    const repositories = (await this.repositoriesForProjects(userId, [row.id])).get(row.id) ?? [];
+    return mapProject(row, repositories);
+  }
+
+  async listProjects(userId: string): Promise<Project[]> {
+    const rows = await run<ProjectRow[]>(this.client.from('projects').select('*').eq('user_id', userId).order('updated_at', { ascending: false }));
+    const grouped = await this.repositoriesForProjects(userId, rows.map((row) => row.id));
+    return rows.map((row) => mapProject(row, grouped.get(row.id) ?? []));
+  }
+
+  async updateProject(userId: string, id: string, patch: ProjectPatch): Promise<Project | null> {
+    const update: Record<string, unknown> = {};
+    if (patch.name !== undefined) update.name = patch.name;
+    if (patch.description !== undefined) update.description = patch.description;
+    let row: ProjectRow | null;
+    if (Object.keys(update).length > 0) {
+      row = await run<ProjectRow | null>(this.client.from('projects').update(update).eq('user_id', userId).eq('id', id).select('*').maybeSingle());
+    } else {
+      row = await run<ProjectRow | null>(this.client.from('projects').select('*').eq('user_id', userId).eq('id', id).maybeSingle());
+    }
+    if (!row) return null;
+    if (patch.repositories !== undefined) {
+      await this.replaceProjectRepositories(userId, id, patch.repositories);
+      row = await run<ProjectRow>(this.client.from('projects').update({ updated_at: new Date().toISOString() }).eq('user_id', userId).eq('id', id).select('*').single());
+    }
+    const repositories = (await this.repositoriesForProjects(userId, [row.id])).get(row.id) ?? [];
+    return mapProject(row, repositories);
+  }
+
+  async deleteProject(userId: string, id: string): Promise<boolean> {
+    const rows = await run<{ id: string }[]>(this.client.from('projects').delete().eq('user_id', userId).eq('id', id).select('id'));
+    return rows.length > 0;
+  }
+
   // ---- tasks ----
   async createTask(userId: string, input: TaskInsert): Promise<Task> {
     const row = await run<TaskRow>(
@@ -610,6 +732,7 @@ export class SupabaseRepository implements Repository {
           key: input.key,
           title: input.title,
           description: input.description,
+          project_id: input.projectId,
           outcome: input.outcome,
           acceptance_criteria: input.acceptanceCriteria,
           state: input.state,
@@ -640,6 +763,7 @@ export class SupabaseRepository implements Repository {
     else if (!filter.includeSubtasks) query = query.is('parent_task_id', null);
     if (filter.state) query = query.eq('state', filter.state);
     if (filter.workflowId) query = query.eq('workflow_id', filter.workflowId);
+    if (filter.projectId) query = query.eq('project_id', filter.projectId);
     const rows = await run<TaskRow[]>(query.order('created_at', { ascending: false }));
     // Search is applied in memory to avoid building PostgREST filter strings from user input.
     const search = filter.search?.trim().toLowerCase();

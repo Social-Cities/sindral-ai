@@ -55,11 +55,35 @@ export const createGitHubRepositorySchema = z.object({
   description: z.string().trim().max(350).optional(),
 });
 
+export const createProjectSchema = z.object({
+  name: shortText,
+  description: z.string().trim().max(2000).default(''),
+  repos: z.array(repo).max(20).default([]),
+  newRepositories: z.array(createGitHubRepositorySchema).max(20).default([]),
+}).refine((input) => input.repos.length + input.newRepositories.length > 0, {
+  message: 'Projects need at least one existing or new repository',
+  path: ['repos'],
+}).refine((input) => input.repos.length + input.newRepositories.length <= 20, {
+  message: 'Projects support at most 20 repositories',
+  path: ['repos'],
+});
+
+export const updateProjectSchema = z.object({
+  name: shortText.optional(),
+  description: z.string().trim().max(2000).optional(),
+  repos: z.array(repo).max(20).optional(),
+  newRepositories: z.array(createGitHubRepositorySchema).max(20).optional(),
+}).refine((input) => (input.repos?.length ?? 0) + (input.newRepositories?.length ?? 0) <= 20, {
+  message: 'Projects support at most 20 repositories',
+  path: ['repos'],
+});
+
 export const createTaskSchema = z.object({
   title: shortText,
   description: longText.default(''),
   ticketUrl: z.string().url().max(2000).optional(),
   key: z.string().trim().regex(/^[A-Z][A-Z0-9]*-\d+$/).optional(),
+  projectId: z.string().uuid().optional(),
   workflowId: z.string().max(64).optional(),
   repos: z.array(repo).max(10).default([]),
   newRepository: createGitHubRepositorySchema.optional(),
@@ -71,6 +95,7 @@ export const createTaskSchema = z.object({
 export const updateTaskSchema = z.object({
   title: shortText.optional(),
   description: longText.optional(),
+  projectId: z.string().uuid().nullable().optional(),
   repos: z.array(repo).max(10).optional(),
   workflowId: z.string().max(64).nullable().optional(),
 });
@@ -87,6 +112,7 @@ export const sendMessageSchema = z.object({
 export const listTasksQuerySchema = z.object({
   state: z.string().max(64).optional(),
   workflowId: z.string().max(64).optional(),
+  projectId: z.string().uuid().optional(),
   search: z.string().max(200).optional(),
   parentTaskId: z.string().uuid().optional(),
   includeSubtasks: z.coerce.boolean().default(false),
@@ -249,6 +275,8 @@ export const rawAgentResultFileSchema = z.object({ kind: z.string().optional() }
 
 export type CreateTaskInput = z.infer<typeof createTaskSchema>;
 export type CreateGitHubRepositoryInput = z.infer<typeof createGitHubRepositorySchema>;
+export type CreateProjectInput = z.infer<typeof createProjectSchema>;
+export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
 export type UpdateTaskInput = z.infer<typeof updateTaskSchema>;
 export type CreateWorkflowInput = z.infer<typeof createWorkflowSchema>;
 export type UpdateWorkflowInput = z.infer<typeof updateWorkflowSchema>;

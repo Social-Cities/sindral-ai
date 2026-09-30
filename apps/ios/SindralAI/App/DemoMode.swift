@@ -149,7 +149,7 @@ enum DemoFixtures {
     static let workers = [Worker(id: "w1", name: "MacBook Pro", hostname: "lucs-mbp.local", version: "0.1.0", status: "online", runningJobs: 1, lastSeenAt: ago(minutes: 1))]
 
     private static func task(_ id: String, key: String, title: String, state: String, step: String?, updated: String, description: String = "", outcome: String = "", criteria: String = "", ticket: String? = nil, pr: String? = nil, parent: String? = nil, sequence: Int? = nil, plan: String? = nil, lastError: String? = nil) -> SindralTask {
-        SindralTask(id: id, userId: "demo-user", version: 3, key: key, title: title, description: description, outcome: outcome, acceptanceCriteria: criteria, state: state, currentStepId: step, workflowId: "wf-default", pinnedWorkflow: nil, repos: ["social-cities/sindral-ai"], ticketUrl: ticket, prUrl: pr, branch: pr == nil ? nil : "sindral/\(key.lowercased())", baseBranch: "main", plan: plan, parentTaskId: parent, sequence: sequence, failedStepId: lastError == nil ? nil : "merge", lastError: lastError, createdAt: ago(days: 4), updatedAt: updated)
+        SindralTask(id: id, userId: "demo-user", version: 3, key: key, title: title, description: description, projectId: nil, outcome: outcome, acceptanceCriteria: criteria, state: state, currentStepId: step, workflowId: "wf-default", pinnedWorkflow: nil, repos: ["social-cities/sindral-ai"], ticketUrl: ticket, prUrl: pr, branch: pr == nil ? nil : "sindral/\(key.lowercased())", baseBranch: "main", plan: plan, parentTaskId: parent, sequence: sequence, failedStepId: lastError == nil ? nil : "merge", lastError: lastError, createdAt: ago(days: 4), updatedAt: updated)
     }
 
     static let tasks: [SindralTask] = [

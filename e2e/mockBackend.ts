@@ -8,6 +8,7 @@ import {
   type CreateTaskInput,
   type Job,
   type Message,
+  type Project,
   type PullRequest,
   type TaskEvent,
   type TaskWithRelations,
@@ -19,6 +20,7 @@ const USER_ID = '10000000-0000-4000-8000-000000000001';
 
 export interface MockBackendOptions {
   tasks?: TaskWithRelations[];
+  projects?: Project[];
   workers?: Array<Record<string, unknown>>;
   jobs?: Record<string, Job[]>;
   diffs?: Record<string, Array<Record<string, unknown>>>;
@@ -26,6 +28,7 @@ export interface MockBackendOptions {
 
 export interface MockBackend {
   tasks: TaskWithRelations[];
+  projects: Project[];
   requests: Array<{ method: string; path: string; body: unknown }>;
 }
 
@@ -38,6 +41,7 @@ export function makeTask(overrides: Partial<TaskWithRelations> = {}): TaskWithRe
     key: 'SIN-1',
     title: 'Harden stacked branch delivery',
     description: 'Implement the approved delivery plan.',
+    projectId: null,
     outcome: 'Stacked branches can be delivered safely.',
     acceptanceCriteria: '- Every branch is rebased and reviewable.',
     state: 'todo',
@@ -115,6 +119,29 @@ export function makeEvent(overrides: Partial<TaskEvent> = {}): TaskEvent {
   };
 }
 
+export function makeProject(overrides: Partial<Project> = {}): Project {
+  const id = overrides.id ?? 'project-1';
+  return {
+    id,
+    userId: USER_ID,
+    name: 'Sindral AI',
+    description: 'Primary product repository.',
+    repositories: [
+      {
+        id: `${id}-repo-1`,
+        userId: USER_ID,
+        projectId: id,
+        repository: 'acme/api',
+        createdAt: NOW,
+        updatedAt: NOW,
+      },
+    ],
+    createdAt: NOW,
+    updatedAt: NOW,
+    ...overrides,
+  };
+}
+
 const workflows: WorkflowRecord[] = BUNDLED_WORKFLOWS.map((workflow, index) => ({
   ...snapshotWorkflow(workflow),
   userId: USER_ID,
@@ -133,7 +160,7 @@ function token(): string {
 }
 
 export async function installMockBackend(page: Page, options: MockBackendOptions = {}): Promise<MockBackend> {
-  const state: MockBackend = { tasks: structuredClone(options.tasks ?? []), requests: [] };
+  const state: MockBackend = { tasks: structuredClone(options.tasks ?? []), projects: structuredClone(options.projects ?? []), requests: [] };
   const accessToken = token();
   const user = {
     id: USER_ID,
@@ -179,6 +206,25 @@ export async function installMockBackend(page: Page, options: MockBackendOptions
     }
     if (path === '/api/me') return json(route, { user: { id: USER_ID, email: user.email }, displayName: 'Dev User' });
     if (path === '/api/workflows') return json(route, { workflows });
+    if (path === '/api/projects' && method === 'GET') return json(route, { projects: state.projects });
+    if (path === '/api/projects' && method === 'POST') {
+      const input = body as { name: string; description?: string; repos?: string[] };
+      const project = makeProject({
+        id: `project-${state.projects.length + 1}`,
+        name: input.name,
+        description: input.description ?? '',
+        repositories: (input.repos ?? []).map((repository, index) => ({
+          id: `project-${state.projects.length + 1}-repo-${index + 1}`,
+          userId: USER_ID,
+          projectId: `project-${state.projects.length + 1}`,
+          repository,
+          createdAt: NOW,
+          updatedAt: NOW,
+        })),
+      });
+      state.projects.push(project);
+      return json(route, { project }, 201);
+    }
     if (path === '/api/workers') return json(route, { workers: options.workers ?? [] });
     if (path === '/api/tasks' && method === 'GET') return json(route, { tasks: state.tasks });
     if (path === '/api/tasks' && method === 'POST') {
@@ -188,6 +234,7 @@ export async function installMockBackend(page: Page, options: MockBackendOptions
         key: `SIN-${state.tasks.length + 1}`,
         title: input.title,
         description: input.description ?? '',
+        projectId: input.projectId ?? null,
         outcome: '',
         acceptanceCriteria: '',
         repos: input.repos ?? [],

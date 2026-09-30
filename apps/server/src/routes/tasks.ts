@@ -26,6 +26,14 @@ export const taskRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx })
     if (newRepository) {
       const created = await ctx.github.createRepository(request.user!.id, newRepository);
       if (!taskInput.repos.includes(created.fullName)) taskInput.repos.push(created.fullName);
+      if (taskInput.projectId) {
+        const project = await repo.getProject(request.user!.id, taskInput.projectId);
+        if (project) {
+          await repo.updateProject(request.user!.id, project.id, {
+            repositories: [...new Set([...project.repositories.map((repository) => repository.repository), created.fullName])],
+          });
+        }
+      }
     }
     const task = await orchestrator.createTask(request.user!.id, taskInput);
     return reply.code(201).send({ task });

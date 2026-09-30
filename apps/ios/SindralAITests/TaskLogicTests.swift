@@ -24,6 +24,6 @@ final class TaskLogicTests: XCTestCase {
     }
 
     private func fixtureTask(state: String, currentStepID: String?, workflow: Workflow?) -> SindralTask {
-        SindralTask(id: "task", userId: "user", version: 2, key: "SIN-1", title: "Test", description: "", outcome: "", acceptanceCriteria: "", state: state, currentStepId: currentStepID, workflowId: workflow?.id, pinnedWorkflow: workflow, repos: [], ticketUrl: nil, prUrl: nil, branch: nil, baseBranch: nil, plan: nil, parentTaskId: nil, sequence: nil, failedStepId: nil, lastError: nil, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z")
+        SindralTask(id: "task", userId: "user", version: 2, key: "SIN-1", title: "Test", description: "", projectId: nil, outcome: "", acceptanceCriteria: "", state: state, currentStepId: currentStepID, workflowId: workflow?.id, pinnedWorkflow: workflow, repos: [], ticketUrl: nil, prUrl: nil, branch: nil, baseBranch: nil, plan: nil, parentTaskId: nil, sequence: nil, failedStepId: nil, lastError: nil, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z")
     }
 }

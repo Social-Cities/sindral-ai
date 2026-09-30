@@ -1,5 +1,7 @@
 export const queryKeys = {
   tasks: ['tasks'] as const,
+  projects: ['projects'] as const,
+  project: (id: string) => ['project', id] as const,
   task: (id: string) => ['task', id] as const,
   taskJobs: (id: string) => ['task', id, 'jobs'] as const,
   taskDiff: (id: string, repository = '') => ['task', id, 'diff', repository] as const,

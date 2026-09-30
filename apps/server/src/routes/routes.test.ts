@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { WORKER_PROTOCOL_HEADER, WORKER_PROTOCOL_VERSION, type Task, type WorkflowRecord } from '@sindral/shared';
+import { WORKER_PROTOCOL_HEADER, WORKER_PROTOCOL_VERSION, type Project, type Task, type WorkflowRecord } from '@sindral/shared';
 import { claimNext, completeMerge, completeNext, createTestApp, plan, pr, review, testConfig, verdict, type TestContext } from '../test/helpers.js';
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -120,6 +120,27 @@ describe('tasks API', () => {
     expect(task.repos).toEqual(['acme/billing-service']);
     expect(task.branch).toMatch(/^sindral\//);
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('creates tasks under projects and inherits the project repositories', async () => {
+    const createdProject = await ctx.app.inject({
+      method: 'POST',
+      url: '/api/projects',
+      headers: asA(),
+      payload: { name: 'Billing platform', description: 'Billing work', repos: ['acme/billing-api', 'acme/billing-web'] },
+    });
+    expect(createdProject.statusCode).toBe(201);
+    const project = createdProject.json<{ project: Project }>().project;
+    expect(project.repositories.map((repo) => repo.repository)).toEqual(['acme/billing-api', 'acme/billing-web']);
+
+    const task = await createTask(asA(), { title: 'Add invoices', projectId: project.id });
+    expect(task).toMatchObject({ projectId: project.id, repos: ['acme/billing-api', 'acme/billing-web'] });
+    expect((await ctx.repo.listTaskRepositories(ctx.userA, task.id)).map((repo) => repo.repository)).toEqual(['acme/billing-api', 'acme/billing-web']);
+
+    const filtered = await ctx.app.inject({ method: 'GET', url: `/api/tasks?projectId=${project.id}`, headers: asA() });
+    expect(filtered.json<{ tasks: Task[] }>().tasks.map((item) => item.id)).toEqual([task.id]);
+    const outsideProject = await ctx.app.inject({ method: 'POST', url: '/api/tasks', headers: asA(), payload: { title: 'Bad repo', projectId: project.id, repos: ['acme/other'] } });
+    expect(outsideProject.statusCode).toBe(400);
   });
 
   it('returns 409 for invalid transitions and 404 for unknown tasks', async () => {

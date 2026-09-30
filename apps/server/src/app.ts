@@ -13,6 +13,7 @@ import { Metrics } from './metrics.js';
 import { eventRoutes } from './routes/events.js';
 import { healthRoutes } from './routes/health.js';
 import { metricsRoutes } from './routes/metrics.js';
+import { projectRoutes } from './routes/projects.js';
 import { settingsRoutes } from './routes/settings.js';
 import { jsonNotFound, registerStatic, spaNotFound, webDistExists } from './routes/static.js';
 import { taskRoutes } from './routes/tasks.js';
@@ -148,6 +149,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   await app.register(healthRoutes);
   await app.register(metricsRoutes, { ctx });
+  await app.register(projectRoutes, { ctx });
   await app.register(taskRoutes, { ctx });
   await app.register(workflowRoutes, { ctx });
   await app.register(workerListRoutes, { ctx });

@@ -97,6 +97,6 @@ final class SharedLogicTests: XCTestCase {
     }
 
     private func fixture(id: String = "t", state: String, step: String?, parent: String? = nil) -> SindralTask {
-        SindralTask(id: id, userId: "u", version: 1, key: "SIN-1", title: "T", description: "", outcome: "", acceptanceCriteria: "", state: state, currentStepId: step, workflowId: nil, pinnedWorkflow: workflow, repos: [], ticketUrl: nil, prUrl: nil, branch: nil, baseBranch: nil, plan: nil, parentTaskId: parent, sequence: nil, failedStepId: nil, lastError: nil, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z")
+        SindralTask(id: id, userId: "u", version: 1, key: "SIN-1", title: "T", description: "", projectId: nil, outcome: "", acceptanceCriteria: "", state: state, currentStepId: step, workflowId: nil, pinnedWorkflow: workflow, repos: [], ticketUrl: nil, prUrl: nil, branch: nil, baseBranch: nil, plan: nil, parentTaskId: parent, sequence: nil, failedStepId: nil, lastError: nil, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z")
     }
 }

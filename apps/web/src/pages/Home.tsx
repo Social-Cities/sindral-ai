@@ -7,6 +7,7 @@ import { displayNameFor, useAuth } from '@/auth/AuthProvider';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Button } from '@/components/Button';
 import { useCreateTask, useTasks } from '@/hooks/useTasks';
+import { useCreateProject, useProjects } from '@/hooks/useProjects';
 import { useWorkflows } from '@/hooks/useWorkflows';
 import { useWorkers } from '@/hooks/useWorkers';
 import { useGitHubCatalog, useMe } from '@/hooks/useSettings';
@@ -25,9 +26,11 @@ export function Home() {
   const { user } = useAuth();
   const me = useMe();
   const tasksQuery = useTasks();
+  const projectsQuery = useProjects();
   const workflowsQuery = useWorkflows();
   const workersQuery = useWorkers();
   const createTask = useCreateTask();
+  const createProject = useCreateProject();
   const githubCatalog = useGitHubCatalog();
 
   const [mode, setMode] = useState<Mode>('text');
@@ -37,6 +40,10 @@ export function Home() {
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [reposInput, setReposInput] = useState('');
+  const [projectId, setProjectId] = useState('');
+  const [showNewProject, setShowNewProject] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [newProjectDescription, setNewProjectDescription] = useState('');
   const [showNewRepository, setShowNewRepository] = useState(false);
   const [newRepositoryOwner, setNewRepositoryOwner] = useState('');
   const [newRepositoryName, setNewRepositoryName] = useState('');
@@ -48,7 +55,9 @@ export function Home() {
   const textRef = useRef<HTMLTextAreaElement>(null);
 
   const workflows = useMemo(() => workflowsQuery.data ?? [], [workflowsQuery.data]);
+  const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data]);
   const tasks = useMemo(() => tasksQuery.data ?? [], [tasksQuery.data]);
+  const selectedProject = projects.find((project) => project.id === projectId) ?? null;
 
   useEffect(() => {
     if (!workflowId && workflows.length > 0) {
@@ -61,6 +70,10 @@ export function Home() {
     const firstOwner = githubCatalog.data?.owners[0]?.login;
     if (!newRepositoryOwner && firstOwner) setNewRepositoryOwner(firstOwner);
   }, [githubCatalog.data, newRepositoryOwner]);
+
+  useEffect(() => {
+    if (!projectId && projects.length > 0 && !showNewProject) setProjectId(projects[0]!.id);
+  }, [projectId, projects, showNewProject]);
 
   const counts = useMemo(() => {
     const c = { todo: 0, 'in-progress': 0, 'in-review': 0, done: 0, failed: 0 };
@@ -119,7 +132,7 @@ export function Home() {
   }
 
   async function handleCreate() {
-    if (!canCreate || createTask.isPending) return;
+    if (!canCreate || createTask.isPending || createProject.isPending) return;
     setFormError(null);
     const repos = parseRepos();
     if (!repos) return;
@@ -132,30 +145,64 @@ export function Home() {
       ? { owner: newRepositoryOwner, name: newRepositoryName.trim(), visibility: newRepositoryVisibility }
       : undefined;
 
-    let input: CreateTaskInput;
-    if (mode === 'text') {
-      input = { title, description: textInput.trim(), repos, workflowId: workflowId || undefined, ...(newRepository ? { newRepository } : {}) };
-    } else if (ticket) {
-      const key = /^[A-Z][A-Z0-9]*-\d+$/.test(ticket.id) ? ticket.id : undefined;
-      input = {
-        title: ticket.title,
-        description: ticket.description,
-        ticketUrl: ticket.url,
-        key,
-        repos,
-        workflowId: workflowId || undefined,
-        ...(newRepository ? { newRepository } : {}),
-      };
-    } else {
-      return;
-    }
-
     try {
+      let resolvedProjectId = showNewProject ? '' : projectId || undefined;
+      let resolvedRepos = repos;
+      if (showNewProject) {
+        if (!newProjectName.trim()) {
+          setFormError('Enter a project name.');
+          return;
+        }
+        if (repos.length === 0 && !newRepository) {
+          setFormError('Add at least one repository or create a new one for the project.');
+          return;
+        }
+        const created = await createProject.mutateAsync({
+          name: newProjectName.trim(),
+          description: newProjectDescription.trim(),
+          repos,
+          newRepositories: newRepository ? [newRepository] : [],
+        });
+        resolvedProjectId = created.project.id;
+        resolvedRepos = created.project.repositories.map((repository) => repository.repository);
+      } else if (selectedProject && repos.length === 0) {
+        resolvedRepos = selectedProject.repositories.map((repository) => repository.repository);
+      }
+
+      let input: CreateTaskInput;
+      if (mode === 'text') {
+        input = {
+          title,
+          description: textInput.trim(),
+          ...(resolvedProjectId ? { projectId: resolvedProjectId } : {}),
+          repos: resolvedRepos,
+          workflowId: workflowId || undefined,
+          ...(!showNewProject && newRepository ? { newRepository } : {}),
+        };
+      } else if (ticket) {
+        const key = /^[A-Z][A-Z0-9]*-\d+$/.test(ticket.id) ? ticket.id : undefined;
+        input = {
+          title: ticket.title,
+          description: ticket.description,
+          ticketUrl: ticket.url,
+          key,
+          ...(resolvedProjectId ? { projectId: resolvedProjectId } : {}),
+          repos: resolvedRepos,
+          workflowId: workflowId || undefined,
+          ...(!showNewProject && newRepository ? { newRepository } : {}),
+        };
+      } else {
+        return;
+      }
       await createTask.mutateAsync(input);
       setTextInput('');
       setUrlInput('');
       setTicket(null);
       setReposInput('');
+      setProjectId(resolvedProjectId ?? '');
+      setShowNewProject(false);
+      setNewProjectName('');
+      setNewProjectDescription('');
       setShowNewRepository(false);
       setNewRepositoryName('');
       navigate('/tasks');
@@ -299,6 +346,72 @@ export function Home() {
                   </div>
                 )}
 
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-2">
+                  <label className="space-y-1">
+                    <span className="label-caps block">Project</span>
+                    <select
+                      aria-label="Project"
+                      value={showNewProject ? '__new__' : projectId}
+                      onChange={(event) => {
+                        if (event.target.value === '__new__') {
+                          setShowNewProject(true);
+                          setProjectId('');
+                        } else {
+                          setShowNewProject(false);
+                          setProjectId(event.target.value);
+                        }
+                        setFormError(null);
+                      }}
+                      className="w-full rounded border border-border bg-input px-2 py-2 text-xs text-foreground outline-none focus:border-accent/40"
+                    >
+                      {projects.length === 0 && <option value="">No project</option>}
+                      {projects.map((project) => (
+                        <option key={project.id} value={project.id}>
+                          {project.name}
+                        </option>
+                      ))}
+                      <option value="__new__">Create new project…</option>
+                    </select>
+                  </label>
+                  <div className="flex items-end">
+                    <Button type="button" variant="subtle" size="xs" onClick={() => setShowNewProject((open) => !open)}>
+                      {showNewProject ? 'Use existing' : 'New project'}
+                    </Button>
+                  </div>
+                </div>
+                {selectedProject && !showNewProject && (
+                  <p className="mt-2 text-[10px] text-muted-foreground">
+                    {selectedProject.repositories.length} repos · {selectedProject.repositories.map((repo) => repo.repository).join(', ')}
+                  </p>
+                )}
+                {showNewProject && (
+                  <div className="mt-3 border-t border-border pt-3 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-2">
+                    <label className="space-y-1">
+                      <span className="label-caps block">Project name</span>
+                      <input
+                        aria-label="Project name"
+                        value={newProjectName}
+                        onChange={(event) => {
+                          setNewProjectName(event.target.value);
+                          setFormError(null);
+                        }}
+                        placeholder="Billing platform"
+                        className="w-full rounded border border-border bg-input px-2 py-2 text-xs text-foreground outline-none focus:border-accent/40"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="label-caps block">Description</span>
+                      <input
+                        aria-label="Project description"
+                        value={newProjectDescription}
+                        onChange={(event) => setNewProjectDescription(event.target.value)}
+                        placeholder="Repos and context this work belongs to"
+                        className="w-full rounded border border-border bg-input px-2 py-2 text-xs text-foreground outline-none focus:border-accent/40"
+                      />
+                    </label>
+                  </div>
+                )}
+
                 <div className="mt-3 flex items-center gap-2">
                   <svg width="11" height="11" viewBox="0 0 11 11" fill="none" className="text-muted-foreground shrink-0" aria-hidden="true">
                     <path d="M1.5 3h8v6h-8zM1.5 3l2-1.5h4l2 1.5" stroke="currentColor" strokeWidth="1" strokeLinejoin="round" />
@@ -311,7 +424,11 @@ export function Home() {
                       setFormError(null);
                     }}
                     onKeyDown={handleKeyDown}
-                    placeholder="Repositories: owner/name, owner/other (leave empty for a non-code task)"
+                    placeholder={
+                      selectedProject && !showNewProject
+                        ? 'Repositories: leave empty to use all project repos'
+                        : 'Repositories: owner/name, owner/other (leave empty for a non-code task)'
+                    }
                     className="flex-1 bg-transparent text-xs font-mono text-foreground placeholder:text-muted-foreground outline-none"
                   />
                   <Button
@@ -433,7 +550,7 @@ export function Home() {
                       ))}
                     </select>
                   </div>
-                  <Button onClick={handleCreate} disabled={!canCreate} loading={createTask.isPending} title="Cmd+Enter">
+                  <Button onClick={handleCreate} disabled={!canCreate} loading={createTask.isPending || createProject.isPending} title="Cmd+Enter">
                     Create task ↵
                   </Button>
                 </div>

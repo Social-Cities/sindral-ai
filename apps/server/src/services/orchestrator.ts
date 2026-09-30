@@ -142,20 +142,30 @@ export class Orchestrator {
       workflowId = (await this.workflows.getDefault(userId))?.id ?? null;
     }
     const key = input.key ?? `SIN-${await this.repo.nextTaskNumber(userId)}`;
+    const project = input.projectId ? await this.repo.getProject(userId, input.projectId) : null;
+    if (input.projectId && !project) throw badRequest('Unknown project');
+    const projectRepos = project?.repositories.map((repo) => repo.repository) ?? [];
+    const repos = project ? (input.repos.length > 0 ? input.repos : projectRepos) : input.repos;
+    if (project) {
+      const allowed = new Set(projectRepos);
+      const outsideProject = repos.find((repo) => !allowed.has(repo));
+      if (outsideProject) throw badRequest(`Repository ${outsideProject} is not part of the selected project`);
+    }
     const importedContract = extractTaskContract(input.description);
     const task = await this.repo.createTask(userId, {
       key,
       title: input.title,
       description: input.description,
+      projectId: project?.id ?? null,
       outcome: importedContract.outcome ?? '',
       acceptanceCriteria: importedContract.acceptanceCriteria ?? '',
       state: 'todo',
       currentStepId: null,
       workflowId,
       pinnedWorkflow: null,
-      repos: input.repos,
+      repos,
       ticketUrl: input.ticketUrl ?? null,
-      branch: input.repos.length > 0 ? branchNameFor(key) : null,
+      branch: repos.length > 0 ? branchNameFor(key) : null,
       baseBranch: null,
       parentTaskId: null,
       sequence: null,
@@ -190,11 +200,33 @@ export class Orchestrator {
     const changes: Parameters<Repository['updateTask']>[2] = {};
     if (patch.title !== undefined) changes.title = patch.title;
     if (patch.description !== undefined) changes.description = patch.description;
-    if (patch.repos !== undefined || patch.workflowId !== undefined) {
+    if (patch.repos !== undefined || patch.workflowId !== undefined || patch.projectId !== undefined) {
       if (task.state !== 'todo') throw conflict('Repositories and workflow can only be changed while the task is in todo');
+      let projectRepos: string[] | null = null;
+      if (patch.projectId !== undefined) {
+        if (patch.projectId === null) {
+          changes.projectId = null;
+        } else {
+          const project = await this.repo.getProject(userId, patch.projectId);
+          if (!project) throw badRequest('Unknown project');
+          changes.projectId = project.id;
+          projectRepos = project.repositories.map((repo) => repo.repository);
+        }
+      } else if (task.projectId) {
+        const project = await this.repo.getProject(userId, task.projectId);
+        projectRepos = project?.repositories.map((repo) => repo.repository) ?? null;
+      }
       if (patch.repos !== undefined) {
+        if (projectRepos) {
+          const allowed = new Set(projectRepos);
+          const outsideProject = patch.repos.find((repo) => !allowed.has(repo));
+          if (outsideProject) throw badRequest(`Repository ${outsideProject} is not part of the selected project`);
+        }
         changes.repos = patch.repos;
         changes.branch = patch.repos.length > 0 ? (task.branch ?? branchNameFor(task.key)) : null;
+      } else if (projectRepos && patch.projectId !== undefined) {
+        changes.repos = projectRepos;
+        changes.branch = projectRepos.length > 0 ? (task.branch ?? branchNameFor(task.key)) : null;
       }
       if (patch.workflowId !== undefined) {
         if (patch.workflowId === null) changes.workflowId = null;
@@ -912,6 +944,7 @@ export class Orchestrator {
           key,
           title: sub.title,
           description: sub.goal,
+          projectId: parent.projectId,
           outcome: sub.goal,
           acceptanceCriteria: '',
           state: 'todo',

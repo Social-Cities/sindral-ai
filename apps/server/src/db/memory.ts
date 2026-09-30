@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { ARTIFACT_CONTENT_TYPES, MAX_ARTIFACT_BYTES } from '@sindral/shared';
-import type { AgentResult, Artifact, Job, JobKind, Message, PullRequest, SecretProvider, Task, TaskEvent, TaskRepository, Worker, WorkerKey, WorkflowRecord } from '@sindral/shared';
+import type { AgentResult, Artifact, Job, JobKind, Message, Project, ProjectRepository, PullRequest, SecretProvider, Task, TaskEvent, TaskRepository, Worker, WorkerKey, WorkflowRecord } from '@sindral/shared';
 import type { OperationalSnapshot } from '../metrics.js';
 import {
   ConflictError,
@@ -16,6 +16,8 @@ import {
   type JobPatch,
   type MessageInsert,
   type Profile,
+  type ProjectInsert,
+  type ProjectPatch,
   type Repository,
   type SecretUpsert,
   type StoredSecret,
@@ -50,6 +52,8 @@ function clone<T>(value: T): T {
 export class MemoryRepository implements Repository {
   private readonly profiles = new Map<string, Profile & { taskCounter: number }>();
   private readonly workflows = new Map<string, WorkflowRecord>();
+  private readonly projects = new Map<string, Omit<Project, 'repositories'>>();
+  private readonly projectRepositories = new Map<string, ProjectRepository>();
   private readonly tasks = new Map<string, Task>();
   private readonly taskRepositories = new Map<string, TaskRepository>();
   private readonly pullRequests = new Map<string, PullRequest>();
@@ -134,6 +138,82 @@ export class MemoryRepository implements Repository {
     return true;
   }
 
+  // ---- projects ----
+  private projectWithRepositories(project: Omit<Project, 'repositories'>): Project {
+    const repositories = [...this.projectRepositories.values()]
+      .filter((record) => record.userId === project.userId && record.projectId === project.id)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .map(clone);
+    return { ...clone(project), repositories };
+  }
+
+  private replaceProjectRepositories(userId: string, projectId: string, repositories: string[]): void {
+    const keep = new Set(repositories);
+    for (const [id, record] of this.projectRepositories) {
+      if (record.userId === userId && record.projectId === projectId && !keep.has(record.repository)) this.projectRepositories.delete(id);
+    }
+    const now = this.now();
+    for (const repository of repositories) {
+      const existing = [...this.projectRepositories.values()].find(
+        (record) => record.userId === userId && record.projectId === projectId && record.repository === repository,
+      );
+      if (existing) {
+        existing.updatedAt = now;
+        continue;
+      }
+      const record: ProjectRepository = { id: randomUUID(), userId, projectId, repository, createdAt: now, updatedAt: now };
+      this.projectRepositories.set(record.id, record);
+    }
+  }
+
+  async createProject(userId: string, input: ProjectInsert): Promise<Project> {
+    const ts = this.now();
+    const project: Omit<Project, 'repositories'> = {
+      id: randomUUID(),
+      userId,
+      name: input.name,
+      description: input.description,
+      createdAt: ts,
+      updatedAt: ts,
+    };
+    this.projects.set(project.id, project);
+    this.replaceProjectRepositories(userId, project.id, input.repositories);
+    return this.projectWithRepositories(project);
+  }
+
+  async getProject(userId: string, id: string): Promise<Project | null> {
+    const project = this.projects.get(id);
+    return project && project.userId === userId ? this.projectWithRepositories(project) : null;
+  }
+
+  async listProjects(userId: string): Promise<Project[]> {
+    return [...this.projects.values()]
+      .filter((project) => project.userId === userId)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .map((project) => this.projectWithRepositories(project));
+  }
+
+  async updateProject(userId: string, id: string, patch: ProjectPatch): Promise<Project | null> {
+    const project = this.projects.get(id);
+    if (!project || project.userId !== userId) return null;
+    Object.assign(project, {
+      ...(patch.name !== undefined ? { name: patch.name } : {}),
+      ...(patch.description !== undefined ? { description: patch.description } : {}),
+      updatedAt: this.now(),
+    });
+    if (patch.repositories !== undefined) this.replaceProjectRepositories(userId, id, patch.repositories);
+    return this.projectWithRepositories(project);
+  }
+
+  async deleteProject(userId: string, id: string): Promise<boolean> {
+    const project = this.projects.get(id);
+    if (!project || project.userId !== userId) return false;
+    this.projects.delete(id);
+    for (const [key, record] of this.projectRepositories) if (record.projectId === id) this.projectRepositories.delete(key);
+    for (const task of this.tasks.values()) if (task.userId === userId && task.projectId === id) task.projectId = null;
+    return true;
+  }
+
   // ---- tasks ----
   async createTask(userId: string, input: TaskInsert): Promise<Task> {
     for (const t of this.tasks.values()) {
@@ -147,6 +227,7 @@ export class MemoryRepository implements Repository {
       key: input.key,
       title: input.title,
       description: input.description,
+      projectId: input.projectId,
       outcome: input.outcome,
       acceptanceCriteria: input.acceptanceCriteria,
       state: input.state,
@@ -182,6 +263,7 @@ export class MemoryRepository implements Repository {
       .filter((t) => (filter.parentTaskId ? t.parentTaskId === filter.parentTaskId : filter.includeSubtasks || t.parentTaskId === null))
       .filter((t) => !filter.state || t.state === filter.state)
       .filter((t) => !filter.workflowId || t.workflowId === filter.workflowId)
+      .filter((t) => !filter.projectId || t.projectId === filter.projectId)
       .filter((t) => !search || t.title.toLowerCase().includes(search) || t.key.toLowerCase().includes(search))
       .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))
       .map(clone);

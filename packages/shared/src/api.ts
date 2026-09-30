@@ -8,6 +8,7 @@ import type {
   Job,
   JobDispatch,
   Message,
+  Project,
   SecretStatus,
   Task,
   TaskEvent,
@@ -24,6 +25,12 @@ export interface ApiError {
 }
 
 export interface ApiRoutes {
+  // projects
+  'GET /api/projects': { response: { projects: Project[] } };
+  'POST /api/projects': { response: { project: Project } };
+  'GET /api/projects/:id': { response: { project: Project } };
+  'PATCH /api/projects/:id': { response: { project: Project } };
+  'DELETE /api/projects/:id': { response: { ok: true } };
   // tasks
   'GET /api/tasks': { response: { tasks: Task[] } };
   'POST /api/tasks': { response: { task: Task } };
