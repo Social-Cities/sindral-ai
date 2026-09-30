@@ -51,10 +51,10 @@ final class APIClient {
 
     func listTasks() async throws -> [SindralTask] { let response: TasksResponse = try await request("api/tasks?includeSubtasks=true"); return response.tasks }
     func task(_ id: String) async throws -> TaskDetail { let response: TaskResponse<TaskDetail> = try await request("api/tasks/\(id)"); return response.task }
-    func createTask(title: String, description: String, ticket: TicketImport?, repos: [String], workflowId: String?) async throws -> SindralTask {
-        struct Body: Encodable { let title: String; let description: String; let ticketUrl: String?; let key: String?; let workflowId: String?; let repos: [String] }
+    func createTask(title: String, description: String, ticket: TicketImport?, repos: [String], workflowId: String?, newRepository: NewGitHubRepository? = nil) async throws -> SindralTask {
+        struct Body: Encodable { let title: String; let description: String; let ticketUrl: String?; let key: String?; let workflowId: String?; let repos: [String]; let newRepository: NewGitHubRepository? }
         let key = ticket.flatMap { $0.id.range(of: "^[A-Z][A-Z0-9]*-[0-9]+$", options: .regularExpression) == nil ? nil : $0.id }
-        let response: TaskResponse<SindralTask> = try await request("api/tasks", method: "POST", body: Body(title: title, description: description, ticketUrl: ticket?.url, key: key, workflowId: workflowId, repos: repos)); return response.task
+        let response: TaskResponse<SindralTask> = try await request("api/tasks", method: "POST", body: Body(title: title, description: description, ticketUrl: ticket?.url, key: key, workflowId: workflowId, repos: repos, newRepository: newRepository)); return response.task
     }
     func updateTask(_ id: String, title: String, description: String, repos: [String], workflowId: String?) async throws -> SindralTask {
         struct Body: Encodable { let title: String; let description: String; let repos: [String]; let workflowId: String? }
@@ -99,6 +99,7 @@ final class APIClient {
         guard let url = URL(string: response.url) else { throw APIError.invalidURL }
         return url
     }
+    func githubCatalog() async throws -> GitHubCatalog { try await request("api/github/catalog") }
     func profile() async throws -> Profile { let response: ProfileResponse = try await request("api/me"); return response.user }
     func importTicket(_ url: String) async throws -> TicketImport { struct Body: Encodable { let url: String }; let response: TicketResponse = try await request("api/tickets/import", method: "POST", body: Body(url: url)); return response.ticket }
 

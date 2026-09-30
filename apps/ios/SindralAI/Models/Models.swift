@@ -187,6 +187,39 @@ struct SecretStatus: Codable, Identifiable, Hashable, Sendable {
 struct TicketImport: Codable, Hashable, Sendable { let provider: String; let id: String; let title: String; let description: String; let url: String }
 struct Profile: Codable, Hashable, Sendable { let id: String; let email: String?; let displayName: String? }
 
+struct GitHubRepository: Codable, Hashable, Sendable {
+    let id: Int?
+    let name: String
+    let fullName: String
+    let `private`: Bool
+    let description: String?
+    let url: String
+    let defaultBranch: String
+    let pushedAt: String?
+    let owner: String
+}
+
+struct GitHubOwner: Codable, Identifiable, Hashable, Sendable {
+    let login: String
+    let type: String
+    let avatarUrl: String?
+    let role: String
+    var id: String { login }
+}
+
+struct GitHubCatalog: Codable, Hashable, Sendable {
+    let connected: Bool
+    let source: String?
+    let repositories: [GitHubRepository]
+    let owners: [GitHubOwner]
+}
+
+struct NewGitHubRepository: Encodable, Hashable, Sendable {
+    let owner: String
+    let name: String
+    let visibility: String
+}
+
 struct Job: Codable, Identifiable, Hashable, Sendable {
     let id: String; let taskId: String; let kind: String; let stepId: String?; let status: String; let workerId: String?; let attempt: Int; let result: JSONValue?; let error: String?; let createdAt: String; let finishedAt: String?
 }

@@ -172,9 +172,16 @@ struct WorkerPanel: View {
 struct CreateTaskCard: View {
     @Environment(AppStore.self) private var store
     @Environment(APIClient.self) private var api
+    @Environment(AppRouter.self) private var router
     var onCreated: () -> Void = {}
 
     private enum Mode: String, CaseIterable { case text = "New task", url = "Paste a URL" }
+    private enum RepositoryVisibility: String, CaseIterable, Identifiable {
+        case `private`, `public`
+        var id: String { rawValue }
+        var title: String { rawValue.capitalized }
+    }
+
     @State private var mode = Mode.text
     @State private var textInput = ""
     @State private var urlInput = ""
@@ -182,6 +189,12 @@ struct CreateTaskCard: View {
     @State private var importing = false
     @State private var importError: String?
     @State private var reposInput = ""
+    @State private var githubCatalog: GitHubCatalog?
+    @State private var loadingGitHubCatalog = false
+    @State private var showNewRepository = false
+    @State private var newRepositoryOwner = ""
+    @State private var newRepositoryName = ""
+    @State private var newRepositoryVisibility = RepositoryVisibility.private
     @State private var workflowID = ""
     @State private var formError: String?
     @State private var uploadNote: String?
@@ -211,15 +224,7 @@ struct CreateTaskCard: View {
 
             VStack(alignment: .leading, spacing: 14) {
                 if mode == .text { textMode } else { urlMode }
-                HStack(spacing: 10) {
-                    Image(systemName: "shippingbox").font(.system(size: 13)).foregroundStyle(Theme.mutedForeground)
-                    TextField("", text: $reposInput, prompt: Text(verbatim: "Repositories: owner/name, owner/other").foregroundStyle(Theme.mutedForeground))
-                        .font(Theme.mono(13)).foregroundStyle(Theme.foreground)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .onChange(of: reposInput) { formError = nil }
-                        .accessibilityLabel("Repositories")
-                }
-                .fieldChrome(height: 48)
+                repoSection
                 if let formError { Text(formError).font(Theme.font(13)).foregroundStyle(Theme.dangerText) }
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 12) { uploadButton; Spacer(minLength: 8); workflowPicker; createButton }
@@ -234,7 +239,123 @@ struct CreateTaskCard: View {
         .surface(Theme.card, radius: Theme.Radius.card)
         .onAppear(perform: pickDefaultWorkflow)
         .onChange(of: store.workflows) { pickDefaultWorkflow() }
+        .task { await loadGitHubCatalog() }
         .fileImporter(isPresented: $importingFile, allowedContentTypes: [.plainText, .text, UTType(filenameExtension: "md") ?? .text]) { handleFile($0) }
+    }
+
+    @ViewBuilder private var repoSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: "shippingbox").font(.system(size: 13)).foregroundStyle(Theme.mutedForeground)
+                TextField("", text: $reposInput, prompt: Text(verbatim: "Repositories: owner/name, owner/other").foregroundStyle(Theme.mutedForeground))
+                    .font(Theme.mono(13)).foregroundStyle(Theme.foreground)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .onChange(of: reposInput) { formError = nil }
+                    .accessibilityLabel("Repositories")
+                Button {
+                    showNewRepository.toggle()
+                    formError = nil
+                } label: {
+                    Text(showNewRepository ? "Cancel" : "New repo").fixedSize()
+                }
+                .buttonStyle(.sindral(.subtle, height: 36))
+                .disabled(!showNewRepository && githubCatalog?.connected != true)
+                .accessibilityLabel(showNewRepository ? "Cancel new repository" : "Create a new repository")
+            }
+            .fieldChrome(height: 48)
+
+            if loadingGitHubCatalog {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Loading GitHub repositories...").font(Theme.font(12)).foregroundStyle(Theme.mutedForeground)
+                }
+            } else if let catalog = githubCatalog, catalog.connected {
+                if !catalog.repositories.isEmpty {
+                    Menu {
+                        ForEach(catalog.repositories, id: \.fullName) { repository in
+                            Button(repository.fullName) { appendRepo(repository.fullName) }
+                        }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                            Text("Choose from \(catalog.repositories.count) available repositories").lineLimit(1)
+                            Spacer(minLength: 0)
+                        }
+                        .font(Theme.font(13)).foregroundStyle(Theme.secondaryForeground)
+                        .padding(.horizontal, 12).frame(minHeight: 40)
+                        .surface(Theme.input, radius: Theme.Radius.control)
+                    }
+                    .accessibilityLabel("Add repository")
+                }
+            } else if githubCatalog != nil {
+                HStack(spacing: 6) {
+                    Text("Connect GitHub to browse repositories or create a new one.")
+                        .font(Theme.font(12)).foregroundStyle(Theme.mutedForeground)
+                    Button("Settings") { router.section = .settings }
+                        .font(Theme.font(12, .medium)).foregroundStyle(Theme.accent)
+                }
+            }
+
+            if showNewRepository, let catalog = githubCatalog, catalog.connected {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 10) {
+                        ownerMenu(catalog)
+                        visibilityMenu
+                    }
+                    HStack(spacing: 10) {
+                        Image(systemName: "folder.badge.plus").font(.system(size: 13)).foregroundStyle(Theme.mutedForeground)
+                        TextField("", text: $newRepositoryName, prompt: Text("new-service").foregroundStyle(Theme.mutedForeground))
+                            .font(Theme.mono(13)).foregroundStyle(Theme.foreground)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .onChange(of: newRepositoryName) { formError = nil }
+                            .accessibilityLabel("New repository name")
+                    }
+                    .fieldChrome(height: 44)
+                }
+                .padding(12)
+                .surface(Theme.muted, radius: Theme.Radius.control)
+            }
+        }
+    }
+
+    private func ownerMenu(_ catalog: GitHubCatalog) -> some View {
+        Menu {
+            Picker("Owner", selection: $newRepositoryOwner) {
+                ForEach(catalog.owners) { owner in
+                    Text(owner.login).tag(owner.login)
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "person.crop.circle").font(.system(size: 13))
+                Text(newRepositoryOwner.isEmpty ? "Owner" : newRepositoryOwner).lineLimit(1)
+                Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+            }
+            .font(Theme.font(13)).foregroundStyle(Theme.secondaryForeground)
+            .padding(.horizontal, 12).frame(height: 40)
+            .surface(Theme.input, radius: Theme.Radius.control)
+        }
+        .accessibilityLabel("Repository owner")
+    }
+
+    private var visibilityMenu: some View {
+        Menu {
+            Picker("Visibility", selection: $newRepositoryVisibility) {
+                ForEach(RepositoryVisibility.allCases) { visibility in
+                    Text(visibility.title).tag(visibility)
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: newRepositoryVisibility == .private ? "lock" : "globe").font(.system(size: 13))
+                Text(newRepositoryVisibility.title)
+                Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+            }
+            .font(Theme.font(13)).foregroundStyle(Theme.secondaryForeground)
+            .padding(.horizontal, 12).frame(height: 40)
+            .surface(Theme.input, radius: Theme.Radius.control)
+        }
+        .accessibilityLabel("Repository visibility")
     }
 
     private var uploadButton: some View {
@@ -336,6 +457,37 @@ struct CreateTaskCard: View {
         return repos
     }
 
+    private func newRepositoryPayload() -> NewGitHubRepository? {
+        guard showNewRepository else { return nil }
+        let owner = newRepositoryOwner.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = newRepositoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !owner.isEmpty, !name.isEmpty else {
+            formError = "Choose an owner and enter a repository name."
+            return nil
+        }
+        return NewGitHubRepository(owner: owner, name: name, visibility: newRepositoryVisibility.rawValue)
+    }
+
+    private func appendRepo(_ repository: String) {
+        let current = reposInput.commaSeparated.compactMap(Tickets.normalizeRepo)
+        guard !current.contains(repository) else { return }
+        reposInput = (current + [repository]).joined(separator: ", ")
+        formError = nil
+    }
+
+    private func loadGitHubCatalog() async {
+        guard githubCatalog == nil, !loadingGitHubCatalog else { return }
+        loadingGitHubCatalog = true
+        defer { loadingGitHubCatalog = false }
+        do {
+            let catalog = try await api.githubCatalog()
+            githubCatalog = catalog
+            if newRepositoryOwner.isEmpty { newRepositoryOwner = catalog.owners.first?.login ?? "" }
+        } catch {
+            githubCatalog = .init(connected: false, source: nil, repositories: [], owners: [])
+        }
+    }
+
     private func importTicket() async {
         guard Tickets.detect(urlInput) != nil else { return }
         importError = nil; importing = true; defer { importing = false }
@@ -347,12 +499,14 @@ struct CreateTaskCard: View {
         guard canCreate, !creating else { return }
         formError = nil
         guard let repos = parseRepos() else { return }
+        let newRepository = showNewRepository ? newRepositoryPayload() : nil
+        if showNewRepository, newRepository == nil { return }
         creating = true; defer { creating = false }
         let description = mode == .text ? textInput.trimmingCharacters(in: .whitespacesAndNewlines) : ticket?.description ?? ""
         let title = mode == .text ? String((description.split(separator: "\n").first ?? "").prefix(200)) : ticket?.title ?? ""
         do {
-            _ = try await api.createTask(title: title, description: description, ticket: mode == .url ? ticket : nil, repos: repos, workflowId: workflowID.isEmpty ? nil : workflowID)
-            textInput = ""; urlInput = ""; ticket = nil; reposInput = ""
+            _ = try await api.createTask(title: title, description: description, ticket: mode == .url ? ticket : nil, repos: repos, workflowId: workflowID.isEmpty ? nil : workflowID, newRepository: newRepository)
+            textInput = ""; urlInput = ""; ticket = nil; reposInput = ""; showNewRepository = false; newRepositoryName = ""
             await store.refreshTasks()
             onCreated()
         } catch { formError = error.localizedDescription }
