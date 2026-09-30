@@ -30,6 +30,7 @@ enum TaskFilter: String, CaseIterable, Identifiable {
 final class AppRouter {
     var section = AppSection.home
     var taskFilter = TaskFilter.active
+    var projectFilterID: String?
     var selectedTaskID: String?
     var showingCreateTask = false
 

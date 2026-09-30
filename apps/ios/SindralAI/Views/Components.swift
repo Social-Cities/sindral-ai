@@ -4,6 +4,7 @@ import SwiftUI
 struct TaskCard: View {
     let task: SindralTask
     var step: WorkflowStep?
+    var projectName: String?
     var selected = false
     var compact = false
     var subtaskCount = 0
@@ -14,6 +15,7 @@ struct TaskCard: View {
             HStack(spacing: 6) {
                 if compact, let sequence = task.sequence { Text("↳ \(sequence)").font(Theme.mono(11)).foregroundStyle(Theme.mutedForeground) }
                 Text(task.key).font(Theme.mono(12)).foregroundStyle(Theme.mutedForeground)
+                if let projectName { MetaChip(text: projectName) }
                 if task.prUrl != nil { MetaChip(text: "PR open", color: Theme.secondaryForeground) }
                 if task.ticketUrl != nil { MetaChip(text: "linked") }
                 if subtaskCount > 0 { MetaChip(text: "↳ \(subtaskDone)/\(subtaskCount)").accessibilityLabel("\(subtaskDone) of \(subtaskCount) subtasks done") }

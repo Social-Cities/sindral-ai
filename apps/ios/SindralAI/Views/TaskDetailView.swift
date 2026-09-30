@@ -396,6 +396,20 @@ private struct TaskSummaryView: View {
                     else { MarkdownText(source: task.description) }
                 }
 
+                if let project = task.projectId.flatMap({ id in store.projects.first { $0.id == id } }) {
+                    section("Project") {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(project.name).font(Theme.bodyMedium).foregroundStyle(Theme.foreground)
+                            if !project.description.isEmpty {
+                                Text(project.description).font(Theme.secondaryBody).foregroundStyle(Theme.mutedForeground)
+                            }
+                        }
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .surface(Theme.secondary, radius: Theme.Radius.row)
+                    }
+                }
+
                 section("Task contract") {
                     if horizontalSizeClass == .regular {
                         RatioColumns(ratios: [1, 1], spacing: 12, equalHeights: true) { contractBox("Outcome", task.outcome); contractBox("Acceptance criteria", task.acceptanceCriteria) }
@@ -783,7 +797,7 @@ private struct TaskSubtasksView: View {
         ScrollView {
             VStack(spacing: 8) {
                 ForEach(tasks.sorted { ($0.sequence ?? 0) < ($1.sequence ?? 0) }) { task in
-                    Button { onOpen(task.id) } label: { TaskCard(task: task, step: task.currentStep(store.workflows), compact: true) }.buttonStyle(.plain)
+                    Button { onOpen(task.id) } label: { TaskCard(task: task, step: task.currentStep(store.workflows), projectName: task.projectId.flatMap { id in store.projects.first { $0.id == id }?.name }, compact: true) }.buttonStyle(.plain)
                 }
             }
             .padding(24)
@@ -834,13 +848,17 @@ private struct JobLogsView: View {
 private struct EditTaskView: View {
     @Environment(\.dismiss) private var dismiss; @Environment(APIClient.self) private var api; @Environment(AppStore.self) private var store
     let task: SindralTask; let didSave: () async -> Void
-    @State private var title: String; @State private var description: String; @State private var repos: String; @State private var workflowID: String; @State private var saving = false
-    init(task: SindralTask, didSave: @escaping () async -> Void) { self.task = task; self.didSave = didSave; _title = State(initialValue: task.title); _description = State(initialValue: task.description); _repos = State(initialValue: task.repos.joined(separator: ", ")); _workflowID = State(initialValue: task.workflowId ?? "") }
+    @State private var title: String; @State private var description: String; @State private var projectID: String; @State private var repos: String; @State private var workflowID: String; @State private var saving = false
+    init(task: SindralTask, didSave: @escaping () async -> Void) { self.task = task; self.didSave = didSave; _title = State(initialValue: task.title); _description = State(initialValue: task.description); _projectID = State(initialValue: task.projectId ?? ""); _repos = State(initialValue: task.repos.joined(separator: ", ")); _workflowID = State(initialValue: task.workflowId ?? "") }
     var body: some View {
         NavigationStack {
             Form {
                 TextField("Title", text: $title)
                 TextEditor(text: $description).frame(minHeight: 130)
+                Picker("Project", selection: $projectID) {
+                    Text("No project").tag("")
+                    ForEach(store.projects) { Text($0.name).tag($0.id) }
+                }
                 TextField("Repositories", text: $repos).font(Theme.mono(14)).textInputAutocapitalization(.never)
                 Picker("Workflow", selection: $workflowID) { Text("Default").tag(""); ForEach(store.workflows) { Text($0.name).tag($0.id) } }
             }
@@ -852,5 +870,17 @@ private struct EditTaskView: View {
             }
         }
     }
-    private func save() async { saving = true; defer { saving = false }; do { _ = try await api.updateTask(task.id, title: title, description: description, repos: repos.commaSeparated, workflowId: workflowID.isEmpty ? nil : workflowID); await store.refreshTasks(); await didSave(); dismiss() } catch { store.present(error) } }
+    private func save() async {
+        saving = true; defer { saving = false }
+        do {
+            var resolvedRepos = repos.commaSeparated
+            if let project = store.projects.first(where: { $0.id == projectID }), resolvedRepos.isEmpty {
+                resolvedRepos = project.repositories.map(\.repository)
+            }
+            _ = try await api.updateTask(task.id, title: title, description: description, projectId: projectID.isEmpty ? nil : projectID, repos: resolvedRepos, workflowId: workflowID.isEmpty ? nil : workflowID)
+            await store.refreshTasks()
+            await didSave()
+            dismiss()
+        } catch { store.present(error) }
+    }
 }

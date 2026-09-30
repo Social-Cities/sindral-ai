@@ -4,6 +4,8 @@ import Observation
 struct EmptyResponse: Decodable {}
 struct TasksResponse: Decodable { let tasks: [SindralTask] }
 struct TaskResponse<T: Decodable>: Decodable { let task: T }
+struct ProjectsResponse: Decodable { let projects: [Project] }
+struct ProjectResponse: Decodable { let project: Project }
 struct WorkflowsResponse: Decodable { let workflows: [Workflow] }
 struct WorkflowResponse: Decodable { let workflow: Workflow }
 struct WorkersResponse: Decodable { let workers: [Worker] }
@@ -51,14 +53,14 @@ final class APIClient {
 
     func listTasks() async throws -> [SindralTask] { let response: TasksResponse = try await request("api/tasks?includeSubtasks=true"); return response.tasks }
     func task(_ id: String) async throws -> TaskDetail { let response: TaskResponse<TaskDetail> = try await request("api/tasks/\(id)"); return response.task }
-    func createTask(title: String, description: String, ticket: TicketImport?, repos: [String], workflowId: String?, newRepository: NewGitHubRepository? = nil) async throws -> SindralTask {
-        struct Body: Encodable { let title: String; let description: String; let ticketUrl: String?; let key: String?; let workflowId: String?; let repos: [String]; let newRepository: NewGitHubRepository? }
+    func createTask(title: String, description: String, ticket: TicketImport?, projectId: String? = nil, repos: [String], workflowId: String?, newRepository: NewGitHubRepository? = nil) async throws -> SindralTask {
+        struct Body: Encodable { let title: String; let description: String; let ticketUrl: String?; let key: String?; let projectId: String?; let workflowId: String?; let repos: [String]; let newRepository: NewGitHubRepository? }
         let key = ticket.flatMap { $0.id.range(of: "^[A-Z][A-Z0-9]*-[0-9]+$", options: .regularExpression) == nil ? nil : $0.id }
-        let response: TaskResponse<SindralTask> = try await request("api/tasks", method: "POST", body: Body(title: title, description: description, ticketUrl: ticket?.url, key: key, workflowId: workflowId, repos: repos, newRepository: newRepository)); return response.task
+        let response: TaskResponse<SindralTask> = try await request("api/tasks", method: "POST", body: Body(title: title, description: description, ticketUrl: ticket?.url, key: key, projectId: projectId, workflowId: workflowId, repos: repos, newRepository: newRepository)); return response.task
     }
-    func updateTask(_ id: String, title: String, description: String, repos: [String], workflowId: String?) async throws -> SindralTask {
-        struct Body: Encodable { let title: String; let description: String; let repos: [String]; let workflowId: String? }
-        let response: TaskResponse<SindralTask> = try await request("api/tasks/\(id)", method: "PATCH", body: Body(title: title, description: description, repos: repos, workflowId: workflowId)); return response.task
+    func updateTask(_ id: String, title: String, description: String, projectId: String?, repos: [String], workflowId: String?) async throws -> SindralTask {
+        struct Body: Encodable { let title: String; let description: String; let projectId: String?; let repos: [String]; let workflowId: String? }
+        let response: TaskResponse<SindralTask> = try await request("api/tasks/\(id)", method: "PATCH", body: Body(title: title, description: description, projectId: projectId, repos: repos, workflowId: workflowId)); return response.task
     }
     func deleteTask(_ id: String) async throws { let _: EmptyResponse = try await request("api/tasks/\(id)", method: "DELETE") }
     func runAction(task: SindralTask, event: String) async throws -> SindralTask {
@@ -74,6 +76,11 @@ final class APIClient {
     func diff(taskId: String, repository: String?) async throws -> [DiffFile] {
         let query = repository.map { "?repository=\($0.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? $0)" } ?? ""
         let response: DiffResponse = try await request("api/tasks/\(taskId)/diff\(query)"); return response.files
+    }
+    func projects() async throws -> [Project] { let response: ProjectsResponse = try await request("api/projects"); return response.projects }
+    func createProject(name: String, description: String, repos: [String], newRepositories: [NewGitHubRepository]) async throws -> Project {
+        struct Body: Encodable { let name: String; let description: String; let repos: [String]; let newRepositories: [NewGitHubRepository] }
+        let response: ProjectResponse = try await request("api/projects", method: "POST", body: Body(name: name, description: description, repos: repos, newRepositories: newRepositories)); return response.project
     }
     func workflows() async throws -> [Workflow] { let response: WorkflowsResponse = try await request("api/workflows"); return response.workflows }
     func createWorkflow(name: String, cloneFrom: String?) async throws -> Workflow {

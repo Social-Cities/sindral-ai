@@ -92,7 +92,7 @@ final class SharedLogicTests: XCTestCase {
     func testTaskListActiveFilterKeepsParentsWithActiveChildren() {
         let parent = fixture(id: "p", state: "done", step: "done")
         let child = fixture(id: "c", state: "planning", step: "plan", parent: "p")
-        let model = TaskListModel(tasks: [parent, child], workflows: [], filter: .active, search: "")
+        let model = TaskListModel(tasks: [parent, child], workflows: [], filter: .active, projectID: nil, search: "")
         XCTAssertEqual(model.rows.map(\.task.id), ["c"])
     }
 

@@ -113,6 +113,25 @@ struct PullRequest: Codable, Identifiable, Hashable, Sendable {
     let id: String; let repository: String; let url: String; let number: Int; let branch: String; let baseBranch: String; let status: String; let mergedAt: String?
 }
 
+struct ProjectRepository: Codable, Identifiable, Hashable, Sendable {
+    let id: String
+    let userId: String
+    let projectId: String
+    let repository: String
+    let createdAt: String
+    let updatedAt: String
+}
+
+struct Project: Codable, Identifiable, Hashable, Sendable {
+    let id: String
+    let userId: String
+    let name: String
+    let description: String
+    let createdAt: String
+    let updatedAt: String
+    let repositories: [ProjectRepository]
+}
+
 struct SindralTask: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let userId: String

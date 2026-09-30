@@ -53,7 +53,8 @@ struct DashboardView: View {
                             HStack(spacing: 12) {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(task.title).font(Theme.bodyMedium).foregroundStyle(Theme.foreground).lineLimit(1)
-                                    Text(task.key).font(Theme.mono(12)).foregroundStyle(Theme.mutedForeground)
+                                    Text(([Optional(task.key), task.projectId.flatMap { id in store.projects.first { $0.id == id }?.name }].compactMap { $0 }).joined(separator: " · "))
+                                        .font(Theme.mono(12)).foregroundStyle(Theme.mutedForeground)
                                 }
                                 Spacer(minLength: 8)
                                 StatusBadge(state: task.state, step: task.currentStep(store.workflows))
@@ -189,6 +190,10 @@ struct CreateTaskCard: View {
     @State private var importing = false
     @State private var importError: String?
     @State private var reposInput = ""
+    @State private var projectID = ""
+    @State private var showNewProject = false
+    @State private var newProjectName = ""
+    @State private var newProjectDescription = ""
     @State private var githubCatalog: GitHubCatalog?
     @State private var githubCatalogError: String?
     @State private var loadingGitHubCatalog = false
@@ -225,6 +230,7 @@ struct CreateTaskCard: View {
 
             VStack(alignment: .leading, spacing: 14) {
                 if mode == .text { textMode } else { urlMode }
+                projectSection
                 repoSection
                 if let formError { Text(formError).font(Theme.font(13)).foregroundStyle(Theme.dangerText) }
                 ViewThatFits(in: .horizontal) {
@@ -238,8 +244,9 @@ struct CreateTaskCard: View {
             .padding(20)
         }
         .surface(Theme.card, radius: Theme.Radius.card)
-        .onAppear(perform: pickDefaultWorkflow)
+        .onAppear { pickDefaultWorkflow(); pickDefaultProject() }
         .onChange(of: store.workflows) { pickDefaultWorkflow() }
+        .onChange(of: store.projects) { pickDefaultProject() }
         .task { await loadGitHubCatalog() }
         .onChange(of: router.section) { _, section in
             guard section == .home else { return }
@@ -248,11 +255,72 @@ struct CreateTaskCard: View {
         .fileImporter(isPresented: $importingFile, allowedContentTypes: [.plainText, .text, UTType(filenameExtension: "md") ?? .text]) { handleFile($0) }
     }
 
+    @ViewBuilder private var projectSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Menu {
+                    if !store.projects.isEmpty {
+                        Picker("Project", selection: $projectID) {
+                            ForEach(store.projects) { project in
+                                Text(project.name).tag(project.id)
+                            }
+                        }
+                    }
+                    Button(showNewProject ? "Use existing project" : "Create new project") {
+                        showNewProject.toggle()
+                        if showNewProject { projectID = "" } else { pickDefaultProject() }
+                        formError = nil
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "rectangle.stack").font(.system(size: 13))
+                        Text(showNewProject ? "New project" : selectedProject?.name ?? "No project").lineLimit(1)
+                        Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                        Spacer(minLength: 0)
+                    }
+                    .font(Theme.font(14)).foregroundStyle(Theme.secondaryForeground)
+                    .padding(.horizontal, 12).frame(minHeight: 44)
+                    .surface(Theme.input, radius: Theme.Radius.control)
+                }
+                .accessibilityLabel("Project")
+
+                Button(showNewProject ? "Use existing" : "New project") {
+                    showNewProject.toggle()
+                    if showNewProject { projectID = "" } else { pickDefaultProject() }
+                    formError = nil
+                }
+                .buttonStyle(.sindral(.subtle, height: 44))
+            }
+
+            if let project = selectedProject, !showNewProject {
+                Text("\(project.repositories.count) repos · \(project.repositories.map(\.repository).joined(separator: ", "))")
+                    .font(Theme.font(12)).foregroundStyle(Theme.mutedForeground).lineLimit(2)
+            }
+
+            if showNewProject {
+                VStack(alignment: .leading, spacing: 10) {
+                    TextField("", text: $newProjectName, prompt: Text("Project name").foregroundStyle(Theme.mutedForeground))
+                        .font(Theme.font(14)).foregroundStyle(Theme.foreground)
+                        .onChange(of: newProjectName) { formError = nil }
+                        .fieldChrome(height: 44)
+                        .accessibilityLabel("Project name")
+                    TextField("", text: $newProjectDescription, prompt: Text("Description").foregroundStyle(Theme.mutedForeground), axis: .vertical)
+                        .font(Theme.font(14)).foregroundStyle(Theme.foreground)
+                        .lineLimit(1...3)
+                        .fieldChrome(height: 44)
+                        .accessibilityLabel("Project description")
+                }
+                .padding(12)
+                .surface(Theme.muted, radius: Theme.Radius.control)
+            }
+        }
+    }
+
     @ViewBuilder private var repoSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 Image(systemName: "shippingbox").font(.system(size: 13)).foregroundStyle(Theme.mutedForeground)
-                TextField("", text: $reposInput, prompt: Text(verbatim: "Repositories: owner/name, owner/other").foregroundStyle(Theme.mutedForeground))
+                TextField("", text: $reposInput, prompt: Text(verbatim: selectedProject != nil && !showNewProject ? "Repositories: leave empty to use all project repos" : "Repositories: owner/name, owner/other").foregroundStyle(Theme.mutedForeground))
                     .font(Theme.mono(13)).foregroundStyle(Theme.foreground)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                     .onChange(of: reposInput) { formError = nil }
@@ -455,10 +523,16 @@ struct CreateTaskCard: View {
     }
 
     private var canCreate: Bool { mode == .text ? !textInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty : ticket != nil }
+    private var selectedProject: Project? { store.projects.first { $0.id == projectID } }
 
     private func pickDefaultWorkflow() {
         guard workflowID.isEmpty || !store.workflows.contains(where: { $0.id == workflowID }) else { return }
         workflowID = (store.workflows.first { $0.isDefault == true } ?? store.workflows.first)?.id ?? ""
+    }
+
+    private func pickDefaultProject() {
+        guard !showNewProject, (projectID.isEmpty || !store.projects.contains(where: { $0.id == projectID })) else { return }
+        projectID = store.projects.first?.id ?? ""
     }
 
     private func parseRepos() -> [String]? {
@@ -520,9 +594,29 @@ struct CreateTaskCard: View {
         let description = mode == .text ? textInput.trimmingCharacters(in: .whitespacesAndNewlines) : ticket?.description ?? ""
         let title = mode == .text ? String((description.split(separator: "\n").first ?? "").prefix(200)) : ticket?.title ?? ""
         do {
-            _ = try await api.createTask(title: title, description: description, ticket: mode == .url ? ticket : nil, repos: repos, workflowId: workflowID.isEmpty ? nil : workflowID, newRepository: newRepository)
-            textInput = ""; urlInput = ""; ticket = nil; reposInput = ""; showNewRepository = false; newRepositoryName = ""
+            var resolvedProjectID = showNewProject ? nil : (projectID.isEmpty ? nil : projectID)
+            var resolvedRepos = repos
+            var taskNewRepository = newRepository
+            if showNewProject {
+                let name = newProjectName.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty else { formError = "Enter a project name."; return }
+                guard !repos.isEmpty || newRepository != nil else {
+                    formError = "Add at least one repository or create a new one for the project."
+                    return
+                }
+                let project = try await api.createProject(name: name, description: newProjectDescription.trimmingCharacters(in: .whitespacesAndNewlines), repos: repos, newRepositories: newRepository.map { [$0] } ?? [])
+                resolvedProjectID = project.id
+                resolvedRepos = project.repositories.map(\.repository)
+                taskNewRepository = nil
+                await store.refreshProjects()
+            } else if let project = selectedProject, repos.isEmpty {
+                resolvedRepos = project.repositories.map(\.repository)
+            }
+
+            _ = try await api.createTask(title: title, description: description, ticket: mode == .url ? ticket : nil, projectId: resolvedProjectID, repos: resolvedRepos, workflowId: workflowID.isEmpty ? nil : workflowID, newRepository: taskNewRepository)
+            textInput = ""; urlInput = ""; ticket = nil; reposInput = ""; projectID = resolvedProjectID ?? ""; showNewProject = false; newProjectName = ""; newProjectDescription = ""; showNewRepository = false; newRepositoryName = ""
             await store.refreshTasks()
+            if taskNewRepository != nil { await store.refreshProjects() }
             onCreated()
         } catch { formError = error.localizedDescription }
     }

@@ -6,6 +6,7 @@ final class AppStore {
     let session: SessionStore
     let api: APIClient
     private(set) var tasks: [SindralTask] = []
+    private(set) var projects: [Project] = []
     private(set) var workflows: [Workflow] = []
     private(set) var workers: [Worker] = []
     private(set) var profile: Profile?
@@ -28,10 +29,12 @@ final class AppStore {
         defer { isLoading = false }
         do {
             async let tasks = api.listTasks()
+            async let projects = api.projects()
             async let workflows = api.workflows()
             async let workers = api.workers()
             async let profile = api.profile()
             self.tasks = try await tasks
+            self.projects = try await projects
             self.workflows = try await workflows
             self.workers = try await workers
             self.profile = try await profile
@@ -40,9 +43,10 @@ final class AppStore {
     }
 
     func refreshTasks() async { do { tasks = try await api.listTasks() } catch { present(error) } }
+    func refreshProjects() async { do { projects = try await api.projects() } catch { present(error) } }
     func refreshWorkflows() async { do { workflows = try await api.workflows() } catch { present(error) } }
     func refreshWorkers() async { do { workers = try await api.workers() } catch { present(error) } }
-    func signOut() { eventTask?.cancel(); eventTask = nil; session.signOut(); tasks = []; workflows = []; workers = []; profile = nil }
+    func signOut() { eventTask?.cancel(); eventTask = nil; session.signOut(); tasks = []; projects = []; workflows = []; workers = []; profile = nil }
     func present(_ error: Error) { if !(error is CancellationError) { errorMessage = error.localizedDescription } }
 
     private func startEvents() {

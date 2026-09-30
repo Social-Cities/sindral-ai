@@ -191,7 +191,7 @@ enum DemoFixtures {
             messages = []
         }
         let prs = t.prUrl.map { [PullRequest(id: "pr-\(id)", repository: "social-cities/sindral-ai", url: $0, number: 51, branch: t.branch ?? "", baseBranch: "main", status: "open", mergedAt: nil)] } ?? []
-        return TaskDetail(id: t.id, userId: t.userId, version: t.version, key: t.key, title: t.title, description: t.description, outcome: t.outcome, acceptanceCriteria: t.acceptanceCriteria, state: t.state, currentStepId: t.currentStepId, workflowId: t.workflowId, pinnedWorkflow: t.pinnedWorkflow, repos: t.repos, ticketUrl: t.ticketUrl, prUrl: t.prUrl, branch: t.branch, baseBranch: t.baseBranch, plan: t.plan, parentTaskId: t.parentTaskId, sequence: t.sequence, failedStepId: t.failedStepId, lastError: t.lastError, createdAt: t.createdAt, updatedAt: t.updatedAt, messages: messages, events: [], artifacts: [], subtasks: tasks.filter { $0.parentTaskId == id }, repositories: [], pullRequests: prs)
+        return TaskDetail(id: t.id, userId: t.userId, version: t.version, key: t.key, title: t.title, description: t.description, projectId: t.projectId, outcome: t.outcome, acceptanceCriteria: t.acceptanceCriteria, state: t.state, currentStepId: t.currentStepId, workflowId: t.workflowId, pinnedWorkflow: t.pinnedWorkflow, repos: t.repos, ticketUrl: t.ticketUrl, prUrl: t.prUrl, branch: t.branch, baseBranch: t.baseBranch, plan: t.plan, parentTaskId: t.parentTaskId, sequence: t.sequence, failedStepId: t.failedStepId, lastError: t.lastError, createdAt: t.createdAt, updatedAt: t.updatedAt, messages: messages, events: [], artifacts: [], subtasks: tasks.filter { $0.parentTaskId == id }, repositories: [], pullRequests: prs)
     }
 }
 #endif

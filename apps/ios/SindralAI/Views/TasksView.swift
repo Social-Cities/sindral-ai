@@ -59,7 +59,7 @@ struct TasksView: View {
 
     private func selectFirstIfNeeded() {
         guard !store.tasks.isEmpty, router.selectedTaskID == nil || !store.tasks.contains(where: { $0.id == router.selectedTaskID }) else { return }
-        router.selectedTaskID = TaskListModel(tasks: store.tasks, workflows: store.workflows, filter: router.taskFilter, search: "").rows.first?.task.id
+        router.selectedTaskID = TaskListModel(tasks: store.tasks, workflows: store.workflows, filter: router.taskFilter, projectID: router.projectFilterID, search: "").rows.first?.task.id
     }
 }
 
@@ -69,7 +69,7 @@ struct TaskListModel {
     let rows: [Row]
     let activeCount: Int
 
-    init(tasks: [SindralTask], workflows: [Workflow], filter: TaskFilter, search: String) {
+    init(tasks: [SindralTask], workflows: [Workflow], filter: TaskFilter, projectID: String?, search: String) {
         var childrenOf: [String: [SindralTask]] = [:]
         for task in tasks { if let parent = task.parentTaskId { childrenOf[parent, default: []].append(task) } }
         for key in childrenOf.keys { childrenOf[key]?.sort { ($0.sequence ?? 0) < ($1.sequence ?? 0) } }
@@ -83,7 +83,8 @@ struct TaskListModel {
             case .active: !TaskStates.terminal.contains(task.state)
             default: task.bucket(workflows) == filter.bucket
             }
-            return searchMatches && filterMatches
+            let projectMatches = projectID == nil || task.projectId == projectID
+            return searchMatches && filterMatches && projectMatches
         }
         rows = parents.flatMap { parent -> [Row] in
             let children = childrenOf[parent.id] ?? []
@@ -92,7 +93,7 @@ struct TaskListModel {
             if TaskStates.terminal.contains(parent.state) { return visible.map { Row(task: $0, children: [], visibleChildren: []) } }
             return visible.isEmpty ? [] : [Row(task: parent, children: children, visibleChildren: visible)]
         }
-        activeCount = parents.filter { !TaskStates.terminal.contains($0.state) }.count
+        activeCount = parents.filter { !TaskStates.terminal.contains($0.state) && (projectID == nil || $0.projectId == projectID) }.count
     }
 }
 
@@ -103,7 +104,7 @@ private struct TaskListPane: View {
     @FocusState private var searchFocused: Bool
 
     var body: some View {
-        let model = TaskListModel(tasks: store.tasks, workflows: store.workflows, filter: router.taskFilter, search: search)
+        let model = TaskListModel(tasks: store.tasks, workflows: store.workflows, filter: router.taskFilter, projectID: router.projectFilterID, search: search)
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
@@ -148,6 +149,25 @@ private struct TaskListPane: View {
                         }
                     }
                 }
+                if !store.projects.isEmpty {
+                    Menu {
+                        Button("All projects") { router.projectFilterID = nil }
+                        ForEach(store.projects) { project in
+                            Button(project.name) { router.projectFilterID = project.id }
+                        }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "rectangle.stack").font(.system(size: 13))
+                            Text(router.projectFilterID.flatMap { id in store.projects.first { $0.id == id }?.name } ?? "All projects").lineLimit(1)
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                        }
+                        .font(Theme.font(14)).foregroundStyle(Theme.secondaryForeground)
+                        .padding(.horizontal, 12).frame(height: 40)
+                        .surface(Theme.input, radius: Theme.Radius.control)
+                    }
+                    .accessibilityLabel("Filter by project")
+                }
             }
             .padding(.horizontal, 18).padding(.top, 18).padding(.bottom, 6)
 
@@ -182,7 +202,7 @@ private struct TaskListPane: View {
 
     private func card(_ task: SindralTask, compact: Bool = false, subtaskCount: Int = 0, subtaskDone: Int = 0) -> some View {
         Button { router.selectedTaskID = task.id } label: {
-            TaskCard(task: task, step: task.currentStep(store.workflows), selected: router.selectedTaskID == task.id, compact: compact, subtaskCount: subtaskCount, subtaskDone: subtaskDone)
+            TaskCard(task: task, step: task.currentStep(store.workflows), projectName: task.projectId.flatMap { id in store.projects.first { $0.id == id }?.name }, selected: router.selectedTaskID == task.id, compact: compact, subtaskCount: subtaskCount, subtaskDone: subtaskDone)
         }
         .buttonStyle(.plain)
     }
