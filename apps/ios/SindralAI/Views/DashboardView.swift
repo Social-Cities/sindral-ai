@@ -190,6 +190,7 @@ struct CreateTaskCard: View {
     @State private var importError: String?
     @State private var reposInput = ""
     @State private var githubCatalog: GitHubCatalog?
+    @State private var githubCatalogError: String?
     @State private var loadingGitHubCatalog = false
     @State private var showNewRepository = false
     @State private var newRepositoryOwner = ""
@@ -240,6 +241,10 @@ struct CreateTaskCard: View {
         .onAppear(perform: pickDefaultWorkflow)
         .onChange(of: store.workflows) { pickDefaultWorkflow() }
         .task { await loadGitHubCatalog() }
+        .onChange(of: router.section) { _, section in
+            guard section == .home else { return }
+            Task { await loadGitHubCatalog(force: true) }
+        }
         .fileImporter(isPresented: $importingFile, allowedContentTypes: [.plainText, .text, UTType(filenameExtension: "md") ?? .text]) { handleFile($0) }
     }
 
@@ -286,6 +291,14 @@ struct CreateTaskCard: View {
                         .surface(Theme.input, radius: Theme.Radius.control)
                     }
                     .accessibilityLabel("Add repository")
+                }
+            } else if let githubCatalogError {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle").font(.system(size: 12)).foregroundStyle(Theme.warning)
+                    Text(githubCatalogError).font(Theme.font(12)).foregroundStyle(Theme.mutedForeground).lineLimit(2)
+                    Spacer(minLength: 0)
+                    Button("Retry") { Task { await loadGitHubCatalog(force: true) } }
+                        .font(Theme.font(12, .medium)).foregroundStyle(Theme.accent)
                 }
             } else if githubCatalog != nil {
                 HStack(spacing: 6) {
@@ -475,16 +488,18 @@ struct CreateTaskCard: View {
         formError = nil
     }
 
-    private func loadGitHubCatalog() async {
-        guard githubCatalog == nil, !loadingGitHubCatalog else { return }
+    private func loadGitHubCatalog(force: Bool = false) async {
+        guard !loadingGitHubCatalog, force || githubCatalog == nil || githubCatalogError != nil else { return }
         loadingGitHubCatalog = true
+        githubCatalogError = nil
         defer { loadingGitHubCatalog = false }
         do {
             let catalog = try await api.githubCatalog()
             githubCatalog = catalog
             if newRepositoryOwner.isEmpty { newRepositoryOwner = catalog.owners.first?.login ?? "" }
         } catch {
-            githubCatalog = .init(connected: false, source: nil, repositories: [], owners: [])
+            githubCatalog = nil
+            githubCatalogError = error.localizedDescription
         }
     }
 
