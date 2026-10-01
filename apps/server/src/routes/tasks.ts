@@ -110,7 +110,7 @@ export const taskRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx })
     if (!prUrl) return { files: [] };
     const ref = parsePrUrl(prUrl);
     if (!ref) return { files: [] };
-    const secret = await ctx.secrets.get(request.user!.id, 'github');
+    const secret = await ctx.githubOAuth.credential(request.user!.id);
     if (!secret) throw badRequest('GitHub token is not configured');
     const files = await fetchPrFiles(ctx.fetch, secret.token, ref);
     return { files };

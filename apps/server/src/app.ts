@@ -53,6 +53,10 @@ const REDACT_PATHS = [
   'req.headers["x-hub-signature-256"]',
   'headers.authorization',
   '*.token',
+  '*.accessToken',
+  '*.access_token',
+  '*.refreshToken',
+  '*.refresh_token',
   '*.secret',
   '*.githubToken',
   '*.credentials',
@@ -127,6 +131,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const fetchImpl = options.fetch ?? fetch;
   const workflows = new WorkflowService(repo);
   const secrets = new SecretService(repo, config.secretsEncryptionKey);
+  const githubOAuth = new GitHubOAuthService(config, secrets, fetchImpl);
   const orchestrator = new Orchestrator({ repo, hub, workflows, log: app.log, metrics, autoMergeEnabled: config.autoMergeEnabled });
   const ctx: AppContext = {
     config,
@@ -138,9 +143,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     userVerifier: options.userVerifier ?? createUserTokenVerifier({ supabaseUrl: config.supabaseUrl, jwtSecret: config.supabaseJwtSecret }),
     workflows,
     secrets,
-    tickets: new TicketService(secrets, fetchImpl),
-    github: new GitHubConnectionService(secrets, fetchImpl),
-    githubOAuth: new GitHubOAuthService(config, secrets, fetchImpl),
+    tickets: new TicketService(secrets, githubOAuth, fetchImpl),
+    github: new GitHubConnectionService(githubOAuth, fetchImpl),
+    githubOAuth,
     orchestrator,
     claim: options.claim ?? { waitMs: 20_000, pollMs: 2_000 },
     ssePingMs: options.ssePingMs ?? 25_000,

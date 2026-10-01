@@ -1,6 +1,6 @@
 import type { CreateGitHubRepositoryInput, GitHubCatalog, GitHubOwner, GitHubRepository } from '@sindral/shared';
 import { HttpError, badRequest, conflict, forbidden, serviceUnavailable } from '../errors.js';
-import type { SecretService } from './secrets.js';
+import type { GitHubOAuthService } from './githubOAuth.js';
 
 type FetchLike = typeof fetch;
 type JsonObject = Record<string, unknown>;
@@ -10,12 +10,12 @@ const API_VERSION = '2022-11-28';
 
 export class GitHubConnectionService {
   constructor(
-    private readonly secrets: SecretService,
+    private readonly githubOAuth: GitHubOAuthService,
     private readonly fetchImpl: FetchLike,
   ) {}
 
   async catalog(userId: string): Promise<GitHubCatalog> {
-    const secret = await this.secrets.get(userId, 'github');
+    const secret = await this.githubOAuth.credential(userId);
     if (!secret) return { connected: false, source: null, repositories: [], owners: [] };
 
     const user = await this.requestObject(secret.token, '/user');
@@ -42,7 +42,7 @@ export class GitHubConnectionService {
   }
 
   async createRepository(userId: string, input: CreateGitHubRepositoryInput): Promise<GitHubRepository> {
-    const secret = await this.secrets.get(userId, 'github');
+    const secret = await this.githubOAuth.credential(userId);
     if (!secret) throw badRequest('Connect GitHub before creating a repository');
 
     const user = await this.requestObject(secret.token, '/user');

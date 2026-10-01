@@ -575,7 +575,7 @@ describe('settings API', () => {
     expect(authorizationUrl.origin + authorizationUrl.pathname).toBe('https://github.com/login/oauth/authorize');
     expect(authorizationUrl.searchParams.get('client_id')).toBe('github-client-id');
     expect(authorizationUrl.searchParams.get('redirect_uri')).toBe('http://localhost:5173/api/github/callback');
-    expect(authorizationUrl.searchParams.get('scope')).toBe('repo read:org');
+    expect(authorizationUrl.searchParams.get('scope')).toBe('repo read:org offline_access');
     expect(authorizationUrl.searchParams.get('code_challenge_method')).toBe('S256');
     const state = authorizationUrl.searchParams.get('state');
     expect(state).toBeTruthy();
@@ -592,7 +592,14 @@ describe('settings API', () => {
           redirect_uri: 'http://localhost:5173/api/github/callback',
         });
         expect(body.code_verifier).toMatch(/^[A-Za-z0-9_-]{43}$/);
-        return json({ access_token: 'github-user-token', scope: 'repo', token_type: 'bearer' });
+        return json({
+          access_token: 'github-user-token',
+          refresh_token: 'github-refresh-token',
+          expires_in: 28_800,
+          refresh_token_expires_in: 15_897_600,
+          scope: 'repo',
+          token_type: 'bearer',
+        });
       }
       if (url === 'https://api.github.com/user') {
         expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer github-user-token');
@@ -609,8 +616,12 @@ describe('settings API', () => {
     expect(callback.headers.location).toBe('http://localhost:5173/settings?github=connected');
     expect(await ctx.app.ctx.secrets.get(ctx.userA, 'github')).toEqual({
       token: 'github-user-token',
+      refreshToken: 'github-refresh-token',
+      expiresAt: expect.any(String),
+      refreshTokenExpiresAt: expect.any(String),
       metadata: { source: 'oauth', login: 'octocat' },
     });
+    expect(JSON.stringify(await ctx.repo.getSecret(ctx.userA, 'github'))).not.toContain('github-refresh-token');
     expect(await ctx.app.ctx.secrets.get(ctx.userB, 'github')).toBeNull();
 
     const tampered = await ctx.app.inject({

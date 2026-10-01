@@ -1,6 +1,7 @@
 import { detectTicket, type DetectedTicket, type TicketImport } from '@sindral/shared';
 import { badRequest, HttpError } from '../errors.js';
 import type { FetchLike } from './github.js';
+import type { GitHubOAuthService } from './githubOAuth.js';
 import type { SecretService } from './secrets.js';
 
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -94,6 +95,7 @@ async function request(fetchImpl: FetchLike, url: string, init: RequestInit, pro
 export class TicketService {
   constructor(
     private readonly secrets: SecretService,
+    private readonly githubOAuth: GitHubOAuthService,
     private readonly fetchImpl: FetchLike,
   ) {}
 
@@ -157,7 +159,7 @@ export class TicketService {
   }
 
   private async importGitHub(userId: string, ticket: DetectedTicket): Promise<TicketImport> {
-    const secret = await this.secrets.get(userId, 'github');
+    const secret = await this.githubOAuth.credential(userId);
     const headers: Record<string, string> = { Accept: 'application/vnd.github+json', 'User-Agent': 'sindral-server' };
     if (secret) headers.Authorization = `Bearer ${secret.token}`;
     const { owner, repo, number } = ticket.ref;

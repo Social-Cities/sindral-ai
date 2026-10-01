@@ -1,13 +1,16 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import type { AppConfig } from '../config.js';
-import { serviceUnavailable } from '../errors.js';
-import type { SecretService } from './secrets.js';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { HttpError, serviceUnavailable } from '../errors.js';
+import type { DecryptedSecret, SecretCredential, SecretService } from './secrets.js';
 
 type FetchLike = typeof fetch;
 type JsonObject = Record<string, unknown>;
 
 const STATE_TTL_MS = 10 * 60_000;
-const GITHUB_SCOPES = 'repo read:org';
+const REFRESH_SKEW_MS = 5 * 60_000;
+const GITHUB_SCOPES = 'repo read:org offline_access';
+const TOKEN_ENDPOINT = 'https://github.com/login/oauth/access_token';
 
 export type GitHubOAuthReturnTo = 'web' | 'ios';
 
@@ -25,10 +28,13 @@ export class GitHubOAuthError extends Error {
 }
 
 export class GitHubOAuthService {
+  private readonly refreshes = new Map<string, Promise<DecryptedSecret>>();
+
   constructor(
     private readonly config: AppConfig,
     private readonly secrets: SecretService,
     private readonly fetchImpl: FetchLike,
+    private readonly now: () => number = Date.now,
   ) {}
 
   authorizationUrl(userId: string, returnTo: GitHubOAuthReturnTo = 'web'): string {
@@ -54,7 +60,7 @@ export class GitHubOAuthService {
     let tokenResponse: Response;
     let tokenBody: JsonObject;
     try {
-      tokenResponse = await this.fetchImpl('https://github.com/login/oauth/access_token', {
+      tokenResponse = await this.fetchImpl(TOKEN_ENDPOINT, {
         method: 'POST',
         headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'sindral-server' },
         redirect: 'error',
@@ -93,12 +99,34 @@ export class GitHubOAuthService {
     const login = stringField(userBody, 'login');
     if (!login) throw new GitHubOAuthError('account', 'GitHub returned an invalid user profile');
 
+    let credential: SecretCredential;
     try {
-      await this.secrets.set(userId, 'github', token, { source: 'oauth', login });
+      credential = tokenCredential(tokenBody, this.now());
+    } catch (error) {
+      throw new GitHubOAuthError('exchange', 'GitHub authorization returned an invalid token response', { cause: error });
+    }
+    try {
+      await this.secrets.setCredential(userId, 'github', credential, { source: 'oauth', login });
     } catch (error) {
       throw new GitHubOAuthError('storage', 'GitHub credential could not be stored', { cause: error });
     }
     return { userId, login };
+  }
+
+  async credential(userId: string): Promise<DecryptedSecret | null> {
+    const credential = await this.secrets.get(userId, 'github');
+    if (!credential || !needsRefresh(credential, this.now())) return credential;
+    if (!credential.refreshToken) throw reconnectRequired();
+
+    const pending = this.refreshes.get(userId);
+    if (pending) return pending;
+    const refresh = this.rotateCredential(userId, credential);
+    this.refreshes.set(userId, refresh);
+    try {
+      return await refresh;
+    } finally {
+      if (this.refreshes.get(userId) === refresh) this.refreshes.delete(userId);
+    }
   }
 
   callbackReturnTo(state: string | undefined): GitHubOAuthReturnTo {
@@ -129,6 +157,49 @@ export class GitHubOAuthService {
     const callbackUrl = this.config.githubOAuthCallbackUrl;
     if (!clientId || !clientSecret || !callbackUrl) throw serviceUnavailable('GitHub repository authorization is not configured');
     return { clientId, clientSecret, callbackUrl };
+  }
+
+  private async rotateCredential(userId: string, current: DecryptedSecret): Promise<DecryptedSecret> {
+    if (!current.refreshToken) throw reconnectRequired();
+    if (current.refreshTokenExpiresAt && Date.parse(current.refreshTokenExpiresAt) <= this.now()) throw reconnectRequired();
+    const { clientId, clientSecret } = this.credentials();
+    let response: Response;
+    let body: JsonObject;
+    try {
+      response = await this.fetchImpl(TOKEN_ENDPOINT, {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'sindral-server' },
+        redirect: 'error',
+        body: JSON.stringify({
+          client_id: clientId,
+          client_secret: clientSecret,
+          grant_type: 'refresh_token',
+          refresh_token: current.refreshToken,
+        }),
+      });
+      body = await readJson(response, 'GitHub OAuth token refresh');
+    } catch (error) {
+      if (error instanceof HttpError) throw error;
+      throw serviceUnavailable('GitHub token refresh could not be completed');
+    }
+
+    const githubError = stringField(body, 'error');
+    if (!response.ok || githubError) {
+      if (githubError === 'bad_refresh_token') {
+        // Another server instance may have consumed the single-use token and persisted its replacement.
+        await sleep(100);
+        const latest = await this.secrets.get(userId, 'github');
+        if (latest && latest.token !== current.token && latest.refreshToken !== current.refreshToken) return latest;
+        throw reconnectRequired();
+      }
+      throw serviceUnavailable(githubMessage(body, 'GitHub token refresh failed'));
+    }
+
+    const next = tokenCredential(body, this.now(), true);
+    await this.secrets.setCredential(userId, 'github', next, current.metadata);
+    const stored = await this.secrets.get(userId, 'github');
+    if (!stored) throw serviceUnavailable('GitHub credential could not be stored');
+    return stored;
   }
 
   private createState(userId: string, returnTo: GitHubOAuthReturnTo): { state: string; codeChallenge: string } {
@@ -165,6 +236,36 @@ export class GitHubOAuthService {
     }
     return { userId, codeVerifier, returnTo: value['returnTo'] === 'ios' ? 'ios' : 'web' };
   }
+}
+
+function tokenCredential(body: JsonObject, now: number, requireRefreshToken = false): SecretCredential {
+  const token = stringField(body, 'access_token');
+  const refreshToken = stringField(body, 'refresh_token');
+  const expiresIn = positiveNumberField(body, 'expires_in');
+  const refreshTokenExpiresIn = positiveNumberField(body, 'refresh_token_expires_in');
+  if (!token) throw serviceUnavailable('GitHub authorization returned no access token');
+  if ((expiresIn || requireRefreshToken) && !refreshToken) throw serviceUnavailable('GitHub authorization returned no refresh token');
+  return {
+    token,
+    ...(refreshToken ? { refreshToken } : {}),
+    ...(expiresIn ? { expiresAt: new Date(now + expiresIn * 1000).toISOString() } : {}),
+    ...(refreshTokenExpiresIn ? { refreshTokenExpiresAt: new Date(now + refreshTokenExpiresIn * 1000).toISOString() } : {}),
+  };
+}
+
+function positiveNumberField(value: JsonObject, key: string): number | null {
+  const field = value[key];
+  return typeof field === 'number' && Number.isFinite(field) && field > 0 ? field : null;
+}
+
+function needsRefresh(credential: DecryptedSecret, now: number): boolean {
+  if (!credential.expiresAt) return false;
+  const expiresAt = Date.parse(credential.expiresAt);
+  return !Number.isFinite(expiresAt) || expiresAt <= now + REFRESH_SKEW_MS;
+}
+
+function reconnectRequired(): HttpError {
+  return new HttpError(400, 'GITHUB_RECONNECT_REQUIRED', 'Your GitHub connection can no longer be refreshed. Reconnect GitHub and try again.');
 }
 
 async function readJson(response: Response, operation: string): Promise<JsonObject> {

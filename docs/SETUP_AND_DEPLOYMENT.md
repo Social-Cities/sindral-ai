@@ -238,7 +238,7 @@ Under **Authentication → Providers**:
 - Email/password is already supported by the UI. For hosted projects, email confirmation should remain enabled; configure custom SMTP for reliable production delivery.
 - GitHub does not need to be enabled as a Supabase Auth provider. Sindral app accounts always authenticate through Supabase email/password.
 
-Create a GitHub OAuth App for repository access after login. Set its authorization callback URL to `https://<portal-origin>/api/github/callback`, then configure `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, and the same URL as `GITHUB_OAUTH_CALLBACK_URL`. For local development, use `http://localhost:5173/api/github/callback`; Vite proxies it to the API server. Sindral requests `repo read:org`, validates the connected GitHub account on the server, and stores its access token encrypted against the current Supabase user.
+Create a GitHub OAuth App for repository access after login. Set its authorization callback URL to `https://<portal-origin>/api/github/callback`, then configure `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, and the same URL as `GITHUB_OAUTH_CALLBACK_URL`. For local development, use `http://localhost:5173/api/github/callback`; Vite proxies it to the API server. Sindral requests `repo read:org offline_access`, validates the connected GitHub account on the server, stores both tokens inside one encrypted credential, and rotates expiring access and refresh tokens automatically. Existing non-expiring OAuth tokens and PATs remain supported.
 
 This GitHub OAuth App is separate from the GitHub App used to grant workers short-lived repository credentials.
 

@@ -121,7 +121,7 @@ export const workerRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx 
     if (jobs.length === 0) return { jobs: [] as JobDispatch[] };
 
     const useGitHubApp = hasGitHubAppCredentials(ctx.config, userId);
-    const github = await ctx.secrets.get(userId, 'github');
+    const github = await ctx.githubOAuth.credential(userId);
     const dispatches: JobDispatch[] = [];
     for (const claimed of jobs) {
       const { leaseToken, ...job } = claimed;
