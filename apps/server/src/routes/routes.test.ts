@@ -364,7 +364,7 @@ describe('worker API', () => {
   async function registeredWorker() {
     const key = await ctx.workerKeyFor(ctx.userA);
     const headers = { authorization: `Bearer ${key}`, [WORKER_PROTOCOL_HEADER]: String(WORKER_PROTOCOL_VERSION) };
-    const res = await ctx.app.inject({ method: 'POST', url: '/api/worker/register', headers, payload: { name: 'mac', hostname: 'mac.local', version: '0.1.0' } });
+    const res = await ctx.app.inject({ method: 'POST', url: '/api/worker/register', headers, payload: { name: 'mac', hostname: 'mac.local', version: '0.1.1' } });
     return { headers, workerId: res.json<{ workerId: string }>().workerId };
   }
 
@@ -386,10 +386,14 @@ describe('worker API', () => {
         details: { clientProtocolVersion: null, serverProtocolVersion: WORKER_PROTOCOL_VERSION },
       },
     });
-    const incompatible = await request(String(WORKER_PROTOCOL_VERSION + 1));
-    expect(incompatible.statusCode).toBe(426);
-    expect(incompatible.headers.upgrade).toBe(`sindral-worker/${WORKER_PROTOCOL_VERSION}`);
-    expect(incompatible.json()).toMatchObject({ error: { code: 'WORKER_PROTOCOL_MISMATCH' } });
+    const oldProtocol = await request(String(WORKER_PROTOCOL_VERSION - 1));
+    expect(oldProtocol.statusCode).toBe(426);
+    expect(oldProtocol.headers.upgrade).toBe(`sindral-worker/${WORKER_PROTOCOL_VERSION}`);
+    expect(oldProtocol.json()).toMatchObject({ error: { code: 'WORKER_PROTOCOL_MISMATCH' } });
+    const futureProtocol = await request(String(WORKER_PROTOCOL_VERSION + 1));
+    expect(futureProtocol.statusCode).toBe(426);
+    expect(futureProtocol.headers.upgrade).toBe(`sindral-worker/${WORKER_PROTOCOL_VERSION}`);
+    expect(futureProtocol.json()).toMatchObject({ error: { code: 'WORKER_PROTOCOL_MISMATCH' } });
     expect(await ctx.repo.listWorkers(ctx.userA)).toEqual([]);
 
     const staleWorker = await ctx.repo.createWorker(ctx.userA, { name: 'stale', hostname: 'old.local', version: '0.0.1', workerKeyId: null });

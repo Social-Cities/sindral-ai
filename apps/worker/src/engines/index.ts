@@ -15,7 +15,7 @@ export function createEngines(config: Pick<WorkerConfig, 'claudeBin' | 'codexBin
   return { claude: new ClaudeEngine(config.claudeBin), codex: new CodexEngine(config.codexBin) };
 }
 
-/** e.g. `worker/0.1.0 claude/2.1.0 codex/none` — kept under the server's 50-char limit. */
+/** e.g. `worker/0.1.1 claude/2.1.0 codex/none` — kept under the server's 50-char limit. */
 export async function describeVersion(workerVersion: string, engines: EngineRegistry): Promise<string> {
   const parts = [`worker/${workerVersion}`];
   for (const name of ['claude', 'codex'] as const) {

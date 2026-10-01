@@ -34,6 +34,6 @@ Worker routes authenticate the worker key before checking an exact wire-protocol
 - **A09 Logging failures** – structured pino logs, task event audit trail, job logs.
 - **A10 SSRF** – ticket import only fetches exact allow-listed provider hosts parsed from the URL, refuses redirects, requires JSON, and streams through a one-MiB response cap; GitHub diff fetch only for `github.com/<owner>/<repo>/pull/<n>`.
 
-## Agent sandboxing
+## Agent execution
 
-Agent steps declare `tools` and `permissions`. The worker maps them to CLI allow-lists (`--allowedTools`, `--permission-mode`, `--sandbox`). Read-only steps (planning, review) cannot edit files or run commands. Every code task runs in its own git worktree under `~/.sindral`, so concurrent tasks never share a working tree.
+Agent steps declare `tools` and `permissions`, but the local worker treats those fields as orchestration intent rather than a filesystem sandbox. Agent subprocesses run with open local permissions inside Sindral-managed checkouts so required result files, artifacts, diagnostics and recovery work are not blocked by CLI sandbox policy. Non-write steps are still instructed not to modify repository files, commit, push or open pull requests; the worker validates structured results and performs GitHub publishing itself. Every code task runs in its own git worktree under `~/.sindral`, so concurrent tasks never share a working tree.
