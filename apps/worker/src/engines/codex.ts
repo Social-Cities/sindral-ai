@@ -9,16 +9,15 @@ export function normalizeCodexModel(model: string | undefined): string | undefin
 }
 
 export function buildCodexArgs(step: WorkflowStep, writableDirs: string[] = []): string[] {
-  const permissions = new Set(step.permissions ?? []);
-  const write = permissions.has('write');
   const args = ['exec'];
   const model = normalizeCodexModel(step.model);
   if (model) args.push('--model', model);
-  args.push('--sandbox', 'workspace-write');
-  if (write) {
-    args.push('--full-auto');
-  }
-  // The result file and output dir live outside the worktree.
+  // Worker agents run inside Sindral-managed checkouts. Keep workflow
+  // permissions as intent metadata, but avoid sandbox modes that can prevent
+  // required result files or diagnostics from being written.
+  args.push('--dangerously-bypass-approvals-and-sandbox');
+  // The result file and output dir live outside the worktree. `--add-dir`
+  // keeps them in the visible workspace when the CLI builds its context.
   for (const dir of writableDirs) args.push('--add-dir', dir);
   // Non-code tasks run in a plain tmp directory; codex refuses to start outside a git repo otherwise.
   args.push('--skip-git-repo-check', '--json', '-');

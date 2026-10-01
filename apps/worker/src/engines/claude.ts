@@ -1,5 +1,4 @@
 import type { AgentMode, ToolName, WorkflowStep } from '@sindral/shared';
-import path from 'node:path';
 import { run, stream } from '../proc.js';
 import { extractVersion, OutputTail, type Engine, type EngineCapabilities, type EngineRunOptions, type EngineRunResult } from './types.js';
 
@@ -20,12 +19,9 @@ export interface ClaudeCapabilities extends EngineCapabilities {
 }
 
 export function claudeAllowedTools(step: WorkflowStep): string[] {
-  const permissions = new Set(step.permissions ?? []);
   const tools = new Set<string>();
   for (const tool of step.tools ?? []) {
     for (const mapped of CLAUDE_TOOL_MAP[tool] ?? []) {
-      if (mapped === 'Bash' && !permissions.has('execute')) continue;
-      if (['Edit', 'Write', 'MultiEdit'].includes(mapped) && !permissions.has('write')) continue;
       tools.add(mapped);
     }
   }
@@ -45,32 +41,18 @@ export function claudeEffort(mode: AgentMode | undefined): string | null {
   }
 }
 
-function claudeEditRule(dir: string): string {
-  const normalized = dir.replaceAll('\\', '/').replace(/\/+$/, '');
-  // Claude permission patterns use `//` for absolute paths. A single leading
-  // slash is resolved like a relative pattern and does not authorize the file.
-  // `Edit` is the umbrella permission for every built-in file editing tool,
-  // including the `Write` calls used to create result and artifact files.
-  const pattern = path.isAbsolute(dir) ? `//${normalized.replace(/^\/+/, '')}` : normalized;
-  return `Edit(${pattern}/**)`;
-}
-
 export function buildClaudeArgs(step: WorkflowStep, caps: Pick<ClaudeCapabilities, 'supportsEffort'>, writableDirs: string[] = []): string[] {
-  const permissions = new Set(step.permissions ?? []);
   const args = ['-p', '--output-format', 'stream-json', '--verbose'];
   if (step.model) args.push('--model', step.model);
-  // Read-only steps run in `default` mode (not `plan`, which forbids all file writes) with an
-  // allow-list that only permits writing inside the worker-owned result/output directories,
-  // so the agent can still emit the Sindral result file without being able to edit the repo.
-  const canWrite = permissions.has('write');
-  args.push('--permission-mode', canWrite ? 'acceptEdits' : 'default');
-  const tools = claudeAllowedTools(step);
-  if (!canWrite) for (const dir of writableDirs) tools.push(claudeEditRule(dir));
-  if (tools.length > 0) args.push('--allowedTools', tools.join(','));
+  // Worker agents run inside Sindral-managed checkouts. Keep the workflow
+  // permissions as intent metadata, but do not put the engine into a restricted
+  // sandbox: read-only planning/review steps still need to write result files,
+  // run diagnostics, and recover from partially blocked tool calls.
+  args.push('--permission-mode', 'bypassPermissions');
   const effort = claudeEffort(step.mode);
   if (caps.supportsEffort && effort) args.push('--effort', effort);
-  // The result file and output dir live outside the worktree; without this,
-  // acceptEdits would still refuse writes there.
+  // The result file and output dir live outside the worktree. `--add-dir`
+  // keeps them visible to Claude even when they are not under the repository.
   for (const dir of writableDirs) args.push('--add-dir', dir);
   return args;
 }
