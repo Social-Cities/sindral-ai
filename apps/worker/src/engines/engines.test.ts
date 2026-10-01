@@ -115,12 +115,12 @@ describe('codex args', () => {
     expect(args[args.indexOf('--model') + 1]).toBe('gpt-6.1-sol');
   });
 
-  it('uses read-only sandbox without write permission', () => {
+  it('uses workspace-write without full-auto for non-write steps', () => {
     const args = buildCodexArgs(step({ permissions: ['read', 'execute'], model: undefined }), ['/w/results']);
-    expect(args[args.indexOf('--sandbox') + 1]).toBe('read-only');
+    expect(args[args.indexOf('--sandbox') + 1]).toBe('workspace-write');
     expect(args).not.toContain('--full-auto');
     expect(args).not.toContain('--model');
-    expect(args.join(' ')).not.toContain('writable_roots');
+    expect(args[args.indexOf('-c') + 1]).toBe('sandbox_workspace_write.writable_roots=["/w/results"]');
   });
 
   it('adds writable roots for write steps', () => {

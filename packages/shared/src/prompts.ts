@@ -100,6 +100,6 @@ export function protocolInstructions(output: StepOutputKind, resultFile: string)
     'Rules:',
     '- The file must contain valid JSON and nothing else.',
     '- Never include secrets, tokens or credentials in the result.',
-    '- If you cannot complete the task, still write the file with the best summary you can and explain what blocked you.',
+    '- If you cannot complete the task, still return the JSON result with the best summary you can and explain what blocked you.',
   ].join('\n');
 }

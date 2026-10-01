@@ -14,12 +14,12 @@ export function buildCodexArgs(step: WorkflowStep, writableDirs: string[] = []):
   const args = ['exec'];
   const model = normalizeCodexModel(step.model);
   if (model) args.push('--model', model);
-  args.push('--sandbox', write ? 'workspace-write' : 'read-only');
+  args.push('--sandbox', 'workspace-write');
   if (write) {
     args.push('--full-auto');
-    // The result file and output dir live outside the worktree.
-    if (writableDirs.length > 0) args.push('-c', `sandbox_workspace_write.writable_roots=${JSON.stringify(writableDirs)}`);
   }
+  // The result file and output dir live outside the worktree.
+  if (writableDirs.length > 0) args.push('-c', `sandbox_workspace_write.writable_roots=${JSON.stringify(writableDirs)}`);
   // Non-code tasks run in a plain tmp directory; codex refuses to start outside a git repo otherwise.
   args.push('--skip-git-repo-check', '--json', '-');
   return args;

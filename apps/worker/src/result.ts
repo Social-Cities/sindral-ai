@@ -61,9 +61,9 @@ function stripFence(text: string): string {
 }
 
 /**
- * Finds a JSON object with a `summary` field inside free text. Read-only
- * steps (plan mode / read-only sandbox) cannot write the result file, so
- * agents fall back to printing it in their final message.
+ * Finds a JSON object with a `summary` field inside free text. This keeps older
+ * or partially blocked agent runs recoverable when they print the result instead
+ * of writing the protocol file.
  */
 export function extractJsonCandidate(text: string | null | undefined): string | null {
   if (!text) return null;

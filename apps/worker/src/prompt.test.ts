@@ -46,9 +46,25 @@ describe('buildPrompt', () => {
     expect(prompt).toContain('`acme/api` is checked out at `/w/worktrees/ENG-142/api` on branch `sindral/eng-142` (base branch `develop`)');
     expect(prompt).toContain('spans several repositories');
     expect(prompt).toContain('Do NOT push');
+    expect(prompt).not.toContain('Inspect the repository only');
     expect(prompt).toContain('/w/outputs/j1');
     // Sections appear in order: prompt, protocol, workspace.
     expect(prompt.indexOf('Sindral protocol')).toBeLessThan(prompt.indexOf('## Workspace'));
+  });
+
+  it('tells non-write repository steps to inspect without modifying code', () => {
+    const prompt = buildPrompt({
+      step: step({ permissions: ['read'], output: 'plan' }),
+      output: 'plan',
+      context: context(),
+      resultFile: '/w/results/j1.json',
+      outputDir: '/w/outputs/j1',
+      workspace: repoWs,
+    });
+    expect(prompt).toContain('Inspect the repository only');
+    expect(prompt).toContain('Do NOT modify repository files');
+    expect(prompt).toContain('Write only the required result JSON file');
+    expect(prompt).not.toContain('Commit your work');
   });
 
   it('describes the tmp directory for non-code tasks', () => {
