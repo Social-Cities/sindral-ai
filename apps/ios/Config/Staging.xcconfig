@@ -2,3 +2,6 @@
 SINDRAL_API_URL = https:/$()/sindralserver-production.up.railway.app
 SUPABASE_URL = https:/$()/xixnyviobybjvrgfgjun.supabase.co
 SUPABASE_ANON_KEY = sb_publishable_Ix59CPIhLfoybKVySQNL7g_0Dyozz7F
+
+// Staging archives are uploaded to TestFlight, so they need an app dSYM.
+DEBUG_INFORMATION_FORMAT = dwarf-with-dsym
