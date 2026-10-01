@@ -71,7 +71,7 @@ export function createSupabaseClient(url: string, serviceRoleKey: string): Supab
   });
 }
 
-export const EXPECTED_SCHEMA_VERSION = '20260930153931';
+export const EXPECTED_SCHEMA_VERSION = '20261001134245';
 
 // ---- row shapes (snake_case, as stored) ----
 interface ProfileRow {
