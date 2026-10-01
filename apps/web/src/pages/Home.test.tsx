@@ -17,6 +17,7 @@ vi.mock('@/lib/api', async (importOriginal) => {
     getMe: vi.fn(),
     getGitHubCatalog: vi.fn(),
     importTicket: vi.fn(),
+    createProject: vi.fn(),
     createTask: vi.fn(),
   };
 });
@@ -29,6 +30,7 @@ describe('Home', () => {
     vi.mocked(api.listWorkers).mockResolvedValue({ workers: [] });
     vi.mocked(api.getMe).mockResolvedValue({ user: { id: 'user-1', email: 'lucas@example.com', displayName: 'Lucas' } });
     vi.mocked(api.getGitHubCatalog).mockResolvedValue({ connected: false, source: null, repositories: [], owners: [] });
+    vi.mocked(api.createProject).mockReset();
     vi.mocked(api.createTask).mockReset();
     vi.mocked(api.importTicket).mockReset();
   });
@@ -131,5 +133,50 @@ describe('Home', () => {
       repos: ['acme/billing-platform'],
       workflowId: 'wf-default',
     }));
+  });
+
+  it('creates a new project from the home project tab', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getGitHubCatalog).mockResolvedValue({
+      connected: true,
+      source: 'oauth',
+      repositories: [],
+      owners: [
+        { login: 'lucas', type: 'user', avatarUrl: null, role: 'owner' },
+        { login: 'acme', type: 'organization', avatarUrl: null, role: 'admin' },
+      ],
+    });
+    vi.mocked(api.createProject).mockResolvedValue({
+      project: {
+        id: 'project-1',
+        userId: 'user-1',
+        name: 'Billing platform',
+        description: 'Billing work',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        repositories: [
+          { id: 'repo-1', userId: 'user-1', projectId: 'project-1', repository: 'acme/billing-platform', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+        ],
+      },
+    });
+    renderWithProviders(<Home />);
+
+    await user.click(await screen.findByRole('tab', { name: 'New project' }));
+    await user.type(screen.getByLabelText('App title'), 'Billing platform');
+    await user.type(screen.getByLabelText('Description'), 'Billing work');
+    await user.selectOptions(screen.getByLabelText('Repository owner'), 'acme');
+    await user.click(screen.getByRole('button', { name: 'Create project' }));
+
+    await waitFor(() => expect(api.createProject).toHaveBeenCalledWith({
+      name: 'Billing platform',
+      description: 'Billing work',
+      repository: {
+        owner: 'acme',
+        name: 'billing-platform',
+        visibility: 'private',
+        description: 'Billing work',
+      },
+    }));
+    expect(await screen.findByText('Created project and initialized acme/billing-platform.')).toBeInTheDocument();
   });
 });

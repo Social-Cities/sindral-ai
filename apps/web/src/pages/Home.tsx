@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router';
 import type { CreateTaskInput, TicketImport, Worker } from '@sindral/shared';
 import { TERMINAL_STATES, dashboardBucket, detectTicket, normalizeRepo } from '@sindral/shared';
 import { displayNameFor, useAuth } from '@/auth/AuthProvider';
+import { ProjectsSection } from '@/components/ProjectsSection';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Button } from '@/components/Button';
 import { useCreateTask, useTasks } from '@/hooks/useTasks';
@@ -17,7 +18,7 @@ import { currentStep } from '@/lib/taskWorkflow';
 
 const MAX_UPLOAD_BYTES = 1024 * 1024;
 
-type Mode = 'text' | 'url';
+type Mode = 'text' | 'url' | 'project';
 
 const PROVIDER_LABEL: Record<TicketImport['provider'], string> = { linear: 'Linear', jira: 'Jira', github: 'GitHub' };
 
@@ -88,7 +89,7 @@ export function Home() {
 
   const detected = mode === 'url' ? detectTicket(urlInput) : null;
   const title = mode === 'url' ? ticket?.title ?? '' : (textInput.trim().split('\n')[0] ?? '').slice(0, 200);
-  const canCreate = mode === 'text' ? !!textInput.trim() : !!ticket;
+  const canCreate = mode === 'text' ? !!textInput.trim() : mode === 'url' ? !!ticket : false;
 
   function parseRepos(): string[] | null {
     const raw = reposInput
@@ -215,8 +216,8 @@ export function Home() {
           <div className="lg:col-span-2 space-y-6">
             {/* Task creation card */}
             <div className="rounded-lg overflow-hidden bg-card border border-border">
-              <div className="flex border-b border-border" role="tablist" aria-label="Task source">
-                {(['text', 'url'] as const).map((m) => (
+              <div className="flex border-b border-border" role="tablist" aria-label="Home action">
+                {(['text', 'url', 'project'] as const).map((m) => (
                   <button
                     key={m}
                     type="button"
@@ -227,14 +228,16 @@ export function Home() {
                       mode === m ? 'text-foreground' : 'text-muted-foreground hover:text-secondary-foreground'
                     }`}
                   >
-                    {m === 'text' ? 'New task' : 'Paste a URL'}
+                    {m === 'text' ? 'New task' : m === 'url' ? 'Paste a URL' : 'New project'}
                     {mode === m && <span className="absolute bottom-0 left-0 right-0 h-px bg-accent" />}
                   </button>
                 ))}
               </div>
 
               <div className="p-4">
-                {mode === 'text' ? (
+                {mode === 'project' ? (
+                  <ProjectsSection />
+                ) : mode === 'text' ? (
                   <textarea
                     ref={textRef}
                     aria-label="Task description"
@@ -304,92 +307,97 @@ export function Home() {
                   </div>
                 )}
 
-                <div className="mt-3">
-                  <label className="space-y-1">
-                    <span className="label-caps block">Project</span>
-                    <select
-                      aria-label="Project"
-                      value={projectId}
-                      onChange={(event) => {
-                        setProjectId(event.target.value);
-                        setFormError(null);
-                      }}
-                      className="w-full rounded border border-border bg-input px-2 py-2 text-xs text-foreground outline-none focus:border-accent/40"
-                    >
-                      {projects.length === 0 && <option value="">No project</option>}
-                      {projects.map((project) => (
-                        <option key={project.id} value={project.id}>
-                          {project.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-                {selectedProject && (
-                  <p className="mt-2 text-[10px] text-muted-foreground">
-                    {selectedProject.repositories.length} repos · {selectedProject.repositories.map((repo) => repo.repository).join(', ')}
-                  </p>
-                )}
-                {projects.length === 0 && (
-                  <p className="mt-2 text-[10px] text-muted-foreground">
-                    <Link to="/settings" className="text-accent hover:text-accent/70">Create a project in Settings</Link> before starting code tasks.
-                  </p>
-                )}
+                {mode !== 'project' && (
+                  <>
+                    <div className="mt-3">
+                      <label className="space-y-1">
+                        <span className="label-caps block">Project</span>
+                        <select
+                          aria-label="Project"
+                          value={projectId}
+                          onChange={(event) => {
+                            setProjectId(event.target.value);
+                            setFormError(null);
+                          }}
+                          className="w-full rounded border border-border bg-input px-2 py-2 text-xs text-foreground outline-none focus:border-accent/40"
+                        >
+                          {projects.length === 0 && <option value="">No project</option>}
+                          {projects.map((project) => (
+                            <option key={project.id} value={project.id}>
+                              {project.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    {selectedProject && (
+                      <p className="mt-2 text-[10px] text-muted-foreground">
+                        {selectedProject.repositories.length} repos · {selectedProject.repositories.map((repo) => repo.repository).join(', ')}
+                      </p>
+                    )}
+                    {projects.length === 0 && (
+                      <p className="mt-2 text-[10px] text-muted-foreground">
+                        Use the New project tab before starting code tasks.
+                      </p>
+                    )}
 
-                <div className="mt-3 flex items-center gap-2">
-                  <svg width="11" height="11" viewBox="0 0 11 11" fill="none" className="text-muted-foreground shrink-0" aria-hidden="true">
-                    <path d="M1.5 3h8v6h-8zM1.5 3l2-1.5h4l2 1.5" stroke="currentColor" strokeWidth="1" strokeLinejoin="round" />
-                  </svg>
-                  <input
-                    aria-label="Repositories"
-                    value={reposInput}
-                    onChange={(e) => {
-                      setReposInput(e.target.value);
-                      setFormError(null);
-                    }}
-                    onKeyDown={handleKeyDown}
-                    placeholder={
-                      selectedProject
-                        ? 'Repositories: leave empty to use all project repos'
-                        : 'Repositories: owner/name, owner/other (leave empty for a non-code task)'
-                    }
-                    className="flex-1 bg-transparent text-xs font-mono text-foreground placeholder:text-muted-foreground outline-none"
-                  />
-                </div>
-                {repositoryChoices.length > 0 && (
-                  <div className="mt-2 flex items-center gap-2">
-                    <select
-                      aria-label="Add repository"
-                      defaultValue=""
-                      onChange={(event) => {
-                        const repository = event.target.value;
-                        if (!repository) return;
-                        const current = reposInput.split(/[,\s]+/).map((value) => normalizeRepo(value)).filter((value): value is string => Boolean(value));
-                        if (!current.includes(repository)) setReposInput([...current, repository].join(', '));
-                        event.target.value = '';
-                        setFormError(null);
-                      }}
-                      className="min-w-0 flex-1 rounded border border-border bg-input px-2 py-1.5 text-xs font-mono text-secondary-foreground outline-none focus:border-accent/40"
-                    >
-                      <option value="">Choose from {repositoryChoices.length} {selectedProject ? 'project' : 'available'} repositories…</option>
-                      {repositoryChoices.map((repository) => (
-                        <option key={repository} value={repository}>{repository}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-                {!selectedProject && githubCatalog.data && !githubCatalog.data.connected && (
-                  <p className="mt-2 text-[10px] text-muted-foreground">
-                    <Link to="/settings" className="text-accent hover:text-accent/70">Connect GitHub</Link> to browse repositories.
-                  </p>
-                )}
-                {formError && (
-                  <p className="text-xs text-[#f87171] mt-2" role="alert">
-                    {formError}
-                  </p>
+                    <div className="mt-3 flex items-center gap-2">
+                      <svg width="11" height="11" viewBox="0 0 11 11" fill="none" className="text-muted-foreground shrink-0" aria-hidden="true">
+                        <path d="M1.5 3h8v6h-8zM1.5 3l2-1.5h4l2 1.5" stroke="currentColor" strokeWidth="1" strokeLinejoin="round" />
+                      </svg>
+                      <input
+                        aria-label="Repositories"
+                        value={reposInput}
+                        onChange={(e) => {
+                          setReposInput(e.target.value);
+                          setFormError(null);
+                        }}
+                        onKeyDown={handleKeyDown}
+                        placeholder={
+                          selectedProject
+                            ? 'Repositories: leave empty to use all project repos'
+                            : 'Repositories: owner/name, owner/other (leave empty for a non-code task)'
+                        }
+                        className="flex-1 bg-transparent text-xs font-mono text-foreground placeholder:text-muted-foreground outline-none"
+                      />
+                    </div>
+                    {repositoryChoices.length > 0 && (
+                      <div className="mt-2 flex items-center gap-2">
+                        <select
+                          aria-label="Add repository"
+                          defaultValue=""
+                          onChange={(event) => {
+                            const repository = event.target.value;
+                            if (!repository) return;
+                            const current = reposInput.split(/[,\s]+/).map((value) => normalizeRepo(value)).filter((value): value is string => Boolean(value));
+                            if (!current.includes(repository)) setReposInput([...current, repository].join(', '));
+                            event.target.value = '';
+                            setFormError(null);
+                          }}
+                          className="min-w-0 flex-1 rounded border border-border bg-input px-2 py-1.5 text-xs font-mono text-secondary-foreground outline-none focus:border-accent/40"
+                        >
+                          <option value="">Choose from {repositoryChoices.length} {selectedProject ? 'project' : 'available'} repositories…</option>
+                          {repositoryChoices.map((repository) => (
+                            <option key={repository} value={repository}>{repository}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    {!selectedProject && githubCatalog.data && !githubCatalog.data.connected && (
+                      <p className="mt-2 text-[10px] text-muted-foreground">
+                        <Link to="/settings" className="text-accent hover:text-accent/70">Connect GitHub</Link> to browse repositories.
+                      </p>
+                    )}
+                    {formError && (
+                      <p className="text-xs text-[#f87171] mt-2" role="alert">
+                        {formError}
+                      </p>
+                    )}
+                  </>
                 )}
               </div>
 
+              {mode !== 'project' && (
               <div className="px-4 pb-4 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <button
@@ -432,6 +440,7 @@ export function Home() {
                   </Button>
                 </div>
               </div>
+              )}
             </div>
 
             {/* Active tasks */}

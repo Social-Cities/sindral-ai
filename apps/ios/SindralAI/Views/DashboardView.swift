@@ -176,7 +176,7 @@ struct CreateTaskCard: View {
     @Environment(AppRouter.self) private var router
     var onCreated: () -> Void = {}
 
-    private enum Mode: String, CaseIterable { case text = "New task", url = "Paste a URL" }
+    private enum Mode: String, CaseIterable { case text = "New task", url = "Paste a URL", project = "New project" }
     @State private var mode = Mode.text
     @State private var textInput = ""
     @State private var urlInput = ""
@@ -216,15 +216,19 @@ struct CreateTaskCard: View {
             .hairline(.bottom)
 
             VStack(alignment: .leading, spacing: 14) {
-                if mode == .text { textMode } else { urlMode }
-                projectSection
-                repoSection
-                if let formError { Text(formError).font(Theme.font(13)).foregroundStyle(Theme.dangerText) }
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 12) { uploadButton; Spacer(minLength: 8); workflowPicker; createButton }
-                    VStack(alignment: .leading, spacing: 10) {
-                        uploadButton
-                        HStack(spacing: 10) { workflowPicker; createButton.frame(maxWidth: .infinity) }
+                if mode == .project {
+                    ProjectsSettingsCard(embedded: true)
+                } else {
+                    if mode == .text { textMode } else { urlMode }
+                    projectSection
+                    repoSection
+                    if let formError { Text(formError).font(Theme.font(13)).foregroundStyle(Theme.dangerText) }
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 12) { uploadButton; Spacer(minLength: 8); workflowPicker; createButton }
+                        VStack(alignment: .leading, spacing: 10) {
+                            uploadButton
+                            HStack(spacing: 10) { workflowPicker; createButton.frame(maxWidth: .infinity) }
+                        }
                     }
                 }
             }

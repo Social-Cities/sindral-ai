@@ -333,9 +333,10 @@ private struct GitHubConnectionCard: View {
     }
 }
 
-private struct ProjectsSettingsCard: View {
+struct ProjectsSettingsCard: View {
     @Environment(APIClient.self) private var api
     @Environment(AppStore.self) private var store
+    var embedded = false
     @State private var catalog: GitHubCatalog?
     @State private var loadingCatalog = false
     @State private var name = ""
@@ -349,6 +350,19 @@ private struct ProjectsSettingsCard: View {
     @State private var feedbackIsError = false
 
     var body: some View {
+        Group {
+            if embedded {
+                fields
+            } else {
+                fields
+                    .padding(24)
+                    .surface(Theme.card, radius: Theme.Radius.card)
+            }
+        }
+        .task { await loadCatalog() }
+    }
+
+    private var fields: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 12) {
                 label("App title")
@@ -398,9 +412,6 @@ private struct ProjectsSettingsCard: View {
 
             projectList
         }
-        .padding(24)
-        .surface(Theme.card, radius: Theme.Radius.card)
-        .task { await loadCatalog() }
     }
 
     private var ownerMenu: some View {
