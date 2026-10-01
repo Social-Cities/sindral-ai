@@ -36,7 +36,7 @@ final class SessionStore {
     private(set) var errorMessage: String?
 
     private let configuration: AppConfiguration
-    private let keychain = KeychainStore(service: "ai.sindral.ios.auth")
+    private let keychain = KeychainStore(service: "ai.sindral.app.auth")
     private let sessionAccount = "session"
     private let urlSession: URLSession
 

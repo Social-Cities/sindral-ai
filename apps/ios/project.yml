@@ -48,7 +48,7 @@ targets:
       Release: Config/Release.xcconfig
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: ai.sindral.ios
+        PRODUCT_BUNDLE_IDENTIFIER: ai.sindral.app
         PRODUCT_NAME: SindralAI
         INFOPLIST_FILE: SindralAI/Info.plist
         TARGETED_DEVICE_FAMILY: "1,2"
@@ -65,5 +65,5 @@ targets:
       - target: SindralAI
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: ai.sindral.ios.tests
+        PRODUCT_BUNDLE_IDENTIFIER: ai.sindral.app.tests
         GENERATE_INFOPLIST_FILE: YES
