@@ -120,12 +120,13 @@ describe('codex args', () => {
     expect(args[args.indexOf('--sandbox') + 1]).toBe('workspace-write');
     expect(args).not.toContain('--full-auto');
     expect(args).not.toContain('--model');
-    expect(args[args.indexOf('-c') + 1]).toBe('sandbox_workspace_write.writable_roots=["/w/results"]');
+    expect(args).toContain('--add-dir');
+    expect(args[args.indexOf('--add-dir') + 1]).toBe('/w/results');
   });
 
   it('adds writable roots for write steps', () => {
     const args = buildCodexArgs(step(), ['/w/results', '/w/outputs/j1']);
-    expect(args[args.indexOf('-c') + 1]).toBe('sandbox_workspace_write.writable_roots=["/w/results","/w/outputs/j1"]');
+    expect(args).toEqual(expect.arrayContaining(['--add-dir', '/w/results', '--add-dir', '/w/outputs/j1']));
   });
 
   it('captures agent messages for the result-file fallback', () => {
