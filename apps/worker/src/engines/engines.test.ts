@@ -107,10 +107,12 @@ describe('codex args', () => {
     expect(args.at(-1)).toBe('-');
   });
 
-  it('maps the retired Codex API model to the ChatGPT-account model', () => {
-    expect(normalizeCodexModel('gpt-5-codex')).toBe('gpt-5');
+  it('maps retired Codex API model names to current Codex model slugs', () => {
+    expect(normalizeCodexModel('gpt-5-codex')).toBe('gpt-6.1-sol');
+    expect(normalizeCodexModel('gpt-5')).toBe('gpt-6.1-sol');
+    expect(normalizeCodexModel('o4-mini')).toBe('gpt-6-luna');
     const args = buildCodexArgs(step({ model: 'gpt-5-codex' }));
-    expect(args[args.indexOf('--model') + 1]).toBe('gpt-5');
+    expect(args[args.indexOf('--model') + 1]).toBe('gpt-6.1-sol');
   });
 
   it('uses read-only sandbox without write permission', () => {

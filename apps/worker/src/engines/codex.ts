@@ -3,7 +3,8 @@ import { run, stream } from '../proc.js';
 import { extractVersion, OutputTail, type Engine, type EngineCapabilities, type EngineRunOptions, type EngineRunResult } from './types.js';
 
 export function normalizeCodexModel(model: string | undefined): string | undefined {
-  if (model === 'gpt-5-codex') return 'gpt-5';
+  if (model === 'gpt-5-codex' || model === 'gpt-5') return 'gpt-6.1-sol';
+  if (model === 'o4-mini') return 'gpt-6-luna';
   return model;
 }
 
