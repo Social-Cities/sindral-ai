@@ -58,14 +58,7 @@ export const createGitHubRepositorySchema = z.object({
 export const createProjectSchema = z.object({
   name: shortText,
   description: z.string().trim().max(2000).default(''),
-  repos: z.array(repo).max(20).default([]),
-  newRepositories: z.array(createGitHubRepositorySchema).max(20).default([]),
-}).refine((input) => input.repos.length + input.newRepositories.length > 0, {
-  message: 'Projects need at least one existing or new repository',
-  path: ['repos'],
-}).refine((input) => input.repos.length + input.newRepositories.length <= 20, {
-  message: 'Projects support at most 20 repositories',
-  path: ['repos'],
+  repository: createGitHubRepositorySchema,
 });
 
 export const updateProjectSchema = z.object({

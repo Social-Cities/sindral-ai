@@ -23,8 +23,14 @@ enum Provider: String, CaseIterable, Identifiable {
 }
 
 private enum SettingsPane: Hashable, Identifiable {
-    case integration(Provider), workerKeys, workers
+    case integration(Provider), projects, workerKeys, workers
     var id: Self { self }
+}
+
+private enum ProjectRepositoryVisibility: String, CaseIterable, Identifiable {
+    case `private`, `public`
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
 }
 
 /// Settings: section list and detail pane side by side on iPad; a pushed list on iPhone.
@@ -76,6 +82,8 @@ struct SettingsView: View {
                         let connected = status(provider)?.configured == true
                         row(provider.title, detail: connected ? "connected" : "not set", detailColor: connected ? Theme.emerald : Theme.mutedForeground, pane: .integration(provider))
                     }
+                    groupLabel("Projects").padding(.top, 20)
+                    row("Projects", detail: "\(store.projects.count)", detailColor: Theme.secondaryForeground, pane: .projects)
                     groupLabel("Agents").padding(.top, 20)
                     let activeKeys = keys.filter { $0.revokedAt == nil }.count
                     row("Worker keys", detail: "\(activeKeys) key\(activeKeys == 1 ? "" : "s")", detailColor: Theme.secondaryForeground, pane: .workerKeys)
@@ -133,6 +141,10 @@ struct SettingsView: View {
                     SecretForm(provider: provider, status: status(provider)) { await load() }
                 }
             }
+        case .projects:
+            section("Projects", "Create the app repository first. Tasks can then be created under the project and inherit its repos.") {
+                ProjectsSettingsCard()
+            }
         case .workerKeys:
             VStack(alignment: .leading, spacing: 40) {
                 section("Worker keys", "A worker runs agent jobs on your machine. Each key authenticates one worker installation.") {
@@ -186,7 +198,14 @@ struct SettingsView: View {
     private func status(_ provider: Provider) -> SecretStatus? { secrets.first { $0.provider == provider.rawValue } }
 
     private func load() async {
-        do { async let secrets = api.secrets(); async let keys = api.workerKeys(); self.secrets = try await secrets; self.keys = try await keys }
+        do {
+            async let secrets = api.secrets()
+            async let keys = api.workerKeys()
+            async let projects: Void = store.refreshProjects()
+            self.secrets = try await secrets
+            self.keys = try await keys
+            _ = await projects
+        }
         catch { store.present(error) }
     }
 
@@ -311,6 +330,233 @@ private struct GitHubConnectionCard: View {
         } catch {
             store.present(error)
         }
+    }
+}
+
+private struct ProjectsSettingsCard: View {
+    @Environment(APIClient.self) private var api
+    @Environment(AppStore.self) private var store
+    @State private var catalog: GitHubCatalog?
+    @State private var loadingCatalog = false
+    @State private var name = ""
+    @State private var description = ""
+    @State private var owner = ""
+    @State private var repositoryName = ""
+    @State private var repositoryEdited = false
+    @State private var visibility = ProjectRepositoryVisibility.private
+    @State private var creating = false
+    @State private var feedback: String?
+    @State private var feedbackIsError = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 12) {
+                label("App title")
+                TextField("", text: Binding(get: { name }, set: updateName), prompt: Text("Billing platform").foregroundStyle(Theme.mutedForeground))
+                    .font(Theme.body).foregroundStyle(Theme.foreground)
+                    .fieldChrome(height: 48)
+                    .accessibilityLabel("App title")
+
+                label("Description")
+                TextField("", text: $description, prompt: Text("What this app is for").foregroundStyle(Theme.mutedForeground), axis: .vertical)
+                    .font(Theme.body).foregroundStyle(Theme.foreground)
+                    .lineLimit(1...3)
+                    .fieldChrome(height: 48)
+                    .accessibilityLabel("Project description")
+
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) { ownerMenu; repositoryNameField; visibilityMenu }
+                    VStack(alignment: .leading, spacing: 12) { ownerMenu; repositoryNameField; visibilityMenu }
+                }
+            }
+
+            if loadingCatalog {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Loading GitHub owners...").font(Theme.font(13)).foregroundStyle(Theme.mutedForeground)
+                }
+            } else if catalog?.connected == false {
+                Text("Connect GitHub above to create project repositories.")
+                    .font(Theme.font(13)).foregroundStyle(Theme.mutedForeground)
+            }
+
+            if let feedback {
+                Label(feedback, systemImage: feedbackIsError ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
+                    .font(Theme.font(13))
+                    .foregroundStyle(feedbackIsError ? Theme.dangerText : Theme.emerald)
+            }
+
+            Button { Task { await create() } } label: {
+                if creating {
+                    HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Creating project") }
+                } else {
+                    Label("Create project", systemImage: "plus")
+                }
+            }
+            .buttonStyle(.sindral(.primary, height: 48))
+            .disabled(catalog?.connected != true || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || owner.isEmpty || repositoryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || creating)
+
+            projectList
+        }
+        .padding(24)
+        .surface(Theme.card, radius: Theme.Radius.card)
+        .task { await loadCatalog() }
+    }
+
+    private var ownerMenu: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            label("Owner")
+            Menu {
+                Picker("Owner", selection: $owner) {
+                    ForEach(catalog?.owners ?? []) { item in
+                        Text(item.login).tag(item.login)
+                    }
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "person.crop.circle").font(.system(size: 13))
+                    Text(owner.isEmpty ? "Owner" : owner).lineLimit(1)
+                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                    Spacer(minLength: 0)
+                }
+                .font(Theme.font(14)).foregroundStyle(Theme.secondaryForeground)
+                .padding(.horizontal, 12).frame(height: 48)
+                .surface(Theme.input, radius: Theme.Radius.control)
+            }
+            .disabled(catalog?.connected != true)
+            .accessibilityLabel("Repository owner")
+        }
+        .frame(minWidth: 180)
+    }
+
+    private var repositoryNameField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            label("Repository name")
+            TextField("", text: Binding(get: { repositoryName }, set: updateRepositoryName), prompt: Text("billing-platform").foregroundStyle(Theme.mutedForeground))
+                .font(Theme.mono(13)).foregroundStyle(Theme.foreground)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                .fieldChrome(height: 48)
+                .accessibilityLabel("Repository name")
+        }
+        .frame(minWidth: 220)
+    }
+
+    private var visibilityMenu: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            label("Visibility")
+            Menu {
+                Picker("Visibility", selection: $visibility) {
+                    ForEach(ProjectRepositoryVisibility.allCases) { item in
+                        Text(item.title).tag(item)
+                    }
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: visibility == .private ? "lock" : "globe").font(.system(size: 13))
+                    Text(visibility.title)
+                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                }
+                .font(Theme.font(14)).foregroundStyle(Theme.secondaryForeground)
+                .padding(.horizontal, 12).frame(height: 48)
+                .surface(Theme.input, radius: Theme.Radius.control)
+            }
+            .disabled(catalog?.connected != true)
+            .accessibilityLabel("Repository visibility")
+        }
+        .frame(minWidth: 140)
+    }
+
+    private var projectList: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("PROJECTS").font(Theme.mono(12, .medium)).tracking(2.5).foregroundStyle(Theme.mutedForeground)
+            if store.projects.isEmpty {
+                Text("No projects yet.").font(Theme.font(14)).foregroundStyle(Theme.mutedForeground)
+            }
+            ForEach(store.projects) { project in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(project.name).font(Theme.bodyMedium).foregroundStyle(Theme.foreground)
+                    Text(project.repositories.map(\.repository).joined(separator: ", "))
+                        .font(Theme.mono(12)).foregroundStyle(Theme.mutedForeground).lineLimit(2)
+                }
+                .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                .surface(Theme.input, radius: Theme.Radius.control)
+            }
+        }
+        .padding(.top, 8)
+    }
+
+    private func label(_ text: String) -> some View { Text(text).font(Theme.font(15)).foregroundStyle(Theme.secondaryForeground) }
+
+    private func updateName(_ value: String) {
+        name = value
+        feedback = nil
+        if !repositoryEdited { repositoryName = Self.repositoryName(from: value) }
+    }
+
+    private func updateRepositoryName(_ value: String) {
+        repositoryEdited = true
+        repositoryName = value
+        feedback = nil
+    }
+
+    private func loadCatalog() async {
+        guard !loadingCatalog else { return }
+        loadingCatalog = true
+        defer { loadingCatalog = false }
+        do {
+            catalog = try await api.githubCatalog()
+            if owner.isEmpty { owner = catalog?.owners.first?.login ?? "" }
+        } catch {
+            feedback = error.localizedDescription
+            feedbackIsError = true
+        }
+    }
+
+    private func create() async {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedRepositoryName = repositoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty, !owner.isEmpty, !trimmedRepositoryName.isEmpty else {
+            feedback = "Enter a project title, owner and repository name."
+            feedbackIsError = true
+            return
+        }
+
+        creating = true
+        feedback = nil
+        defer { creating = false }
+        do {
+            let project = try await api.createProject(
+                name: trimmedName,
+                description: description.trimmingCharacters(in: .whitespacesAndNewlines),
+                repository: NewGitHubRepository(owner: owner, name: trimmedRepositoryName, visibility: visibility.rawValue)
+            )
+            await store.refreshProjects()
+            feedback = "Created \(project.repositories.first?.repository ?? project.name)."
+            feedbackIsError = false
+            name = ""
+            description = ""
+            repositoryName = ""
+            repositoryEdited = false
+        } catch {
+            feedback = error.localizedDescription
+            feedbackIsError = true
+        }
+    }
+
+    private static func repositoryName(from value: String) -> String {
+        let allowed = Set("abcdefghijklmnopqrstuvwxyz0123456789_.-")
+        var output = ""
+        var lastWasDash = false
+        for character in value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            if allowed.contains(character) {
+                output.append(character)
+                lastWasDash = false
+            } else if !lastWasDash {
+                output.append("-")
+                lastWasDash = true
+            }
+        }
+        return String(output.trimmingCharacters(in: CharacterSet(charactersIn: "-")).prefix(100))
     }
 }
 

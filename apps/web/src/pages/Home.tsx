@@ -7,7 +7,7 @@ import { displayNameFor, useAuth } from '@/auth/AuthProvider';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Button } from '@/components/Button';
 import { useCreateTask, useTasks } from '@/hooks/useTasks';
-import { useCreateProject, useProjects } from '@/hooks/useProjects';
+import { useProjects } from '@/hooks/useProjects';
 import { useWorkflows } from '@/hooks/useWorkflows';
 import { useWorkers } from '@/hooks/useWorkers';
 import { useGitHubCatalog, useMe } from '@/hooks/useSettings';
@@ -30,7 +30,6 @@ export function Home() {
   const workflowsQuery = useWorkflows();
   const workersQuery = useWorkers();
   const createTask = useCreateTask();
-  const createProject = useCreateProject();
   const githubCatalog = useGitHubCatalog();
 
   const [mode, setMode] = useState<Mode>('text');
@@ -41,13 +40,6 @@ export function Home() {
   const [importError, setImportError] = useState<string | null>(null);
   const [reposInput, setReposInput] = useState('');
   const [projectId, setProjectId] = useState('');
-  const [showNewProject, setShowNewProject] = useState(false);
-  const [newProjectName, setNewProjectName] = useState('');
-  const [newProjectDescription, setNewProjectDescription] = useState('');
-  const [showNewRepository, setShowNewRepository] = useState(false);
-  const [newRepositoryOwner, setNewRepositoryOwner] = useState('');
-  const [newRepositoryName, setNewRepositoryName] = useState('');
-  const [newRepositoryVisibility, setNewRepositoryVisibility] = useState<'private' | 'public'>('private');
   const [workflowId, setWorkflowId] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [uploadNote, setUploadNote] = useState<string | null>(null);
@@ -58,6 +50,9 @@ export function Home() {
   const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data]);
   const tasks = useMemo(() => tasksQuery.data ?? [], [tasksQuery.data]);
   const selectedProject = projects.find((project) => project.id === projectId) ?? null;
+  const repositoryChoices = selectedProject
+    ? selectedProject.repositories.map((repository) => repository.repository)
+    : (githubCatalog.data?.repositories.map((repository) => repository.fullName) ?? []);
 
   useEffect(() => {
     if (!workflowId && workflows.length > 0) {
@@ -67,13 +62,8 @@ export function Home() {
   }, [workflows, workflowId]);
 
   useEffect(() => {
-    const firstOwner = githubCatalog.data?.owners[0]?.login;
-    if (!newRepositoryOwner && firstOwner) setNewRepositoryOwner(firstOwner);
-  }, [githubCatalog.data, newRepositoryOwner]);
-
-  useEffect(() => {
-    if (!projectId && projects.length > 0 && !showNewProject) setProjectId(projects[0]!.id);
-  }, [projectId, projects, showNewProject]);
+    if (!projectId && projects.length > 0) setProjectId(projects[0]!.id);
+  }, [projectId, projects]);
 
   const counts = useMemo(() => {
     const c = { todo: 0, 'in-progress': 0, 'in-review': 0, done: 0, failed: 0 };
@@ -132,40 +122,15 @@ export function Home() {
   }
 
   async function handleCreate() {
-    if (!canCreate || createTask.isPending || createProject.isPending) return;
+    if (!canCreate || createTask.isPending) return;
     setFormError(null);
     const repos = parseRepos();
     if (!repos) return;
-    if (showNewRepository && (!newRepositoryOwner || !newRepositoryName.trim())) {
-      setFormError('Choose an owner and enter a repository name.');
-      return;
-    }
-
-    const newRepository = showNewRepository
-      ? { owner: newRepositoryOwner, name: newRepositoryName.trim(), visibility: newRepositoryVisibility }
-      : undefined;
 
     try {
-      let resolvedProjectId = showNewProject ? '' : projectId || undefined;
+      const resolvedProjectId = projectId || undefined;
       let resolvedRepos = repos;
-      if (showNewProject) {
-        if (!newProjectName.trim()) {
-          setFormError('Enter a project name.');
-          return;
-        }
-        if (repos.length === 0 && !newRepository) {
-          setFormError('Add at least one repository or create a new one for the project.');
-          return;
-        }
-        const created = await createProject.mutateAsync({
-          name: newProjectName.trim(),
-          description: newProjectDescription.trim(),
-          repos,
-          newRepositories: newRepository ? [newRepository] : [],
-        });
-        resolvedProjectId = created.project.id;
-        resolvedRepos = created.project.repositories.map((repository) => repository.repository);
-      } else if (selectedProject && repos.length === 0) {
+      if (selectedProject && repos.length === 0) {
         resolvedRepos = selectedProject.repositories.map((repository) => repository.repository);
       }
 
@@ -177,7 +142,6 @@ export function Home() {
           ...(resolvedProjectId ? { projectId: resolvedProjectId } : {}),
           repos: resolvedRepos,
           workflowId: workflowId || undefined,
-          ...(!showNewProject && newRepository ? { newRepository } : {}),
         };
       } else if (ticket) {
         const key = /^[A-Z][A-Z0-9]*-\d+$/.test(ticket.id) ? ticket.id : undefined;
@@ -189,7 +153,6 @@ export function Home() {
           ...(resolvedProjectId ? { projectId: resolvedProjectId } : {}),
           repos: resolvedRepos,
           workflowId: workflowId || undefined,
-          ...(!showNewProject && newRepository ? { newRepository } : {}),
         };
       } else {
         return;
@@ -200,11 +163,6 @@ export function Home() {
       setTicket(null);
       setReposInput('');
       setProjectId(resolvedProjectId ?? '');
-      setShowNewProject(false);
-      setNewProjectName('');
-      setNewProjectDescription('');
-      setShowNewRepository(false);
-      setNewRepositoryName('');
       navigate('/tasks');
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Could not create task');
@@ -346,20 +304,14 @@ export function Home() {
                   </div>
                 )}
 
-                <div className="mt-3 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-2">
+                <div className="mt-3">
                   <label className="space-y-1">
                     <span className="label-caps block">Project</span>
                     <select
                       aria-label="Project"
-                      value={showNewProject ? '__new__' : projectId}
+                      value={projectId}
                       onChange={(event) => {
-                        if (event.target.value === '__new__') {
-                          setShowNewProject(true);
-                          setProjectId('');
-                        } else {
-                          setShowNewProject(false);
-                          setProjectId(event.target.value);
-                        }
+                        setProjectId(event.target.value);
                         setFormError(null);
                       }}
                       className="w-full rounded border border-border bg-input px-2 py-2 text-xs text-foreground outline-none focus:border-accent/40"
@@ -370,46 +322,18 @@ export function Home() {
                           {project.name}
                         </option>
                       ))}
-                      <option value="__new__">Create new project…</option>
                     </select>
                   </label>
-                  <div className="flex items-end">
-                    <Button type="button" variant="subtle" size="xs" onClick={() => setShowNewProject((open) => !open)}>
-                      {showNewProject ? 'Use existing' : 'New project'}
-                    </Button>
-                  </div>
                 </div>
-                {selectedProject && !showNewProject && (
+                {selectedProject && (
                   <p className="mt-2 text-[10px] text-muted-foreground">
                     {selectedProject.repositories.length} repos · {selectedProject.repositories.map((repo) => repo.repository).join(', ')}
                   </p>
                 )}
-                {showNewProject && (
-                  <div className="mt-3 border-t border-border pt-3 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-2">
-                    <label className="space-y-1">
-                      <span className="label-caps block">Project name</span>
-                      <input
-                        aria-label="Project name"
-                        value={newProjectName}
-                        onChange={(event) => {
-                          setNewProjectName(event.target.value);
-                          setFormError(null);
-                        }}
-                        placeholder="Billing platform"
-                        className="w-full rounded border border-border bg-input px-2 py-2 text-xs text-foreground outline-none focus:border-accent/40"
-                      />
-                    </label>
-                    <label className="space-y-1">
-                      <span className="label-caps block">Description</span>
-                      <input
-                        aria-label="Project description"
-                        value={newProjectDescription}
-                        onChange={(event) => setNewProjectDescription(event.target.value)}
-                        placeholder="Repos and context this work belongs to"
-                        className="w-full rounded border border-border bg-input px-2 py-2 text-xs text-foreground outline-none focus:border-accent/40"
-                      />
-                    </label>
-                  </div>
+                {projects.length === 0 && (
+                  <p className="mt-2 text-[10px] text-muted-foreground">
+                    <Link to="/settings" className="text-accent hover:text-accent/70">Create a project in Settings</Link> before starting code tasks.
+                  </p>
                 )}
 
                 <div className="mt-3 flex items-center gap-2">
@@ -425,24 +349,14 @@ export function Home() {
                     }}
                     onKeyDown={handleKeyDown}
                     placeholder={
-                      selectedProject && !showNewProject
+                      selectedProject
                         ? 'Repositories: leave empty to use all project repos'
                         : 'Repositories: owner/name, owner/other (leave empty for a non-code task)'
                     }
                     className="flex-1 bg-transparent text-xs font-mono text-foreground placeholder:text-muted-foreground outline-none"
                   />
-                  <Button
-                    type="button"
-                    variant="subtle"
-                    size="xs"
-                    onClick={() => setShowNewRepository((open) => !open)}
-                    disabled={!showNewRepository && !githubCatalog.data?.connected}
-                    title={githubCatalog.data?.connected ? 'Create a GitHub repository with this task' : 'Connect GitHub to create repositories'}
-                  >
-                    {showNewRepository ? 'Cancel new repo' : 'New repo'}
-                  </Button>
                 </div>
-                {githubCatalog.data?.connected && githubCatalog.data.repositories.length > 0 && (
+                {repositoryChoices.length > 0 && (
                   <div className="mt-2 flex items-center gap-2">
                     <select
                       aria-label="Add repository"
@@ -457,54 +371,17 @@ export function Home() {
                       }}
                       className="min-w-0 flex-1 rounded border border-border bg-input px-2 py-1.5 text-xs font-mono text-secondary-foreground outline-none focus:border-accent/40"
                     >
-                      <option value="">Choose from {githubCatalog.data.repositories.length} available repositories…</option>
-                      {githubCatalog.data.repositories.map((repository) => (
-                        <option key={repository.id || repository.fullName} value={repository.fullName}>{repository.fullName}</option>
+                      <option value="">Choose from {repositoryChoices.length} {selectedProject ? 'project' : 'available'} repositories…</option>
+                      {repositoryChoices.map((repository) => (
+                        <option key={repository} value={repository}>{repository}</option>
                       ))}
                     </select>
                   </div>
                 )}
-                {githubCatalog.data && !githubCatalog.data.connected && (
+                {!selectedProject && githubCatalog.data && !githubCatalog.data.connected && (
                   <p className="mt-2 text-[10px] text-muted-foreground">
-                    <Link to="/settings" className="text-accent hover:text-accent/70">Connect GitHub</Link> to browse repositories or create a new one.
+                    <Link to="/settings" className="text-accent hover:text-accent/70">Connect GitHub</Link> to browse repositories.
                   </p>
-                )}
-                {showNewRepository && (
-                  <div className="mt-3 border-t border-border pt-3 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto] gap-2">
-                    <label className="space-y-1">
-                      <span className="label-caps block">Owner</span>
-                      <select
-                        aria-label="Repository owner"
-                        value={newRepositoryOwner}
-                        onChange={(event) => setNewRepositoryOwner(event.target.value)}
-                        className="w-full rounded border border-border bg-input px-2 py-2 text-xs font-mono text-foreground outline-none focus:border-accent/40"
-                      >
-                        {githubCatalog.data?.owners.map((owner) => <option key={owner.login} value={owner.login}>{owner.login}</option>)}
-                      </select>
-                    </label>
-                    <label className="space-y-1">
-                      <span className="label-caps block">Repository name</span>
-                      <input
-                        aria-label="New repository name"
-                        value={newRepositoryName}
-                        onChange={(event) => { setNewRepositoryName(event.target.value); setFormError(null); }}
-                        placeholder="new-service"
-                        className="w-full rounded border border-border bg-input px-2 py-2 text-xs font-mono text-foreground outline-none focus:border-accent/40"
-                      />
-                    </label>
-                    <label className="space-y-1">
-                      <span className="label-caps block">Visibility</span>
-                      <select
-                        aria-label="Repository visibility"
-                        value={newRepositoryVisibility}
-                        onChange={(event) => setNewRepositoryVisibility(event.target.value as 'private' | 'public')}
-                        className="w-full rounded border border-border bg-input px-2 py-2 text-xs text-foreground outline-none focus:border-accent/40"
-                      >
-                        <option value="private">Private</option>
-                        <option value="public">Public</option>
-                      </select>
-                    </label>
-                  </div>
                 )}
                 {formError && (
                   <p className="text-xs text-[#f87171] mt-2" role="alert">
@@ -550,7 +427,7 @@ export function Home() {
                       ))}
                     </select>
                   </div>
-                  <Button onClick={handleCreate} disabled={!canCreate} loading={createTask.isPending || createProject.isPending} title="Cmd+Enter">
+                  <Button onClick={handleCreate} disabled={!canCreate} loading={createTask.isPending} title="Cmd+Enter">
                     Create task ↵
                   </Button>
                 </div>

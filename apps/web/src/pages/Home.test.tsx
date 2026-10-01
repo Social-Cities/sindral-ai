@@ -17,7 +17,6 @@ vi.mock('@/lib/api', async (importOriginal) => {
     getMe: vi.fn(),
     getGitHubCatalog: vi.fn(),
     importTicket: vi.fn(),
-    createProject: vi.fn(),
     createTask: vi.fn(),
   };
 });
@@ -31,7 +30,6 @@ describe('Home', () => {
     vi.mocked(api.getMe).mockResolvedValue({ user: { id: 'user-1', email: 'lucas@example.com', displayName: 'Lucas' } });
     vi.mocked(api.getGitHubCatalog).mockResolvedValue({ connected: false, source: null, repositories: [], owners: [] });
     vi.mocked(api.createTask).mockReset();
-    vi.mocked(api.createProject).mockReset();
     vi.mocked(api.importTicket).mockReset();
   });
 
@@ -104,32 +102,34 @@ describe('Home', () => {
     });
   });
 
-  it('creates a repository with the task under a connected GitHub owner', async () => {
+  it('creates a task under an existing project and inherits its repositories', async () => {
     const user = userEvent.setup();
-    vi.mocked(api.getGitHubCatalog).mockResolvedValue({
-      connected: true,
-      source: 'oauth',
-      repositories: [],
-      owners: [
-        { login: 'lucas', type: 'user', avatarUrl: null, role: 'owner' },
-        { login: 'acme', type: 'organization', avatarUrl: null, role: 'admin' },
-      ],
+    vi.mocked(api.listProjects).mockResolvedValue({
+      projects: [{
+        id: 'project-1',
+        userId: 'user-1',
+        name: 'Billing platform',
+        description: 'Billing work',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        repositories: [
+          { id: 'repo-1', userId: 'user-1', projectId: 'project-1', repository: 'acme/billing-platform', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+        ],
+      }],
     });
-    vi.mocked(api.createTask).mockResolvedValue({ task: makeTask({ repos: ['acme/billing-service'] }) });
+    vi.mocked(api.createTask).mockResolvedValue({ task: makeTask({ projectId: 'project-1', repos: ['acme/billing-platform'] }) });
     renderWithProviders(<Home />);
 
     await user.type(await screen.findByLabelText('Task description'), 'Build the billing service');
-    await user.click(await screen.findByRole('button', { name: 'New repo' }));
-    await user.selectOptions(screen.getByLabelText('Repository owner'), 'acme');
-    await user.type(screen.getByLabelText('New repository name'), 'billing-service');
+    await screen.findByText(/1 repos/);
     await user.click(screen.getByRole('button', { name: /Create task/ }));
 
     await waitFor(() => expect(api.createTask).toHaveBeenCalledWith({
       title: 'Build the billing service',
       description: 'Build the billing service',
-      repos: [],
+      projectId: 'project-1',
+      repos: ['acme/billing-platform'],
       workflowId: 'wf-default',
-      newRepository: { owner: 'acme', name: 'billing-service', visibility: 'private' },
     }));
   });
 });

@@ -26,8 +26,15 @@ export const projectRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx
 
   app.post('/api/projects', async (request, reply) => {
     const input = validate(createProjectSchema, request.body);
-    const created = await createRepositories(request.user!.id, input.newRepositories);
-    const repositories = [...new Set([...input.repos, ...created])];
+    const created = await ctx.github.createRepository(request.user!.id, {
+      ...input.repository,
+      description: input.repository.description ?? input.description,
+    });
+    await ctx.github.setRepositoryReadme(request.user!.id, created.fullName, {
+      title: input.name,
+      description: input.description,
+    });
+    const repositories = [created.fullName];
     const project = await repo.createProject(request.user!.id, { name: input.name, description: input.description, repositories });
     return reply.code(201).send({ project });
   });

@@ -77,6 +77,34 @@ export class GitHubConnectionService {
     return mapRepository(repository);
   }
 
+  async setRepositoryReadme(userId: string, fullName: string, input: { title: string; description: string }): Promise<void> {
+    const secret = await this.githubOAuth.credential(userId);
+    if (!secret) throw badRequest('Connect GitHub before updating a repository');
+
+    const [owner, name] = fullName.split('/');
+    if (!owner || !name) throw serviceUnavailable('GitHub returned an invalid repository name');
+
+    const path = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/contents/README.md`;
+    let sha: string | undefined;
+    try {
+      const readme = await this.requestObject(secret.token, `${path}?ref=main`);
+      sha = stringField(readme, 'sha') || undefined;
+    } catch (error) {
+      if (!(error instanceof HttpError) || error.statusCode !== 404) throw error;
+    }
+
+    const content = [`# ${input.title}`, input.description.trim()].filter(Boolean).join('\n\n') + '\n';
+    await this.requestObject(secret.token, path, {
+      method: 'PUT',
+      body: {
+        message: 'Initialize project README',
+        content: Buffer.from(content, 'utf8').toString('base64'),
+        branch: 'main',
+        ...(sha ? { sha } : {}),
+      },
+    });
+  }
+
   private async listRepositories(token: string): Promise<GitHubRepository[]> {
     const repositories: GitHubRepository[] = [];
     for (let page = 1; page <= 5; page++) {
@@ -128,7 +156,7 @@ export class GitHubConnectionService {
   private async requestObject(
     token: string,
     path: string,
-    options: { method?: 'GET' | 'POST'; body?: JsonObject } = {},
+    options: { method?: 'GET' | 'POST' | 'PUT'; body?: JsonObject } = {},
   ): Promise<JsonObject> {
     const value = await this.request(token, path, options);
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw serviceUnavailable('GitHub returned an unexpected response');
@@ -146,7 +174,7 @@ export class GitHubConnectionService {
   private async request(
     token: string,
     path: string,
-    options: { method?: 'GET' | 'POST'; body?: JsonObject } = {},
+    options: { method?: 'GET' | 'POST' | 'PUT'; body?: JsonObject } = {},
   ): Promise<unknown> {
     const response = await this.fetchImpl(`${API}${path}`, {
       method: options.method ?? 'GET',

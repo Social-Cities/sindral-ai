@@ -78,9 +78,9 @@ final class APIClient {
         let response: DiffResponse = try await request("api/tasks/\(taskId)/diff\(query)"); return response.files
     }
     func projects() async throws -> [Project] { let response: ProjectsResponse = try await request("api/projects"); return response.projects }
-    func createProject(name: String, description: String, repos: [String], newRepositories: [NewGitHubRepository]) async throws -> Project {
-        struct Body: Encodable { let name: String; let description: String; let repos: [String]; let newRepositories: [NewGitHubRepository] }
-        let response: ProjectResponse = try await request("api/projects", method: "POST", body: Body(name: name, description: description, repos: repos, newRepositories: newRepositories)); return response.project
+    func createProject(name: String, description: String, repository: NewGitHubRepository) async throws -> Project {
+        struct Body: Encodable { let name: String; let description: String; let repository: NewGitHubRepository }
+        let response: ProjectResponse = try await request("api/projects", method: "POST", body: Body(name: name, description: description, repository: repository)); return response.project
     }
     func workflows() async throws -> [Workflow] { let response: WorkflowsResponse = try await request("api/workflows"); return response.workflows }
     func createWorkflow(name: String, cloneFrom: String?) async throws -> Workflow {

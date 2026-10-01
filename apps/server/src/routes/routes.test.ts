@@ -123,19 +123,61 @@ describe('tasks API', () => {
   });
 
   it('creates tasks under projects and inherits the project repositories', async () => {
+    await ctx.app.ctx.secrets.set(ctx.userA, 'github', 'github-oauth-token', { source: 'oauth' });
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === 'https://api.github.com/user') return json({ login: 'lucas' });
+      if (url === 'https://api.github.com/orgs/acme/repos') {
+        expect(JSON.parse(String(init?.body))).toEqual({
+          name: 'billing-platform',
+          description: 'Billing work',
+          private: true,
+          auto_init: true,
+        });
+        return json({
+          id: 43,
+          name: 'billing-platform',
+          full_name: 'acme/billing-platform',
+          private: true,
+          html_url: 'https://github.com/acme/billing-platform',
+          default_branch: 'master',
+          owner: { login: 'acme' },
+        }, 201);
+      }
+      if (url === 'https://api.github.com/repos/acme/billing-platform/branches/master/rename') {
+        expect(JSON.parse(String(init?.body))).toEqual({ new_name: 'main' });
+        return json({ name: 'main' }, 201);
+      }
+      if (url === 'https://api.github.com/repos/acme/billing-platform/contents/README.md?ref=main') return json({ sha: 'readme-sha' });
+      if (url === 'https://api.github.com/repos/acme/billing-platform/contents/README.md') {
+        expect(JSON.parse(String(init?.body))).toEqual({
+          message: 'Initialize project README',
+          content: Buffer.from('# Billing platform\n\nBilling work\n', 'utf8').toString('base64'),
+          branch: 'main',
+          sha: 'readme-sha',
+        });
+        return json({ content: { sha: 'next-readme-sha' } });
+      }
+      return json({ message: 'not found' }, 404);
+    });
+
     const createdProject = await ctx.app.inject({
       method: 'POST',
       url: '/api/projects',
       headers: asA(),
-      payload: { name: 'Billing platform', description: 'Billing work', repos: ['acme/billing-api', 'acme/billing-web'] },
+      payload: {
+        name: 'Billing platform',
+        description: 'Billing work',
+        repository: { owner: 'acme', name: 'billing-platform', visibility: 'private' },
+      },
     });
     expect(createdProject.statusCode).toBe(201);
     const project = createdProject.json<{ project: Project }>().project;
-    expect(project.repositories.map((repo) => repo.repository)).toEqual(['acme/billing-api', 'acme/billing-web']);
+    expect(project.repositories.map((repo) => repo.repository)).toEqual(['acme/billing-platform']);
 
     const task = await createTask(asA(), { title: 'Add invoices', projectId: project.id });
-    expect(task).toMatchObject({ projectId: project.id, repos: ['acme/billing-api', 'acme/billing-web'] });
-    expect((await ctx.repo.listTaskRepositories(ctx.userA, task.id)).map((repo) => repo.repository)).toEqual(['acme/billing-api', 'acme/billing-web']);
+    expect(task).toMatchObject({ projectId: project.id, repos: ['acme/billing-platform'] });
+    expect((await ctx.repo.listTaskRepositories(ctx.userA, task.id)).map((repo) => repo.repository)).toEqual(['acme/billing-platform']);
 
     const filtered = await ctx.app.inject({ method: 'GET', url: `/api/tasks?projectId=${project.id}`, headers: asA() });
     expect(filtered.json<{ tasks: Task[] }>().tasks.map((item) => item.id)).toEqual([task.id]);
