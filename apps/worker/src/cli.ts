@@ -24,6 +24,7 @@ const CONFIG_KEYS = [
   'SINDRAL_CLAUDE_BIN',
   'SINDRAL_CODEX_BIN',
   'SINDRAL_GH_BIN',
+  'SINDRAL_EXTRA_PATH',
   'SINDRAL_JOB_TIMEOUT_MINUTES',
   'SINDRAL_RETENTION_DAYS',
   'SINDRAL_ALLOW_PAT_MERGE',
@@ -42,6 +43,12 @@ Usage:
 Configuration comes from environment variables (SINDRAL_*), a .env file in the
 current directory or the repository root, or <workdir>/config.json. Environment
 variables take precedence.`;
+
+export function applyExtraPath(extraPath: string | undefined, env: NodeJS.ProcessEnv = process.env): void {
+  if (!extraPath) return;
+  const current = env['PATH'] ?? '';
+  env['PATH'] = current ? `${extraPath}${path.delimiter}${current}` : extraPath;
+}
 
 function findRepoRoot(start: string): string | null {
   let dir = start;
@@ -213,6 +220,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     }
     throw err;
   }
+  applyExtraPath(config.extraPath);
   const logger = createLogger(config.logLevel);
   return command === 'clean' ? clean(config, logger, commandArgs.includes('--dry-run')) : start(config, logger);
 }

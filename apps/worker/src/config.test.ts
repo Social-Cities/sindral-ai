@@ -16,6 +16,7 @@ describe('loadConfig', () => {
     expect(config.claudeBin).toBe('claude');
     expect(config.codexBin).toBe('codex');
     expect(config.ghBin).toBe('gh');
+    expect(config.extraPath).toBeUndefined();
     expect(config.jobTimeoutMs).toBe(90 * 60_000);
     expect(config.retentionMs).toBe(7 * 24 * 60 * 60_000);
     expect(config.allowPatMerge).toBe(false);
@@ -38,7 +39,7 @@ describe('loadConfig', () => {
 
   it('parses numeric and named settings', () => {
     const config = loadConfig(
-      { ...base, SINDRAL_CONCURRENCY: '4', SINDRAL_JOB_TIMEOUT_MINUTES: '15', SINDRAL_RETENTION_DAYS: '30', SINDRAL_WORKER_NAME: 'mac', LOG_LEVEL: 'debug', SINDRAL_CLAUDE_BIN: '/opt/claude', SINDRAL_ALLOW_PAT_MERGE: 'true' },
+      { ...base, SINDRAL_CONCURRENCY: '4', SINDRAL_JOB_TIMEOUT_MINUTES: '15', SINDRAL_RETENTION_DAYS: '30', SINDRAL_WORKER_NAME: 'mac', LOG_LEVEL: 'debug', SINDRAL_CLAUDE_BIN: '/opt/claude', SINDRAL_EXTRA_PATH: '/opt/homebrew/bin:/usr/local/bin', SINDRAL_ALLOW_PAT_MERGE: 'true' },
       opts,
     );
     expect(config.concurrency).toBe(4);
@@ -47,6 +48,7 @@ describe('loadConfig', () => {
     expect(config.workerName).toBe('mac');
     expect(config.logLevel).toBe('debug');
     expect(config.claudeBin).toBe('/opt/claude');
+    expect(config.extraPath).toBe('/opt/homebrew/bin:/usr/local/bin');
     expect(config.allowPatMerge).toBe(true);
   });
 

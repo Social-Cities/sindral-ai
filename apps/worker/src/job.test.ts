@@ -178,7 +178,8 @@ describe('runJob', () => {
     const d = dispatch({ payload: agentPayload({ repos: [] }) });
     const { deps: jobDeps, api } = deps(missing, docWorkspace());
     await runJob(d, jobDeps, new AbortController().signal);
-    expect(api.failed[0]).toMatch(/Engine "claude".*not installed/);
+    expect(api.failed[0]).toMatch(/Engine "claude".*cannot find or run/);
+    expect(api.failed[0]).toContain('SINDRAL_EXTRA_PATH');
 
     const engine = fakeEngine(async () => ({}));
     const d2 = dispatch({ payload: agentPayload({ repos: [], step: step({ output: undefined }) }) });

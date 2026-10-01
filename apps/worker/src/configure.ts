@@ -184,7 +184,7 @@ export async function configureWorker(initial: Record<string, string | undefined
     SINDRAL_WORKER_NAME: workerName,
     SINDRAL_CODEX_HOME: codexHome,
   };
-  for (const key of ['SINDRAL_CONCURRENCY', 'SINDRAL_CLAUDE_BIN', 'SINDRAL_CODEX_BIN', 'SINDRAL_GH_BIN', 'SINDRAL_JOB_TIMEOUT_MINUTES', 'SINDRAL_RETENTION_DAYS', 'SINDRAL_ALLOW_PAT_MERGE', 'LOG_LEVEL']) {
+  for (const key of ['SINDRAL_CONCURRENCY', 'SINDRAL_CLAUDE_BIN', 'SINDRAL_CODEX_BIN', 'SINDRAL_GH_BIN', 'SINDRAL_EXTRA_PATH', 'SINDRAL_JOB_TIMEOUT_MINUTES', 'SINDRAL_RETENTION_DAYS', 'SINDRAL_ALLOW_PAT_MERGE', 'LOG_LEVEL']) {
     const value = initial[key]?.trim();
     if (value) values[key] = value;
   }

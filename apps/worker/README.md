@@ -24,6 +24,7 @@ Create a worker key in the Sindral UI (Settings → Worker keys) and put it in t
 | `SINDRAL_CONCURRENCY` | `2` | Jobs run in parallel (1–8); never two jobs of the same task |
 | `SINDRAL_WORKER_NAME` | hostname | Display name in the UI |
 | `SINDRAL_CLAUDE_BIN` / `SINDRAL_CODEX_BIN` / `SINDRAL_GH_BIN` | `claude` / `codex` / `gh` | Binaries to use |
+| `SINDRAL_EXTRA_PATH` | — | Extra PATH entries prepended before probing and running `claude`, `codex`, and `gh`; useful for supervisor-launched workers that do not load shell profiles |
 | `SINDRAL_JOB_TIMEOUT_MINUTES` | `90` | Hard limit per agent run |
 | `SINDRAL_RETENTION_DAYS` | `7` | Keep inactive worktrees, temp files, results, outputs, and logs for this many days |
 | `SINDRAL_ALLOW_PAT_MERGE` | `false` | Allow internal/local workers to merge using the configured PAT; keep disabled in production |
@@ -37,6 +38,12 @@ pnpm --filter @sindral/worker start    # node dist/cli.js start
 sindral-worker clean --dry-run         # preview inactive retained files eligible for cleanup
 sindral-worker clean                   # remove eligible files after server lease/worker checks
 ```
+
+If a CLI works over SSH but the portal reports it as missing, the worker daemon is
+usually running with a different PATH than your interactive shell. Set
+`SINDRAL_EXTRA_PATH` to the directories that contain the CLIs and their runtime,
+or set the relevant `SINDRAL_*_BIN` value to an absolute path, then restart the
+worker.
 
 `SIGINT`/`SIGTERM` stop claiming new work, keep renewing active job leases, and wait up to `SINDRAL_JOB_TIMEOUT_MINUTES` for running jobs to finish. Jobs still running at that deadline are killed and reported as failed ("worker shutting down"). Claimed jobs that have not started are released immediately.
 

@@ -363,6 +363,7 @@ SINDRAL_WORKER_KEY=sk_sindral_...
 SINDRAL_WORKDIR=/absolute/path/to/sindral-worker-data
 SINDRAL_CONCURRENCY=2
 SINDRAL_WORKER_NAME=build-mac-01
+SINDRAL_EXTRA_PATH=/opt/homebrew/bin:/usr/local/bin
 SINDRAL_RETENTION_DAYS=7
 SINDRAL_ALLOW_PAT_MERGE=false
 LOG_LEVEL=info
@@ -377,6 +378,11 @@ pnpm --filter @sindral/worker start
 ```
 
 Run it under a process supervisor appropriate to the host (for example, systemd or launchd), with automatic restart and logs sent to the host's protected logging system. The worker and server negotiate a protocol version; HTTP 426 means they must be upgraded together.
+
+Supervisors often do not load the same shell startup files as SSH sessions. If
+`codex`, `claude`, or `gh` works over SSH but the worker reports it missing, add
+the install directories to `SINDRAL_EXTRA_PATH` or set `SINDRAL_CODEX_BIN`,
+`SINDRAL_CLAUDE_BIN`, or `SINDRAL_GH_BIN` to absolute paths.
 
 ## 8. Safe rollout
 

@@ -143,7 +143,11 @@ async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx:
   const caps = await engine.probe();
   if (!caps.available) {
     const bin = engineName === 'claude' ? config.claudeBin : config.codexBin;
-    throw new Error(`Engine "${engineName}" is required by step "${step.label}" but the binary "${bin}" is not installed on worker ${config.workerName}`);
+    const envVar = engineName === 'claude' ? 'SINDRAL_CLAUDE_BIN' : 'SINDRAL_CODEX_BIN';
+    throw new Error(
+      `Engine "${engineName}" is required by step "${step.label}" but the worker process cannot find or run "${bin}" on worker ${config.workerName}. ` +
+        `If it works in an interactive SSH shell, configure the worker service with the same PATH, set SINDRAL_EXTRA_PATH, or set ${envVar} to the absolute binary path.`,
+    );
   }
 
   const taskKey = payload.context.task_key || job.taskId;
