@@ -2,11 +2,17 @@ import type { WorkflowStep } from '@sindral/shared';
 import { run, stream } from '../proc.js';
 import { extractVersion, OutputTail, type Engine, type EngineCapabilities, type EngineRunOptions, type EngineRunResult } from './types.js';
 
+export function normalizeCodexModel(model: string | undefined): string | undefined {
+  if (model === 'gpt-5-codex') return 'gpt-5';
+  return model;
+}
+
 export function buildCodexArgs(step: WorkflowStep, writableDirs: string[] = []): string[] {
   const permissions = new Set(step.permissions ?? []);
   const write = permissions.has('write');
   const args = ['exec'];
-  if (step.model) args.push('--model', step.model);
+  const model = normalizeCodexModel(step.model);
+  if (model) args.push('--model', model);
   args.push('--sandbox', write ? 'workspace-write' : 'read-only');
   if (write) {
     args.push('--full-auto');

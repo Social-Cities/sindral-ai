@@ -377,7 +377,7 @@ private struct StepConfigPanel: View {
     static let outputs = ["plan", "pr", "review", "verdict", "document", "troubleshoot", "conflict-resolution", "merge"]
     static let tools = ["read_file", "write_file", "run_command", "search_codebase", "list_directory", "create_pr", "web_search"]
     static let permissions = ["read", "write", "execute"]
-    static let models = ["claude": ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5", "claude-fable-5-1"], "codex": ["gpt-5-codex", "gpt-5", "o4-mini"]]
+    static let models = ["claude": ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5", "claude-fable-5-1"], "codex": ["gpt-5", "o4-mini"]]
 
     var body: some View {
         VStack(spacing: 0) {

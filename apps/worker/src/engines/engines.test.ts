@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { step } from '../test/fixtures.js';
 import { buildClaudeArgs, claudeAllowedTools, formatClaudeLine, parseClaudeLine } from './claude.js';
-import { buildCodexArgs, formatCodexLine, parseCodexLine } from './codex.js';
+import { buildCodexArgs, formatCodexLine, normalizeCodexModel, parseCodexLine } from './codex.js';
 import { buildAgentEnv } from './env.js';
 import { extractVersion, OutputTail } from './types.js';
 
@@ -105,6 +105,12 @@ describe('codex args', () => {
     expect(args).toContain('--full-auto');
     expect(args).toContain('--json');
     expect(args.at(-1)).toBe('-');
+  });
+
+  it('maps the retired Codex API model to the ChatGPT-account model', () => {
+    expect(normalizeCodexModel('gpt-5-codex')).toBe('gpt-5');
+    const args = buildCodexArgs(step({ model: 'gpt-5-codex' }));
+    expect(args[args.indexOf('--model') + 1]).toBe('gpt-5');
   });
 
   it('uses read-only sandbox without write permission', () => {

@@ -310,7 +310,7 @@ export const BUNDLED_WORKFLOWS: Workflow[] = [FULL_SDLC_WORKFLOW, PLANNING_ONLY_
 /** Models offered in the workflow editor. Keep in sync with the worker's engine adapters. */
 export const MODEL_OPTIONS: Record<'claude' | 'codex', string[]> = {
   claude: ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5', 'claude-fable-5-1'],
-  codex: ['gpt-5-codex', 'gpt-5', 'o4-mini'],
+  codex: ['gpt-5', 'o4-mini'],
 };
 
 export const ALL_TOOLS = ['read_file', 'write_file', 'run_command', 'search_codebase', 'list_directory', 'create_pr', 'web_search'] as const;
