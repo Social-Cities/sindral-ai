@@ -125,6 +125,14 @@ export function runTaskAction(id: string, event: string, expectedVersion: number
   });
 }
 
+export function repinTaskWorkflow(id: string, expectedVersion: number, idempotencyKey = crypto.randomUUID()) {
+  return apiFetch<ResponseOf<'POST /api/tasks/:id/workflow-pin'>>(`/api/tasks/${encodeURIComponent(id)}/workflow-pin`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    json: { expectedVersion },
+  });
+}
+
 export function sendMessage(id: string, content: string) {
   return apiFetch<ResponseOf<'POST /api/tasks/:id/messages'>>(`/api/tasks/${encodeURIComponent(id)}/messages`, {
     method: 'POST',

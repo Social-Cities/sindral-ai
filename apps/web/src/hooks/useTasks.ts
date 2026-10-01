@@ -10,6 +10,7 @@ import {
   getTaskDiff,
   getTaskJobs,
   listTasks,
+  repinTaskWorkflow,
   runTaskAction,
   sendMessage,
   updateTask,
@@ -107,6 +108,25 @@ export function useTaskAction(taskId: string, workflow: Workflow | null) {
     },
     onError: (_err, _event, ctx) => {
       if (ctx?.previous) qc.setQueryData(key, ctx.previous);
+    },
+    onSuccess: ({ task }) => {
+      qc.setQueryData<TaskWithRelations>(key, (prev) => (prev ? { ...prev, ...task } : prev));
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: key });
+      void qc.invalidateQueries({ queryKey: queryKeys.tasks });
+    },
+  });
+}
+
+export function useRepinTaskWorkflow(taskId: string) {
+  const qc = useQueryClient();
+  const key = queryKeys.task(taskId);
+  return useMutation({
+    mutationFn: () => {
+      const task = qc.getQueryData<TaskWithRelations>(key);
+      if (!task) throw new ApiError(409, 'CONFLICT', 'Task data is stale; refresh and try again');
+      return repinTaskWorkflow(taskId, task.version);
     },
     onSuccess: ({ task }) => {
       qc.setQueryData<TaskWithRelations>(key, (prev) => (prev ? { ...prev, ...task } : prev));

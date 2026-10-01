@@ -539,6 +539,25 @@ describe('failure handling', () => {
     await expect(orch().applyUserEvent(userId, task.id, 'approve')).rejects.toBeInstanceOf(TransitionError);
   });
 
+  it('can repin a failed task to the latest workflow before retrying', async () => {
+    let task = await failedTask();
+    const live = await ctx.app.ctx.workflows.get(userId, task.workflowId!);
+    await ctx.app.ctx.workflows.update(userId, live!.id, {
+      ...live!,
+      steps: live!.steps.map((step) => (step.id === 'implement' ? { ...step, engine: 'codex', model: 'gpt-6.1-sol' } : step)),
+    });
+
+    const previousVersion = task.version;
+    task = await orch().repinWorkflow(userId, task.id, previousVersion, 'repin-latest-workflow');
+    expect(task.version).toBe(previousVersion + 1);
+    expect(task.pinnedWorkflow?.steps.find((step) => step.id === 'implement')).toMatchObject({ engine: 'codex', model: 'gpt-6.1-sol' });
+    expect((await ctx.repo.listEvents(userId, task.id)).at(-1)?.type).toBe('workflow-repinned');
+
+    task = await orch().applyUserEvent(userId, task.id, 'retry');
+    expect(task.state).toBe('implement');
+    expect(agentPayload((await queuedJobs(task.id))[0]!).step).toMatchObject({ id: 'implement', engine: 'codex', model: 'gpt-6.1-sol' });
+  });
+
   it('rejects results whose kind does not match the step output', async () => {
     const task = await newTask();
     await orch().applyUserEvent(userId, task.id, 'start');

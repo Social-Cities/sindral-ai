@@ -260,6 +260,49 @@ export class Orchestrator {
     return live ? toWorkflow(live) : null;
   }
 
+  async repinWorkflow(userId: string, taskId: string, expectedVersion: number, idempotencyKey: string): Promise<Task> {
+    const task = await this.getTask(userId, taskId);
+    if (TERMINAL_STATES.has(task.state)) throw conflict('Closed tasks cannot be moved to a newer workflow version');
+    if (!task.pinnedWorkflow) throw conflict('This task is not pinned yet');
+    if (!task.workflowId) throw conflict('This task no longer has a live workflow to pin');
+    const activeJob = (await this.repo.listJobsForTask(userId, task.id)).find((job) => ['queued', 'claimed', 'running', 'applying'].includes(job.status));
+    if (activeJob) throw conflict('Task has active work; wait for it to finish before updating its pinned workflow');
+    const live = await this.workflows.get(userId, task.workflowId);
+    if (!live) throw conflict('The live workflow for this task no longer exists');
+    const pinnedWorkflow = snapshotWorkflow(toWorkflow(live));
+    const detail = { actor: 'user', workflowId: live.id, workflowName: live.name };
+    const requestHash = transitionRequestHash(userId, task.id, expectedVersion, 'workflow-repinned', 'user', detail);
+    const replay = await this.repo.getTaskTransitionReplay(userId, idempotencyKey, requestHash);
+    if (replay) return replay.task;
+    if (JSON.stringify(pinnedWorkflow) === JSON.stringify(task.pinnedWorkflow)) {
+      if (task.version !== expectedVersion) throw conflict(`Task version ${expectedVersion} is stale; current version is ${task.version}`);
+      return task;
+    }
+
+    const applied = await this.repo.applyTaskTransition(userId, {
+      taskId: task.id,
+      expectedVersion,
+      idempotencyKey,
+      requestHash,
+      patch: {
+        state: task.state,
+        currentStepId: task.currentStepId,
+        failedStepId: task.failedStepId,
+        pinnedWorkflow,
+      },
+      event: {
+        taskId: task.id,
+        type: 'workflow-repinned',
+        fromState: task.state,
+        toState: task.state,
+        stepId: task.currentStepId,
+        detail,
+      },
+    });
+    this.hub.publish(userId, { type: 'task.updated', taskId: task.id });
+    return applied.task;
+  }
+
   // ---------------------------------------------------------------- events & messages
 
   async applyUserEvent(userId: string, taskId: string, event: string, expectedVersion?: number, idempotencyKey?: string): Promise<Task> {

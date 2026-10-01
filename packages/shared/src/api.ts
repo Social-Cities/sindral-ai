@@ -38,6 +38,7 @@ export interface ApiRoutes {
   'PATCH /api/tasks/:id': { response: { task: Task } };
   'DELETE /api/tasks/:id': { response: { ok: true } };
   'POST /api/tasks/:id/actions': { response: { task: Task } };
+  'POST /api/tasks/:id/workflow-pin': { response: { task: Task } };
   'GET /api/tasks/:id/messages': { response: { messages: Message[] } };
   'POST /api/tasks/:id/messages': { response: { message: Message; task: Task } };
   'GET /api/tasks/:id/events': { response: { events: TaskEvent[] } };

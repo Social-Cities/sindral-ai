@@ -10,7 +10,7 @@ import { ExternalLink } from '@/components/ExternalLink';
 import { Modal } from '@/components/Modal';
 import { PageLoader, Spinner } from '@/components/Spinner';
 import { StatusBadge } from '@/components/StatusBadge';
-import { useSendMessage, useTask, useTaskAction } from '@/hooks/useTasks';
+import { useRepinTaskWorkflow, useSendMessage, useTask, useTaskAction } from '@/hooks/useTasks';
 import { useWorkflows } from '@/hooks/useWorkflows';
 import { ApiError } from '@/lib/api';
 import { formatDate } from '@/lib/format';
@@ -62,6 +62,22 @@ function errorMessage(err: unknown): string {
   return 'Something went wrong';
 }
 
+function workflowSnapshot(workflow: Workflow): Workflow {
+  return {
+    id: workflow.id,
+    name: workflow.name,
+    ...(workflow.description !== undefined ? { description: workflow.description } : {}),
+    entryStepId: workflow.entryStepId,
+    steps: workflow.steps,
+    edges: workflow.edges,
+    ...(workflow.troubleshootStep !== undefined ? { troubleshootStep: workflow.troubleshootStep } : {}),
+  };
+}
+
+function workflowsMatch(a: Workflow, b: Workflow): boolean {
+  return JSON.stringify(workflowSnapshot(a)) === JSON.stringify(workflowSnapshot(b));
+}
+
 export function TaskDetail() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
@@ -73,8 +89,11 @@ export function TaskDetail() {
   const task = taskQuery.data ?? null;
   const workflows = useMemo(() => workflowsQuery.data ?? [], [workflowsQuery.data]);
   const workflow: Workflow | null = useMemo(() => (task ? resolveWorkflow(task, workflows) : null), [task, workflows]);
+  const liveWorkflow: Workflow | null = useMemo(() => (task?.workflowId ? workflows.find((wf) => wf.id === task.workflowId) ?? null : null), [task?.workflowId, workflows]);
+  const pinnedWorkflowOutdated = Boolean(task?.pinnedWorkflow && liveWorkflow && !workflowsMatch(task.pinnedWorkflow, liveWorkflow));
 
   const action = useTaskAction(id ?? '', workflow);
+  const repinWorkflow = useRepinTaskWorkflow(id ?? '');
   const send = useSendMessage(id ?? '', workflow);
 
   if (taskQuery.isLoading) return <PageLoader label="Loading task…" />;
@@ -98,7 +117,7 @@ export function TaskDetail() {
   const step = workflow ? getStep(workflow, task.currentStepId ?? workflow.entryStepId) : null;
   const tabs: Tab[] = ['summary', 'plan', 'chat', 'code', 'steps', 'artifacts', ...(task.subtasks.length > 0 ? (['subtasks'] as Tab[]) : [])];
   const userInitial = (displayNameFor(user, 'U').charAt(0) || 'U').toUpperCase();
-  const actionError = action.error ? errorMessage(action.error) : null;
+  const actionError = action.error ? errorMessage(action.error) : repinWorkflow.error ? errorMessage(repinWorkflow.error) : null;
   const canApprovePlan = actions.some((item) => item.event === 'approve');
   const approvePlan = () => action.mutate('approve');
   const runAction = (event: string) => {
@@ -142,6 +161,17 @@ export function TaskDetail() {
             <ExternalLink href={task.prUrl} className="px-3 py-1.5 text-xs font-mono rounded-md transition-all bg-secondary border border-border text-accent hover:border-border-strong">
               View PR ↗
             </ExternalLink>
+          )}
+          {pinnedWorkflowOutdated && (
+            <Button
+              variant="ghost"
+              onClick={() => repinWorkflow.mutate()}
+              loading={repinWorkflow.isPending}
+              disabled={agentActive || repinWorkflow.isPending}
+              title={agentActive ? 'Wait for the running agent before updating the pinned workflow' : 'Update this task to the latest saved workflow version'}
+            >
+              Use latest workflow
+            </Button>
           )}
           {actions.filter((a) => a.event !== 'approve' || (tab !== 'summary' && tab !== 'plan')).map((a) => (
             <Button key={a.event} variant={variantForEvent(a.event)} onClick={() => runAction(a.event)} disabled={action.isPending} data-event={a.event}>

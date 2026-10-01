@@ -98,6 +98,10 @@ export const taskActionSchema = z.object({
   expectedVersion: z.number().int().nonnegative(),
 });
 
+export const repinWorkflowSchema = z.object({
+  expectedVersion: z.number().int().nonnegative(),
+});
+
 export const sendMessageSchema = z.object({
   content: z.string().trim().min(1).max(20_000),
 });
@@ -271,6 +275,7 @@ export type CreateGitHubRepositoryInput = z.infer<typeof createGitHubRepositoryS
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;
 export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
 export type UpdateTaskInput = z.infer<typeof updateTaskSchema>;
+export type RepinWorkflowInput = z.infer<typeof repinWorkflowSchema>;
 export type CreateWorkflowInput = z.infer<typeof createWorkflowSchema>;
 export type UpdateWorkflowInput = z.infer<typeof updateWorkflowSchema>;
 export type ListTasksQuery = z.infer<typeof listTasksQuerySchema>;

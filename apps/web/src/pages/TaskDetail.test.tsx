@@ -15,6 +15,7 @@ vi.mock('@/lib/api', async (importOriginal) => {
     getTask: vi.fn(),
     listWorkflows: vi.fn(),
     runTaskAction: vi.fn(),
+    repinTaskWorkflow: vi.fn(),
     sendMessage: vi.fn(),
     getTaskJobs: vi.fn().mockResolvedValue({ jobs: [] }),
     getJobLogs: vi.fn().mockResolvedValue({ logs: [] }),
@@ -22,15 +23,16 @@ vi.mock('@/lib/api', async (importOriginal) => {
   };
 });
 
-function setup(task: TaskWithRelations) {
+function setup(task: TaskWithRelations, workflows = [workflowRecord()]) {
   vi.mocked(api.getTask).mockResolvedValue({ task });
-  vi.mocked(api.listWorkflows).mockResolvedValue({ workflows: [workflowRecord()] });
+  vi.mocked(api.listWorkflows).mockResolvedValue({ workflows });
   return renderWithProviders(<TaskDetail />, { route: `/tasks/${task.id}`, path: '/tasks/:id' });
 }
 
 describe('TaskDetail', () => {
   beforeEach(() => {
     vi.mocked(api.runTaskAction).mockReset();
+    vi.mocked(api.repinTaskWorkflow).mockReset();
     vi.mocked(api.sendMessage).mockReset();
   });
 
@@ -110,6 +112,24 @@ describe('TaskDetail', () => {
     expect(screen.getByRole('button', { name: 'Retry step' })).toBeInTheDocument();
     expect(screen.getByText('Permission denied: .github/workflows')).toBeInTheDocument();
     expect(screen.getByTestId('pipeline-offpath')).toHaveTextContent('Failed');
+  });
+
+  it('offers to update an outdated pinned workflow snapshot', async () => {
+    const user = userEvent.setup();
+    const liveWorkflow = workflowRecord({ ...FULL_SDLC_WORKFLOW, name: 'Full SDLC v2' });
+    const task = makeTaskWithRelations({
+      id: 'repin-me',
+      version: 7,
+      state: 'failure',
+      currentStepId: 'implement',
+      failedStepId: 'implement',
+      pinnedWorkflow: snapshotWorkflow(FULL_SDLC_WORKFLOW),
+    });
+    vi.mocked(api.repinTaskWorkflow).mockResolvedValue({ task: { ...task, pinnedWorkflow: snapshotWorkflow(liveWorkflow), version: 8 } });
+    setup(task, [liveWorkflow]);
+
+    await user.click(await screen.findByRole('button', { name: 'Use latest workflow' }));
+    expect(api.repinTaskWorkflow).toHaveBeenCalledWith('repin-me', 7);
   });
 
   it('offers Accept & merge and a View PR link on in-review', async () => {

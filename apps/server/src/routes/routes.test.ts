@@ -83,6 +83,28 @@ describe('tasks API', () => {
     expect((await ctx.repo.getTask(ctx.userA, task.id))?.title).toBe('Task');
   });
 
+  it('updates a task pinned workflow to the latest live workflow version', async () => {
+    const task = await createTask();
+    await taskAction(task.id, 'start');
+    await completeNext(ctx, ctx.userA, plan());
+    const started = (await ctx.repo.getTask(ctx.userA, task.id))!;
+    const live = await ctx.app.ctx.workflows.get(ctx.userA, started.workflowId!);
+    await ctx.app.ctx.workflows.update(ctx.userA, live!.id, { ...live!, name: 'Full SDLC latest' });
+
+    const res = await ctx.app.inject({
+      method: 'POST',
+      url: `/api/tasks/${task.id}/workflow-pin`,
+      headers: { ...asA(), 'idempotency-key': 'repin-route-test-1' },
+      payload: { expectedVersion: started.version },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const repinned = res.json<{ task: Task }>().task;
+    expect(repinned.version).toBe(started.version + 1);
+    expect(repinned.pinnedWorkflow?.name).toBe('Full SDLC latest');
+    expect((await ctx.repo.listEvents(ctx.userA, task.id)).at(-1)?.type).toBe('workflow-repinned');
+  });
+
   it('creates and initializes a GitHub repository before attaching it to a task', async () => {
     await ctx.app.ctx.secrets.set(ctx.userA, 'github', 'github-oauth-token', { source: 'oauth' });
     fetchMock.mockImplementation(async (input, init) => {
