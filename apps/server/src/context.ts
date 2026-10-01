@@ -11,6 +11,7 @@ import type { TicketService } from './services/tickets.js';
 import type { WorkflowService } from './services/workflows.js';
 import type { GitHubConnectionService } from './services/githubConnection.js';
 import type { GitHubOAuthService } from './services/githubOAuth.js';
+import type { NotificationSink } from './services/notifications.js';
 
 export interface ClaimOptions {
   /** How long `POST /api/worker/jobs/claim` waits for work before returning an empty list. */
@@ -32,6 +33,7 @@ export interface AppContext {
   tickets: TicketService;
   github: GitHubConnectionService;
   githubOAuth: GitHubOAuthService;
+  notifications: NotificationSink;
   orchestrator: Orchestrator;
   claim: ClaimOptions;
   ssePingMs: number;

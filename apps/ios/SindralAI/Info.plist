@@ -44,6 +44,8 @@
 	</dict>
 	<key>SindralAPIURL</key>
 	<string>$(SINDRAL_API_URL)</string>
+	<key>SindralPushEnvironment</key>
+	<string>$(PUSH_ENVIRONMENT)</string>
 	<key>SupabaseAnonKey</key>
 	<string>$(SUPABASE_ANON_KEY)</string>
 	<key>SupabaseURL</key>

@@ -11,6 +11,9 @@ import type {
   Project,
   PullRequest,
   PullRequestStatus,
+  PushDevice,
+  PushEnvironment,
+  PushPlatform,
   SecretProvider,
   Task,
   TaskEvent,
@@ -276,6 +279,12 @@ export interface SecretUpsert {
   metadata: Record<string, unknown>;
 }
 
+export interface PushDeviceUpsert {
+  platform: PushPlatform;
+  environment: PushEnvironment;
+  token: string;
+}
+
 /**
  * Persistence boundary. Every method is scoped by the verified `userId`; the few
  * cross-user lookups are explicitly named so they stand out in review.
@@ -392,4 +401,9 @@ export interface Repository {
   listSecrets(userId: string): Promise<StoredSecret[]>;
   upsertSecret(userId: string, provider: SecretProvider, input: SecretUpsert): Promise<StoredSecret>;
   deleteSecret(userId: string, provider: SecretProvider): Promise<boolean>;
+
+  // push devices
+  upsertPushDevice(userId: string, input: PushDeviceUpsert): Promise<PushDevice>;
+  listPushDevices(userId: string): Promise<PushDevice[]>;
+  deletePushDevice(userId: string, platform: PushPlatform, environment: PushEnvironment, token: string): Promise<boolean>;
 }

@@ -21,6 +21,8 @@ describe('config', () => {
     expect(config.secretsEncryptionKey).toHaveLength(32);
     expect(config.webDistDir.endsWith('/apps/web/dist')).toBe(true);
     expect(config.githubAppInstallations).toEqual({});
+    expect(config.apnsKeyId).toBeUndefined();
+    expect(config.apnsEnvironment).toBe('sandbox');
     expect(config.githubOAuthClientId).toBeUndefined();
     expect(config.jobDispatchEnabled).toBe(true);
     expect(config.autoMergeEnabled).toBe(false);
@@ -37,6 +39,20 @@ describe('config', () => {
         GITHUB_APP_INSTALLATIONS: '{"11111111-1111-4111-8111-111111111111":456}',
       }).githubAppInstallations,
     ).toEqual({ '11111111-1111-4111-8111-111111111111': 456 });
+    expect(parseConfig({
+      ...valid,
+      APNS_KEY_ID: 'ABC123DEFG',
+      APNS_TEAM_ID: 'TEAM123456',
+      APNS_BUNDLE_ID: 'ai.sindral.app',
+      APNS_PRIVATE_KEY: '-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----',
+      APNS_ENVIRONMENT: 'production',
+    })).toMatchObject({
+      apnsKeyId: 'ABC123DEFG',
+      apnsTeamId: 'TEAM123456',
+      apnsBundleId: 'ai.sindral.app',
+      apnsPrivateKey: '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----',
+      apnsEnvironment: 'production',
+    });
   });
 
   it('fails fast with a readable message', () => {
@@ -48,6 +64,8 @@ describe('config', () => {
       expect((err as Error).message).toContain('openssl rand -hex 32');
     }
     expect(() => parseConfig({ ...valid, GITHUB_APP_ID: '1' })).toThrow(/configured together/);
+    expect(() => parseConfig({ ...valid, APNS_KEY_ID: 'key' })).toThrow(/APNS_KEY_ID/);
+    expect(() => parseConfig({ ...valid, APNS_ENVIRONMENT: 'other' })).toThrow(ConfigError);
     expect(() => parseConfig({ ...valid, GITHUB_OAUTH_CLIENT_ID: 'client' })).toThrow(/configured together/);
     expect(() => parseConfig({ ...valid, GITHUB_OAUTH_CALLBACK_URL: 'https://app.example.com/api/github/callback' })).toThrow(/requires/);
     expect(parseConfig({ ...valid, GITHUB_OAUTH_CLIENT_ID: 'client', GITHUB_OAUTH_CLIENT_SECRET: 'secret' })).toMatchObject({

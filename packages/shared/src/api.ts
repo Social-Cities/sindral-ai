@@ -15,6 +15,7 @@ import type {
   TaskWithRelations,
   TicketImport,
   GitHubCatalog,
+  PushDevice,
   Worker,
   WorkerKey,
   WorkflowRecord,
@@ -58,6 +59,8 @@ export interface ApiRoutes {
   'GET /api/settings/secrets': { response: { secrets: SecretStatus[] } };
   'PUT /api/settings/secrets': { response: { secret: SecretStatus } };
   'DELETE /api/settings/secrets/:provider': { response: { ok: true } };
+  'PUT /api/settings/push-device': { response: { device: PushDevice } };
+  'DELETE /api/settings/push-device': { response: { ok: true } };
   'GET /api/me': { response: { user: { id: string; email: string | null; displayName: string | null } } };
   'GET /api/github/catalog': { response: GitHubCatalog };
   'POST /api/github/connect': { request: { returnTo?: 'web' | 'ios' }; response: { url: string } };

@@ -2,4 +2,6 @@
 SINDRAL_API_URL = https:/$()/api.example.com
 SUPABASE_URL = https:/$()/project.supabase.co
 SUPABASE_ANON_KEY =
+APS_ENVIRONMENT = production
+PUSH_ENVIRONMENT = production
 #include? "Local.xcconfig"

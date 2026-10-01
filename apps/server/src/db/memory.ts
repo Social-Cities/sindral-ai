@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { ARTIFACT_CONTENT_TYPES, MAX_ARTIFACT_BYTES } from '@sindral/shared';
-import type { AgentResult, Artifact, Job, JobKind, Message, Project, ProjectRepository, PullRequest, SecretProvider, Task, TaskEvent, TaskRepository, Worker, WorkerKey, WorkflowRecord } from '@sindral/shared';
+import type { AgentResult, Artifact, Job, JobKind, Message, Project, ProjectRepository, PullRequest, PushDevice, PushEnvironment, PushPlatform, SecretProvider, Task, TaskEvent, TaskRepository, Worker, WorkerKey, WorkflowRecord } from '@sindral/shared';
 import type { OperationalSnapshot } from '../metrics.js';
 import {
   ConflictError,
@@ -28,6 +28,7 @@ import {
   type TaskTransitionCommand,
   type TaskTransitionResult,
   type PullRequestUpsert,
+  type PushDeviceUpsert,
   type WorkerInsert,
   type WorkerKeyInsert,
   type WorkerKeyLookup,
@@ -68,6 +69,7 @@ export class MemoryRepository implements Repository {
   private readonly workers = new Map<string, Worker>();
   private readonly workerKeys = new Map<string, WorkerKeyLookup>();
   private readonly secrets = new Map<string, StoredSecret>();
+  private readonly pushDevices = new Map<string, PushDevice>();
   private readonly transitionCommands = new Map<string, { requestHash: string; result: TaskTransitionResult }>();
   private readonly webhookDeliveries = new Map<
     string,
@@ -915,6 +917,41 @@ export class MemoryRepository implements Repository {
 
   async deleteSecret(userId: string, provider: SecretProvider): Promise<boolean> {
     return this.secrets.delete(this.secretKey(userId, provider));
+  }
+
+  private pushDeviceKey(platform: PushPlatform, environment: PushEnvironment, token: string): string {
+    return `${platform}:${environment}:${token.toLowerCase()}`;
+  }
+
+  async upsertPushDevice(userId: string, input: PushDeviceUpsert): Promise<PushDevice> {
+    const key = this.pushDeviceKey(input.platform, input.environment, input.token);
+    const existing = this.pushDevices.get(key);
+    const ts = this.now();
+    const device: PushDevice = {
+      id: existing?.id ?? randomUUID(),
+      userId,
+      platform: input.platform,
+      environment: input.environment,
+      token: input.token.toLowerCase(),
+      enabled: true,
+      createdAt: existing?.createdAt ?? ts,
+      updatedAt: ts,
+      lastRegisteredAt: ts,
+    };
+    this.pushDevices.set(key, device);
+    return clone(device);
+  }
+
+  async listPushDevices(userId: string): Promise<PushDevice[]> {
+    return [...this.pushDevices.values()].filter((device) => device.userId === userId && device.enabled).map(clone);
+  }
+
+  async deletePushDevice(userId: string, platform: PushPlatform, environment: PushEnvironment, token: string): Promise<boolean> {
+    const key = this.pushDeviceKey(platform, environment, token);
+    const existing = this.pushDevices.get(key);
+    if (!existing || existing.userId !== userId) return false;
+    this.pushDevices.delete(key);
+    return true;
   }
 
   async getOperationalSnapshot(now = new Date()): Promise<OperationalSnapshot> {

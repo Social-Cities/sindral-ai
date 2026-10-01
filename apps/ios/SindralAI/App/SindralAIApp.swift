@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct SindralAIApp: App {
+    @UIApplicationDelegateAdaptor(PushNotificationDelegate.self) private var pushDelegate
     @State private var store: AppStore?
     @State private var router = AppRouter()
     @State private var configurationError: String?
@@ -53,7 +54,13 @@ private struct RootView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.background.ignoresSafeArea())
-        .task(id: session.session?.accessToken) { if session.session != nil { await store.bootstrap() } }
+        .onAppear { PushNotificationDelegate.store = store }
+        .task(id: session.session?.accessToken) {
+            if session.session != nil {
+                await store.bootstrap()
+                await store.requestPushNotifications()
+            }
+        }
         #if DEBUG
         .task { await startDemoSession() }
         #endif

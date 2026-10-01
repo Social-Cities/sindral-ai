@@ -15,6 +15,9 @@ import type {
   ProjectRepository,
   PullRequest,
   PullRequestStatus,
+  PushDevice,
+  PushEnvironment,
+  PushPlatform,
   SecretProvider,
   Task,
   TaskEvent,
@@ -55,6 +58,7 @@ import {
   type TaskTransitionCommand,
   type TaskTransitionResult,
   type PullRequestUpsert,
+  type PushDeviceUpsert,
   type WorkerInsert,
   type WorkerKeyInsert,
   type WorkerKeyLookup,
@@ -71,7 +75,7 @@ export function createSupabaseClient(url: string, serviceRoleKey: string): Supab
   });
 }
 
-export const EXPECTED_SCHEMA_VERSION = '20261001134245';
+export const EXPECTED_SCHEMA_VERSION = '20261001150000';
 
 // ---- row shapes (snake_case, as stored) ----
 interface ProfileRow {
@@ -253,6 +257,17 @@ interface SecretRow {
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+}
+interface PushDeviceRow {
+  id: string;
+  user_id: string;
+  platform: PushPlatform;
+  environment: PushEnvironment;
+  token: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+  last_registered_at: string;
 }
 
 const UNIQUE_VIOLATION = '23505';
@@ -455,6 +470,18 @@ const mapSecret = (r: SecretRow): StoredSecret => ({
   metadata: r.metadata ?? {},
   createdAt: r.created_at,
   updatedAt: r.updated_at,
+});
+
+const mapPushDevice = (r: PushDeviceRow): PushDevice => ({
+  id: r.id,
+  userId: r.user_id,
+  platform: r.platform,
+  environment: r.environment,
+  token: r.token,
+  enabled: r.enabled,
+  createdAt: r.created_at,
+  updatedAt: r.updated_at,
+  lastRegisteredAt: r.last_registered_at,
 });
 
 function taskPatchToRow(patch: TaskPatch): Record<string, unknown> {
@@ -1342,6 +1369,49 @@ export class SupabaseRepository implements Repository {
   async deleteSecret(userId: string, provider: SecretProvider): Promise<boolean> {
     const rows = await run<{ provider: string }[]>(
       this.client.from('user_secrets').delete().eq('user_id', userId).eq('provider', provider).select('provider'),
+    );
+    return rows.length > 0;
+  }
+
+  // ---- push devices ----
+  async upsertPushDevice(userId: string, input: PushDeviceUpsert): Promise<PushDevice> {
+    const row = await run<PushDeviceRow>(
+      this.client
+        .from('push_devices')
+        .upsert(
+          {
+            user_id: userId,
+            platform: input.platform,
+            environment: input.environment,
+            token: input.token.toLowerCase(),
+            enabled: true,
+            last_registered_at: new Date().toISOString(),
+          },
+          { onConflict: 'platform,environment,token' },
+        )
+        .select('*')
+        .single(),
+    );
+    return mapPushDevice(row);
+  }
+
+  async listPushDevices(userId: string): Promise<PushDevice[]> {
+    const rows = await run<PushDeviceRow[]>(
+      this.client.from('push_devices').select('*').eq('user_id', userId).eq('enabled', true).order('last_registered_at', { ascending: false }),
+    );
+    return rows.map(mapPushDevice);
+  }
+
+  async deletePushDevice(userId: string, platform: PushPlatform, environment: PushEnvironment, token: string): Promise<boolean> {
+    const rows = await run<{ id: string }[]>(
+      this.client
+        .from('push_devices')
+        .delete()
+        .eq('user_id', userId)
+        .eq('platform', platform)
+        .eq('environment', environment)
+        .eq('token', token.toLowerCase())
+        .select('id'),
     );
     return rows.length > 0;
   }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Redactor } from './redact.js';
-import { describeFailure, extractJsonCandidate, parseRawResult, summaryOf, validateResult } from './result.js';
+import { describeFailure, extractJsonCandidate, markdownPlanResult, parseRawResult, summaryOf, validateResult } from './result.js';
 import { GH_TOKEN, WORKER_KEY } from './test/fixtures.js';
 
 describe('parseRawResult', () => {
@@ -71,6 +71,21 @@ describe('extractJsonCandidate', () => {
     expect(extractJsonCandidate('no json here')).toBeNull();
     expect(extractJsonCandidate('{"not":"a result"}')).toBeNull();
     expect(extractJsonCandidate(null)).toBeNull();
+  });
+});
+
+describe('markdownPlanResult', () => {
+  it('synthesizes a plan result from Markdown final output', () => {
+    expect(markdownPlanResult('## Outcome\nShip it\n\n## Implementation plan\n1. Build it')).toEqual({
+      kind: 'plan',
+      summary: 'Outcome',
+      plan: '## Outcome\nShip it\n\n## Implementation plan\n1. Build it',
+    });
+  });
+
+  it('returns null for empty output', () => {
+    expect(markdownPlanResult('  \n')).toBeNull();
+    expect(markdownPlanResult(null)).toBeNull();
   });
 });
 

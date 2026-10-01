@@ -205,6 +205,9 @@ struct WorkerKey: Codable, Identifiable, Hashable, Sendable {
 struct SecretStatus: Codable, Identifiable, Hashable, Sendable {
     let provider: String; let configured: Bool; let updatedAt: String?; let hint: String?; var id: String { provider }
 }
+struct PushDevice: Codable, Identifiable, Hashable, Sendable {
+    let id: String; let userId: String; let platform: String; let environment: String; let token: String; let enabled: Bool; let createdAt: String; let updatedAt: String; let lastRegisteredAt: String
+}
 struct TicketImport: Codable, Hashable, Sendable { let provider: String; let id: String; let title: String; let description: String; let url: String }
 struct Profile: Codable, Hashable, Sendable { let id: String; let email: String?; let displayName: String? }
 

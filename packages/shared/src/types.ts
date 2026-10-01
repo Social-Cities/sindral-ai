@@ -515,6 +515,21 @@ export interface SecretStatus {
   hint: string | null;
 }
 
+export type PushPlatform = 'ios';
+export type PushEnvironment = 'sandbox' | 'production';
+
+export interface PushDevice {
+  id: string;
+  userId: string;
+  platform: PushPlatform;
+  environment: PushEnvironment;
+  token: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastRegisteredAt: string;
+}
+
 export interface GitHubRepository {
   id: number;
   name: string;

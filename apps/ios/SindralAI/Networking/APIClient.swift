@@ -13,6 +13,7 @@ struct WorkerKeysResponse: Decodable { let keys: [WorkerKey] }
 struct WorkerKeyResponse: Decodable { let key: WorkerKey; let secret: String }
 struct SecretsResponse: Decodable { let secrets: [SecretStatus] }
 struct SecretResponse: Decodable { let secret: SecretStatus }
+struct PushDeviceResponse: Decodable { let device: PushDevice }
 struct TicketResponse: Decodable { let ticket: TicketImport }
 struct ProfileResponse: Decodable { let user: Profile }
 struct JobsResponse: Decodable { let jobs: [Job] }
@@ -100,6 +101,15 @@ final class APIClient {
     func secrets() async throws -> [SecretStatus] { let response: SecretsResponse = try await request("api/settings/secrets"); return response.secrets }
     func setSecret(provider: String, token: String, email: String?) async throws -> SecretStatus { struct Body: Encodable { let provider: String; let token: String; let email: String? }; let response: SecretResponse = try await request("api/settings/secrets", method: "PUT", body: Body(provider: provider, token: token, email: email)); return response.secret }
     func deleteSecret(_ provider: String) async throws { let _: EmptyResponse = try await request("api/settings/secrets/\(provider)", method: "DELETE") }
+    func registerPushDevice(token: String, environment: String) async throws -> PushDevice {
+        struct Body: Encodable { let platform = "ios"; let environment: String; let token: String }
+        let response: PushDeviceResponse = try await request("api/settings/push-device", method: "PUT", body: Body(environment: environment, token: token))
+        return response.device
+    }
+    func unregisterPushDevice(token: String, environment: String) async throws {
+        struct Body: Encodable { let platform = "ios"; let environment: String; let token: String }
+        let _: EmptyResponse = try await request("api/settings/push-device", method: "DELETE", body: Body(environment: environment, token: token))
+    }
     func githubAuthorizationURL() async throws -> URL {
         struct Body: Encodable { let returnTo = "ios" }
         let response: GitHubConnectResponse = try await request("api/github/connect", method: "POST", body: Body())

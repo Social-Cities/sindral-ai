@@ -51,6 +51,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: ai.sindral.app
         PRODUCT_NAME: SindralAI
         INFOPLIST_FILE: SindralAI/Info.plist
+        CODE_SIGN_ENTITLEMENTS: SindralAI/SindralAI.entitlements
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     scheme:

@@ -1,4 +1,6 @@
 SINDRAL_API_URL = http:/$()/127.0.0.1:8787
 SUPABASE_URL = http:/$()/127.0.0.1:55321
 SUPABASE_ANON_KEY =
+APS_ENVIRONMENT = development
+PUSH_ENVIRONMENT = sandbox
 #include? "Local.xcconfig"

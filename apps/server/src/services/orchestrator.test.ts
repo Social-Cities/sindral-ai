@@ -479,6 +479,49 @@ describe('task contracts outside planning workflows', () => {
 });
 
 describe('failure handling', () => {
+  it('notifies when an agent completion reaches a human step', async () => {
+    await ctx.app.close();
+    const notifications: { userId: string; kind: string; task: Task; stepLabel: string | null; error: string | null }[] = [];
+    ctx = await createTestApp({
+      notifications: {
+        async notifyTaskStatus(nextUserId, notification) {
+          notifications.push({ userId: nextUserId, ...notification });
+        },
+      },
+    });
+    userId = ctx.userA;
+
+    const task = await newTask();
+    await orch().applyUserEvent(userId, task.id, 'start');
+    await completeNext(ctx, userId, plan());
+
+    expect(notifications).toMatchObject([
+      { userId, kind: 'needs-input', stepLabel: 'Plan Review', task: { id: task.id, state: 'plan-review' }, error: null },
+    ]);
+  });
+
+  it('notifies when a worker failure parks the task', async () => {
+    await ctx.app.close();
+    const notifications: { userId: string; kind: string; task: Task; stepLabel: string | null; error: string | null }[] = [];
+    ctx = await createTestApp({
+      notifications: {
+        async notifyTaskStatus(nextUserId, notification) {
+          notifications.push({ userId: nextUserId, ...notification });
+        },
+      },
+    });
+    userId = ctx.userA;
+
+    const task = await newTask();
+    await orch().applyUserEvent(userId, task.id, 'start');
+    const job = await claimNext(ctx, userId);
+    await orch().failJob(userId, job!.id, 'npm install exploded', job!.attempt, job!.leaseToken);
+
+    expect(notifications).toMatchObject([
+      { userId, kind: 'failure', stepLabel: 'Planning Agent', task: { id: task.id, state: 'failure' }, error: 'npm install exploded' },
+    ]);
+  });
+
   async function failedTask(): Promise<Task> {
     const task = await newTask();
     await orch().applyUserEvent(userId, task.id, 'start');

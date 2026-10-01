@@ -33,6 +33,7 @@ import { badRequest, conflict, notFound, serviceUnavailable } from '../errors.js
 import type { Hub } from '../realtime/hub.js';
 import type { Metrics } from '../metrics.js';
 import { parsePrUrl } from './github.js';
+import type { NotificationSink, TaskNotification } from './notifications.js';
 import { toWorkflow, type WorkflowService } from './workflows.js';
 
 export type Actor = 'user' | 'worker' | 'system';
@@ -54,6 +55,7 @@ export interface OrchestratorDeps {
   workflows: WorkflowService;
   log: FastifyBaseLogger;
   metrics?: Metrics;
+  notifications?: NotificationSink;
   autoMergeEnabled?: boolean;
   now?: () => Date;
 }
@@ -117,6 +119,7 @@ export class Orchestrator {
   private readonly workflows: WorkflowService;
   private readonly log: FastifyBaseLogger;
   private readonly metrics: Metrics | undefined;
+  private readonly notifications: NotificationSink | undefined;
   private readonly now: () => Date;
   private readonly autoMergeEnabled: boolean;
 
@@ -126,6 +129,7 @@ export class Orchestrator {
     this.workflows = deps.workflows;
     this.log = deps.log;
     this.metrics = deps.metrics;
+    this.notifications = deps.notifications;
     this.autoMergeEnabled = deps.autoMergeEnabled ?? true;
     this.now = deps.now ?? (() => new Date());
   }
@@ -503,9 +507,37 @@ export class Orchestrator {
       await this.startNextSibling(userId, current);
       await this.resumeDeferredStackRebase(userId, current);
     }
+    await this.notifyIfNeedsAttention(userId, task, current, workflow, options);
 
     this.hub.publish(userId, { type: 'task.updated', taskId: task.id });
     return (await this.repo.getTask(userId, task.id)) ?? current;
+  }
+
+  private async notifyIfNeedsAttention(
+    userId: string,
+    previous: Task,
+    current: Task,
+    workflow: Workflow | null,
+    options: ApplyOptions,
+  ): Promise<void> {
+    if (!this.notifications || options.actor === 'user') return;
+    let notification: TaskNotification | null = null;
+    if (current.state === 'failure') {
+      const failedStep = workflow ? getStep(workflow, current.failedStepId ?? current.currentStepId) : null;
+      notification = { kind: 'failure', task: current, stepLabel: failedStep?.label ?? null, error: current.lastError };
+    } else {
+      const previousStep = workflow ? getStep(workflow, previous.currentStepId) : null;
+      const currentStep = workflow ? getStep(workflow, current.currentStepId) : null;
+      if (previousStep?.type === 'agent' && currentStep?.type === 'human') {
+        notification = { kind: 'needs-input', task: current, stepLabel: currentStep.label, error: null };
+      }
+    }
+    if (!notification) return;
+    try {
+      await this.notifications.notifyTaskStatus(userId, notification);
+    } catch (error) {
+      this.log.warn({ err: error, userId, taskId: current.id, kind: notification.kind }, 'task notification failed');
+    }
   }
 
   private isReviewOrDone(task: Task, workflow: Workflow | null): boolean {

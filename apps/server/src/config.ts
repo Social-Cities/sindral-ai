@@ -34,6 +34,11 @@ const envSchema = z.object({
   GITHUB_APP_ID: optionalString,
   GITHUB_APP_PRIVATE_KEY: optionalString,
   GITHUB_APP_INSTALLATIONS: optionalString,
+  APNS_KEY_ID: optionalString,
+  APNS_TEAM_ID: optionalString,
+  APNS_BUNDLE_ID: optionalString,
+  APNS_PRIVATE_KEY: optionalString,
+  APNS_ENVIRONMENT: z.enum(['sandbox', 'production']).default('sandbox'),
   METRICS_TOKEN: optionalString,
   SINDRAL_JOB_DISPATCH_ENABLED: booleanString('true'),
   SINDRAL_AUTO_MERGE_ENABLED: booleanString('false'),
@@ -60,6 +65,11 @@ export interface AppConfig {
   githubAppId: string | undefined;
   githubAppPrivateKey: string | undefined;
   githubAppInstallations: Record<string, number>;
+  apnsKeyId: string | undefined;
+  apnsTeamId: string | undefined;
+  apnsBundleId: string | undefined;
+  apnsPrivateKey: string | undefined;
+  apnsEnvironment: 'sandbox' | 'production';
   metricsToken: string | undefined;
   jobDispatchEnabled: boolean;
   autoMergeEnabled: boolean;
@@ -97,6 +107,10 @@ export function parseConfig(env: NodeJS.ProcessEnv): AppConfig {
   const githubOAuthValues = [e.GITHUB_OAUTH_CLIENT_ID, e.GITHUB_OAUTH_CLIENT_SECRET];
   if (githubOAuthValues.some((value) => value !== undefined) && githubOAuthValues.some((value) => value === undefined)) {
     throw new ConfigError('GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET must be configured together');
+  }
+  const apnsValues = [e.APNS_KEY_ID, e.APNS_TEAM_ID, e.APNS_BUNDLE_ID, e.APNS_PRIVATE_KEY];
+  if (apnsValues.some((value) => value !== undefined) && apnsValues.some((value) => value === undefined)) {
+    throw new ConfigError('APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID, and APNS_PRIVATE_KEY must be configured together');
   }
   let githubOAuthCallbackUrl: string | undefined;
   if (e.GITHUB_OAUTH_CLIENT_ID) {
@@ -141,6 +155,11 @@ export function parseConfig(env: NodeJS.ProcessEnv): AppConfig {
     githubAppId: e.GITHUB_APP_ID,
     githubAppPrivateKey: e.GITHUB_APP_PRIVATE_KEY?.replaceAll('\\n', '\n'),
     githubAppInstallations,
+    apnsKeyId: e.APNS_KEY_ID,
+    apnsTeamId: e.APNS_TEAM_ID,
+    apnsBundleId: e.APNS_BUNDLE_ID,
+    apnsPrivateKey: e.APNS_PRIVATE_KEY?.replaceAll('\\n', '\n'),
+    apnsEnvironment: e.APNS_ENVIRONMENT,
     metricsToken: e.METRICS_TOKEN,
     jobDispatchEnabled: e.SINDRAL_JOB_DISPATCH_ENABLED,
     autoMergeEnabled: e.SINDRAL_AUTO_MERGE_ENABLED,

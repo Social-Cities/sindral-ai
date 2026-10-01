@@ -126,6 +126,12 @@ export const setSecretSchema = z.object({
 
 export const createWorkerKeySchema = z.object({ name: shortText });
 
+export const pushDeviceSchema = z.object({
+  platform: z.literal('ios'),
+  environment: z.enum(['sandbox', 'production']),
+  token: z.string().trim().min(64).max(512).regex(/^[0-9a-fA-F]+$/, 'Device token must be hexadecimal'),
+});
+
 // ---- worker API ----
 export const workerRegisterSchema = z.object({
   name: shortText,

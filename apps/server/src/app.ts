@@ -30,6 +30,7 @@ import { TicketService } from './services/tickets.js';
 import { WorkflowService } from './services/workflows.js';
 import { GitHubConnectionService } from './services/githubConnection.js';
 import { GitHubOAuthService } from './services/githubOAuth.js';
+import { notificationServiceFromConfig, type NotificationSink } from './services/notifications.js';
 import './fastify.js';
 
 export interface AppOptions {
@@ -40,6 +41,7 @@ export interface AppOptions {
   fetch?: FetchLike;
   logger?: FastifyServerOptions['logger'];
   userVerifier?: UserTokenVerifier;
+  notifications?: NotificationSink;
   claim?: ClaimOptions;
   /** 0 disables the stale-job sweeper (tests). */
   sweeperIntervalMs?: number;
@@ -132,7 +134,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const workflows = new WorkflowService(repo);
   const secrets = new SecretService(repo, config.secretsEncryptionKey);
   const githubOAuth = new GitHubOAuthService(config, secrets, fetchImpl);
-  const orchestrator = new Orchestrator({ repo, hub, workflows, log: app.log, metrics, autoMergeEnabled: config.autoMergeEnabled });
+  const notifications = options.notifications ?? notificationServiceFromConfig(config, repo, app.log);
+  const orchestrator = new Orchestrator({ repo, hub, workflows, log: app.log, metrics, autoMergeEnabled: config.autoMergeEnabled, notifications });
   const ctx: AppContext = {
     config,
     repo,
@@ -146,6 +149,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     tickets: new TicketService(secrets, githubOAuth, fetchImpl),
     github: new GitHubConnectionService(githubOAuth, fetchImpl),
     githubOAuth,
+    notifications,
     orchestrator,
     claim: options.claim ?? { waitMs: 20_000, pollMs: 2_000 },
     ssePingMs: options.ssePingMs ?? 25_000,

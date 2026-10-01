@@ -16,7 +16,7 @@ import { runRebaseStack } from './rebase.js';
 import { runMergePullRequests } from './merge.js';
 import type { run } from './proc.js';
 import { Redactor } from './redact.js';
-import { describeFailure, extractJsonCandidate, parseRawResult, readResultFile, summaryOf, validateResult } from './result.js';
+import { describeFailure, extractJsonCandidate, markdownPlanResult, parseRawResult, readResultFile, summaryOf, validateResult } from './result.js';
 import { assertPathContained, type GitFactory, type WorkspaceManager } from './workspace.js';
 
 export const SHUTDOWN_REASON = 'worker shutting down';
@@ -216,7 +216,9 @@ async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx:
     resultText = extractJsonCandidate(run.finalText);
     if (resultText !== null) write('result file missing; using JSON from the final agent message');
   }
-  const parsed = parseRawResult(resultText, output);
+  const fallbackPlan = resultText === null && output === 'plan' ? markdownPlanResult(run.finalText) : null;
+  if (fallbackPlan) write('result file missing; using Markdown from the final agent message as the plan');
+  const parsed = fallbackPlan ? { ok: true as const, value: fallbackPlan } : parseRawResult(resultText, output);
   if (!parsed.ok) throw new Error(describeFailure(`${parsed.reason}${exitNote}`, run.tail, ctx.redactor));
   const raw = parsed.value;
 

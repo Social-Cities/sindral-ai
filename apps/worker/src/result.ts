@@ -33,6 +33,15 @@ export function validateResult(raw: Record<string, unknown>): Parsed<AgentResult
   return { ok: true, value: parsed.data };
 }
 
+/** Some agents return the requested plan as Markdown instead of writing JSON. */
+export function markdownPlanResult(text: string | null | undefined): RawResult | null {
+  const plan = text?.trim();
+  if (!plan) return null;
+  const heading = plan.split(/\r?\n/).find((line) => /^#{1,3}\s+\S/.test(line.trim()));
+  const summary = heading?.replace(/^#{1,3}\s+/, '').trim() || firstMeaningfulLine(plan) || 'Plan created';
+  return { kind: 'plan', summary: summary.slice(0, 20_000), plan };
+}
+
 /** Reads the result file; `null` when it does not exist. */
 export async function readResultFile(file: string): Promise<string | null> {
   try {
@@ -95,4 +104,12 @@ function issues(list: { path: PropertyKey[]; message: string }[]): string {
     .slice(0, 6)
     .map((i) => `${i.path.map(String).join('.') || '(root)'}: ${i.message}`)
     .join('; ');
+}
+
+function firstMeaningfulLine(text: string): string | null {
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim().replace(/^\s*[-*]\s+/, '');
+    if (trimmed) return trimmed;
+  }
+  return null;
 }

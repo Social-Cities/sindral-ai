@@ -570,6 +570,46 @@ describe('settings API', () => {
     expect(await ctx.repo.getSecret(ctx.userA, 'github')).toBeNull();
   });
 
+  it('registers and removes iOS push device tokens per user', async () => {
+    const token = 'a'.repeat(64);
+    const created = await ctx.app.inject({
+      method: 'PUT',
+      url: '/api/settings/push-device',
+      headers: asA(),
+      payload: { platform: 'ios', environment: 'sandbox', token },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({ device: { userId: ctx.userA, platform: 'ios', environment: 'sandbox', token, enabled: true } });
+    expect(await ctx.repo.listPushDevices(ctx.userA)).toHaveLength(1);
+    expect(await ctx.repo.listPushDevices(ctx.userB)).toEqual([]);
+
+    const invalid = await ctx.app.inject({
+      method: 'PUT',
+      url: '/api/settings/push-device',
+      headers: asA(),
+      payload: { platform: 'ios', environment: 'sandbox', token: 'not-hex' },
+    });
+    expect(invalid.statusCode).toBe(400);
+
+    const crossUserDelete = await ctx.app.inject({
+      method: 'DELETE',
+      url: '/api/settings/push-device',
+      headers: asB(),
+      payload: { platform: 'ios', environment: 'sandbox', token },
+    });
+    expect(crossUserDelete.statusCode).toBe(200);
+    expect(await ctx.repo.listPushDevices(ctx.userA)).toHaveLength(1);
+
+    const deleted = await ctx.app.inject({
+      method: 'DELETE',
+      url: '/api/settings/push-device',
+      headers: asA(),
+      payload: { platform: 'ios', environment: 'sandbox', token },
+    });
+    expect(deleted.json()).toEqual({ ok: true });
+    expect(await ctx.repo.listPushDevices(ctx.userA)).toEqual([]);
+  });
+
   it('lists writable GitHub repositories and repository owners for a connected account', async () => {
     const disconnected = await ctx.app.inject({ method: 'GET', url: '/api/github/catalog', headers: asA() });
     expect(disconnected.json()).toEqual({ connected: false, source: null, repositories: [], owners: [] });

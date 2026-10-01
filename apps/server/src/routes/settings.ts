@@ -1,4 +1,4 @@
-import { createWorkerKeySchema, setSecretSchema } from '@sindral/shared';
+import { createWorkerKeySchema, pushDeviceSchema, setSecretSchema } from '@sindral/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { requireUser } from '../auth/user.js';
 import type { RouteOptions } from '../context.js';
@@ -50,6 +50,18 @@ export const settingsRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ct
   app.delete('/api/settings/secrets/:provider', async (request) => {
     const { provider } = validate(providerParamsSchema, request.params);
     await secrets.remove(request.user!.id, provider);
+    return { ok: true as const };
+  });
+
+  app.put('/api/settings/push-device', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (request, reply) => {
+    const input = validate(pushDeviceSchema, request.body);
+    const device = await repo.upsertPushDevice(request.user!.id, input);
+    return reply.code(201).send({ device });
+  });
+
+  app.delete('/api/settings/push-device', async (request) => {
+    const input = validate(pushDeviceSchema, request.body);
+    await repo.deletePushDevice(request.user!.id, input.platform, input.environment, input.token);
     return { ok: true as const };
   });
 };
