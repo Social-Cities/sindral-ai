@@ -239,8 +239,8 @@ export class GitHubOAuthService {
 }
 
 function tokenCredential(body: JsonObject, now: number, requireRefreshToken = false): SecretCredential {
-  const token = stringField(body, 'access_token');
-  const refreshToken = stringField(body, 'refresh_token');
+  const token = stringField(body, 'access_token').trim();
+  const refreshToken = stringField(body, 'refresh_token').trim();
   const expiresIn = positiveNumberField(body, 'expires_in');
   const refreshTokenExpiresIn = positiveNumberField(body, 'refresh_token_expires_in');
   if (!token) throw serviceUnavailable('GitHub authorization returned no access token');

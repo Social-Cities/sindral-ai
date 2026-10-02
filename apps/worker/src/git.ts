@@ -1,4 +1,4 @@
-import { runOrThrow, run, type RunOptions, type RunResult } from './proc.js';
+import { CommandError, runOrThrow, run, type RunOptions, type RunResult } from './proc.js';
 
 export interface GitAuth {
   /** Extra `git -c` arguments carrying the auth header; empty without a token. */
@@ -13,11 +13,12 @@ export interface GitAuth {
  * `http.extraheader` config value.
  */
 export function gitAuth(token: string | null | undefined): GitAuth {
-  if (!token) return { configArgs: [], secrets: [] };
-  const basic = Buffer.from(`x-access-token:${token}`).toString('base64');
+  const normalized = token?.trim();
+  if (!normalized) return { configArgs: [], secrets: [] };
+  const basic = Buffer.from(`x-access-token:${normalized}`).toString('base64');
   return {
     configArgs: ['-c', `http.https://github.com/.extraheader=AUTHORIZATION: basic ${basic}`],
-    secrets: [token, basic],
+    secrets: [normalized, basic],
   };
 }
 
@@ -31,10 +32,30 @@ export interface GitRunner {
 
 /** Builds a git invoker bound to a directory and (optionally) auth config. */
 export function gitIn(cwd: string, auth: GitAuth = gitAuth(null)): GitRunner {
-  const runner = ((args, opts = {}) =>
-    runOrThrow('git', [...auth.configArgs, ...args], { ...opts, cwd, env: { ...GIT_ENV, ...opts.env } })) as GitRunner;
+  const runner = (async (args, opts = {}) => {
+    try {
+      return await runOrThrow('git', [...auth.configArgs, ...args], { ...opts, cwd, env: { ...GIT_ENV, ...opts.env } });
+    } catch (err) {
+      throw explainGitHubAuthFailure(err, args);
+    }
+  }) as GitRunner;
   runner.try = (args, opts = {}) => run('git', [...auth.configArgs, ...args], { ...opts, cwd, env: { ...GIT_ENV, ...opts.env } });
   return runner;
+}
+
+function explainGitHubAuthFailure(err: unknown, args: readonly string[]): unknown {
+  if (!(err instanceof CommandError) || !looksLikeGitHubAuthFailure(err.result)) return err;
+  const detail = (err.result.stderr.trim() || err.result.stdout.trim() || err.result.message).trim();
+  return new Error(
+    `GitHub rejected the configured credential while running "git ${args.join(' ')}". ` +
+      'Reconnect GitHub, check that the token has access to this repository, or reinstall the GitHub App for the repository, then retry the task.' +
+      (detail ? ` Original git error: ${detail}` : ''),
+  );
+}
+
+function looksLikeGitHubAuthFailure(result: RunResult): boolean {
+  const text = `${result.stderr}\n${result.stdout}\n${result.message}`;
+  return /github\.com/i.test(text) && /(authentication failed|invalid username or token|password authentication is not supported|could not read username)/i.test(text);
 }
 
 const REF_FORBIDDEN = /[\s~^:?*[\\]|\.\.|@\{|\/\/|^[-/]|[/.]$|\.lock$|^@$/;

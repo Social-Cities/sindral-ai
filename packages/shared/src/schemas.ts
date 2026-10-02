@@ -119,7 +119,7 @@ export const importTicketSchema = z.object({ url: z.string().url().max(2000) });
 
 export const setSecretSchema = z.object({
   provider: z.enum(['github', 'linear', 'jira']),
-  token: z.string().min(8).max(4000),
+  token: z.string().trim().min(8).max(4000),
   /** Jira needs the account email for basic auth. */
   email: z.string().email().max(200).optional(),
 });

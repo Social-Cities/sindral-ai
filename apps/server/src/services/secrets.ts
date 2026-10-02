@@ -28,13 +28,15 @@ export class SecretService {
   ) {}
 
   async set(userId: string, provider: SecretProvider, token: string, metadata: Record<string, unknown> = {}): Promise<SecretStatus> {
-    return this.store(userId, provider, token, token, metadata);
+    const normalized = token.trim();
+    if (!normalized) throw new Error('A credential token is required');
+    return this.store(userId, provider, normalized, normalized, metadata);
   }
 
   async setCredential(userId: string, provider: SecretProvider, credential: SecretCredential, metadata: Record<string, unknown> = {}): Promise<SecretStatus> {
-    if (!credential.token) throw new Error('A credential token is required');
-    const plaintext = `${CREDENTIAL_PREFIX}${JSON.stringify(credential)}`;
-    return this.store(userId, provider, plaintext, credential.token, metadata);
+    const normalized = normalizeCredential(credential);
+    const plaintext = `${CREDENTIAL_PREFIX}${JSON.stringify(normalized)}`;
+    return this.store(userId, provider, plaintext, normalized.token, metadata);
   }
 
   private async store(userId: string, provider: SecretProvider, plaintext: string, hintToken: string, metadata: Record<string, unknown>): Promise<SecretStatus> {
@@ -78,10 +80,29 @@ function parseCredential(value: string): SecretCredential {
   for (const field of ['refreshToken', 'expiresAt', 'refreshTokenExpiresAt']) {
     if (credential[field] !== undefined && typeof credential[field] !== 'string') throw new Error('Stored credential is invalid');
   }
-  return {
+  return normalizeCredential({
     token: credential['token'],
     ...(typeof credential['refreshToken'] === 'string' ? { refreshToken: credential['refreshToken'] } : {}),
     ...(typeof credential['expiresAt'] === 'string' ? { expiresAt: credential['expiresAt'] } : {}),
     ...(typeof credential['refreshTokenExpiresAt'] === 'string' ? { refreshTokenExpiresAt: credential['refreshTokenExpiresAt'] } : {}),
+  });
+}
+
+function normalizeCredential(credential: SecretCredential): SecretCredential {
+  const token = credential.token.trim();
+  const refreshToken = trimOptional(credential.refreshToken);
+  const expiresAt = trimOptional(credential.expiresAt);
+  const refreshTokenExpiresAt = trimOptional(credential.refreshTokenExpiresAt);
+  if (!token) throw new Error('A credential token is required');
+  return {
+    token,
+    ...(refreshToken ? { refreshToken } : {}),
+    ...(expiresAt ? { expiresAt } : {}),
+    ...(refreshTokenExpiresAt ? { refreshTokenExpiresAt } : {}),
   };
+}
+
+function trimOptional(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed || undefined;
 }

@@ -53,7 +53,7 @@ describe('derivations', () => {
   });
 
   it('builds auth as an extraheader and never as a URL', () => {
-    const auth = gitAuth(GH_TOKEN);
+    const auth = gitAuth(` ${GH_TOKEN}\n`);
     expect(auth.configArgs[0]).toBe('-c');
     expect(auth.configArgs[1]).toMatch(/^http\.https:\/\/github\.com\/\.extraheader=AUTHORIZATION: basic /);
     expect(auth.configArgs[1]).not.toContain(GH_TOKEN);
