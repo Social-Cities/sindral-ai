@@ -266,9 +266,10 @@ export function TaskRow({ task, workflows, project, compact = false, subtaskCoun
   const wf = resolveWorkflow(task, workflows);
   const isPinned = !!task.pinnedWorkflow;
   const step = currentStep(task, workflows);
+  const href = subtaskCount > 0 ? `/tasks/${task.id}?tab=subtasks` : `/tasks/${task.id}`;
   return (
     <Link
-      to={`/tasks/${task.id}`}
+      to={href}
       data-testid="task-card"
       className={`block w-full text-left rounded-lg transition-all bg-card border border-border hover:border-border-strong ${compact ? 'px-4 py-3' : 'px-5 py-4'}`}
     >

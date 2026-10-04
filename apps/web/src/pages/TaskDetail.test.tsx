@@ -5,7 +5,7 @@ import type { TaskWithRelations } from '@sindral/shared';
 import { FULL_SDLC_WORKFLOW, snapshotWorkflow } from '@sindral/shared';
 import * as api from '@/lib/api';
 import { renderWithProviders } from '@/test/utils';
-import { makeMessage, makeTaskWithRelations, workflowRecord } from '@/test/fixtures';
+import { makeMessage, makeTask, makeTaskWithRelations, workflowRecord } from '@/test/fixtures';
 import { TaskDetail } from './TaskDetail';
 
 vi.mock('@/lib/api', async (importOriginal) => {
@@ -23,10 +23,10 @@ vi.mock('@/lib/api', async (importOriginal) => {
   };
 });
 
-function setup(task: TaskWithRelations, workflows = [workflowRecord()]) {
+function setup(task: TaskWithRelations, workflows = [workflowRecord()], route = `/tasks/${task.id}`) {
   vi.mocked(api.getTask).mockResolvedValue({ task });
   vi.mocked(api.listWorkflows).mockResolvedValue({ workflows });
-  return renderWithProviders(<TaskDetail />, { route: `/tasks/${task.id}`, path: '/tasks/:id' });
+  return renderWithProviders(<TaskDetail />, { route, path: '/tasks/:id' });
 }
 
 describe('TaskDetail', () => {
@@ -41,6 +41,44 @@ describe('TaskDetail', () => {
     const button = await screen.findByRole('button', { name: 'Start Planning' });
     expect(button).toHaveClass('bg-primary');
     expect(screen.queryByText('Agent working…')).not.toBeInTheDocument();
+  });
+
+  it('opens parent tasks on their subtasks tab by default', async () => {
+    const parent = makeTaskWithRelations({
+      id: 'parent-1',
+      title: 'Ship stacked work',
+      subtasks: [
+        makeTask({ id: 'child-1', key: 'SIN-1.1', title: 'Build API', state: 'done', currentStepId: 'done', parentTaskId: 'parent-1', sequence: 1 }),
+        makeTask({ id: 'child-2', key: 'SIN-1.2', title: 'Wire UI', state: 'planning', currentStepId: 'planning', parentTaskId: 'parent-1', sequence: 2 }),
+      ],
+    });
+    setup(parent);
+
+    const tab = await screen.findByRole('tab', { name: /Subtasks/ });
+    expect(tab).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText('1/2 done · each subtask ships as its own PR, stacked on the previous one.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Build API/ })).toHaveAttribute('href', '/tasks/child-1');
+    expect(screen.getByRole('link', { name: /Wire UI/ })).toHaveAttribute('href', '/tasks/child-2');
+  });
+
+  it('honors explicit task detail tab links for parent tasks', async () => {
+    const parent = makeTaskWithRelations({
+      id: 'parent-2',
+      description: 'Parent summary remains one click away.',
+      subtasks: [makeTask({ id: 'child-3', title: 'One subtask', parentTaskId: 'parent-2', sequence: 1 })],
+    });
+    setup(parent, [workflowRecord()], '/tasks/parent-2?tab=summary');
+
+    const tab = await screen.findByRole('tab', { name: 'Summary' });
+    expect(tab).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText('Parent summary remains one click away.')).toBeInTheDocument();
+  });
+
+  it('links subtasks back to the parent subtasks tab', async () => {
+    setup(makeTaskWithRelations({ id: 'child-4', parentTaskId: 'parent-4', sequence: 1 }));
+
+    const parentLink = await screen.findByRole('link', { name: '↑ parent' });
+    expect(parentLink).toHaveAttribute('href', '/tasks/parent-4?tab=subtasks');
   });
 
   it('offers "Approve Plan" on plan review and shows the plan', async () => {

@@ -39,6 +39,8 @@ describe('Tasks page', () => {
     expect(screen.getByText('↳ 1/1')).toBeInTheDocument();
     expect(screen.getByText('PR open')).toBeInTheDocument();
     expect(screen.getByText('linked')).toBeInTheDocument();
+    expect(screen.getByText('Add OAuth login').closest('a')).toHaveAttribute('href', '/tasks/p1?tab=subtasks');
+    expect(screen.getByText('Fix flaky test').closest('a')).toHaveAttribute('href', '/tasks/o1');
   });
 
   it('shows terminal tasks through all-status and specific-status filters', async () => {

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router';
+import { Link, useParams, useSearchParams } from 'react-router';
 import type { Workflow } from '@sindral/shared';
 import { availableActions, getStep, isAgentActive } from '@sindral/shared';
 import { displayNameFor, useAuth } from '@/auth/AuthProvider';
@@ -80,10 +80,10 @@ function workflowsMatch(a: Workflow, b: Workflow): boolean {
 
 export function TaskDetail() {
   const { id } = useParams<{ id: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const taskQuery = useTask(id);
   const workflowsQuery = useWorkflows();
-  const [tab, setTab] = useState<Tab>('summary');
   const [pendingCloseEvent, setPendingCloseEvent] = useState<'mark-done' | 'mark-wont-do' | null>(null);
 
   const task = taskQuery.data ?? null;
@@ -116,6 +116,15 @@ export function TaskDetail() {
   const agentActive = isAgentActive(task, workflow);
   const step = workflow ? getStep(workflow, task.currentStepId ?? workflow.entryStepId) : null;
   const tabs: Tab[] = ['summary', 'plan', 'chat', 'code', 'steps', 'artifacts', ...(task.subtasks.length > 0 ? (['subtasks'] as Tab[]) : [])];
+  const defaultTab: Tab = task.subtasks.length > 0 ? 'subtasks' : 'summary';
+  const requestedTab = searchParams.get('tab') as Tab | null;
+  const tab: Tab = requestedTab && tabs.includes(requestedTab) ? requestedTab : defaultTab;
+  const setTab = (next: Tab) => {
+    const params = new URLSearchParams(searchParams);
+    if (next === defaultTab) params.delete('tab');
+    else params.set('tab', next);
+    setSearchParams(params, { replace: true });
+  };
   const userInitial = (displayNameFor(user, 'U').charAt(0) || 'U').toUpperCase();
   const actionError = action.error ? errorMessage(action.error) : repinWorkflow.error ? errorMessage(repinWorkflow.error) : null;
   const canApprovePlan = actions.some((item) => item.event === 'approve');
@@ -143,7 +152,7 @@ export function TaskDetail() {
 
         <div className="flex items-center gap-2 min-w-0">
           {task.parentTaskId && (
-            <Link to={`/tasks/${task.parentTaskId}`} className="text-[10px] font-mono text-muted-foreground hover:text-accent">
+            <Link to={`/tasks/${task.parentTaskId}?tab=subtasks`} className="text-[10px] font-mono text-muted-foreground hover:text-accent">
               ↑ parent
             </Link>
           )}
