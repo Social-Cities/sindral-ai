@@ -917,19 +917,27 @@ describe('end to end through HTTP', () => {
       outcome: 'The requested behavior is delivered.',
       acceptanceCriteria: '- The requested behavior is verified.',
     });
+    const reviewJob = await claimNext(ctx, ctx.userA);
+    expect(reviewJob?.payload.kind).toBe('agent');
+    if (!reviewJob || reviewJob.payload.kind !== 'agent') throw new Error('expected review job');
+    expect(reviewJob.payload.step.id).toBe('adversarial-review');
+    expect(reviewJob.payload.context.task_outcome).toBe('The requested behavior is delivered.');
+    expect(reviewJob.payload.context.acceptance_criteria).toBe('- The requested behavior is verified.');
+    await ctx.app.ctx.orchestrator.completeJob(ctx.userA, reviewJob.id, review(), reviewJob.attempt, reviewJob.leaseToken);
     const verifyJob = await claimNext(ctx, ctx.userA);
     expect(verifyJob?.payload.kind).toBe('agent');
     if (!verifyJob || verifyJob.payload.kind !== 'agent') throw new Error('expected verify job');
+    expect(verifyJob.payload.step.id).toBe('verify');
     expect(verifyJob.payload.context.task_outcome).toBe('The requested behavior is delivered.');
     expect(verifyJob.payload.context.acceptance_criteria).toBe('- The requested behavior is verified.');
+    expect(verifyJob.payload.context.review).toBe('# Review');
     await ctx.app.ctx.orchestrator.completeJob(ctx.userA, verifyJob.id, verdict(true), verifyJob.attempt, verifyJob.leaseToken);
     expect((await ctx.repo.getTask(ctx.userA, task.id))?.state).toBe('in-review');
-    expect((await ctx.app.inject({ method: 'GET', url: `/api/tasks/${task.id}/artifacts`, headers: asA() })).json<{ artifacts: { name: string }[] }>().artifacts.map((a) => a.name)).toEqual(['verify-report.md']);
+    expect((await ctx.app.inject({ method: 'GET', url: `/api/tasks/${task.id}/artifacts`, headers: asA() })).json<{ artifacts: { name: string }[] }>().artifacts.map((a) => a.name)).toEqual(['adversarial-review.md', 'verify-report.md']);
     const accepted = await taskAction(task.id, 'accept');
     expect(accepted.json<{ task: Task }>().task.state).toBe('merge');
     await completeMerge(ctx, ctx.userA);
     expect((await ctx.repo.getTask(ctx.userA, task.id))?.state).toBe('done');
-    void review;
   });
 
   it('rejects automatic merge before changing state when the kill switch is off', async () => {
@@ -939,6 +947,7 @@ describe('end to end through HTTP', () => {
       let task = await guarded.app.ctx.orchestrator.createTask(guarded.userA, { title: 'guarded merge', description: '', repos: ['acme/app'], workflowId: fast.id });
       task = await guarded.app.ctx.orchestrator.applyUserEvent(guarded.userA, task.id, 'start');
       await completeNext(guarded, guarded.userA, pr(8));
+      await completeNext(guarded, guarded.userA, review());
       await completeNext(guarded, guarded.userA, verdict(true));
       task = (await guarded.repo.getTask(guarded.userA, task.id))!;
       const response = await guarded.app.inject({

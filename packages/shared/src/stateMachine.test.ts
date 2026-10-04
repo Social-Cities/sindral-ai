@@ -19,8 +19,23 @@ describe('bundled workflows', () => {
 
   it('other workflows have sensible happy paths', () => {
     expect(happyPath(PLANNING_ONLY_WORKFLOW).map((s) => s.state)).toEqual(['todo', 'planning', 'plan-review', 'done']);
-    expect(happyPath(FAST_TRACK_WORKFLOW).map((s) => s.state)).toEqual(['todo', 'implement', 'verify', 'in-review', 'merge', 'done']);
+    expect(happyPath(FAST_TRACK_WORKFLOW).map((s) => s.state)).toEqual(['todo', 'implement', 'adversarial-review', 'verify', 'in-review', 'merge', 'done']);
     expect(happyPath(DOCUMENT_WORKFLOW).map((s) => s.state)).toEqual(['todo', 'implement', 'in-review', 'done']);
+  });
+
+  it('code workflows run adversarial review after implementation', () => {
+    const reviewPrompt = FAST_TRACK_WORKFLOW.steps.find((step) => step.id === 'adversarial-review')?.prompt;
+    expect(reviewPrompt).toContain('Explain this diff to a senior engineer');
+    expect(reviewPrompt).toContain('Try to break your implementation');
+
+    let t = transition(at('todo', 'todo'), FAST_TRACK_WORKFLOW, 'start');
+    expect(t.nextState).toBe('implement');
+    t = transition(at('implement', 'implement'), FAST_TRACK_WORKFLOW, 'complete');
+    expect(t).toMatchObject({
+      nextState: 'adversarial-review',
+      nextStepId: 'adversarial-review',
+      effects: [{ type: 'dispatch', stepId: 'adversarial-review' }],
+    });
   });
 });
 
@@ -135,8 +150,8 @@ describe('transition', () => {
     });
     expect(() => transition(at('implement', 'implement'), wf, 'restacked')).toThrow(/implementation review/);
     expect(transition(at('in-review', 'in-review'), FAST_TRACK_WORKFLOW, 'restacked')).toMatchObject({
-      nextState: 'verify',
-      effects: [{ type: 'dispatch', stepId: 'verify' }],
+      nextState: 'adversarial-review',
+      effects: [{ type: 'dispatch', stepId: 'adversarial-review' }],
     });
   });
 

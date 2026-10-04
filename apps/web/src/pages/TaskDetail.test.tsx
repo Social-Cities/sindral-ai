@@ -192,6 +192,36 @@ describe('TaskDetail', () => {
     expect(link).toHaveAttribute('rel', 'noreferrer noopener');
   });
 
+  it('shows adversarial review output in a dedicated Review tab', async () => {
+    const user = userEvent.setup();
+    setup(
+      makeTaskWithRelations({
+        id: 'reviewed-task',
+        state: 'in-review',
+        currentStepId: 'in-review',
+        pinnedWorkflow: snapshotWorkflow(FULL_SDLC_WORKFLOW),
+        artifacts: [
+          {
+            id: 'review-artifact',
+            taskId: 'reviewed-task',
+            jobId: null,
+            name: 'adversarial-review.md',
+            contentType: 'text/markdown',
+            content: '## Diff explanation\nThe implementation updates task detail navigation.\n\n## Findings ordered by severity\nNo material findings.',
+            byteSize: 116,
+            downloadUrl: null,
+            createdAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+      }),
+    );
+
+    await user.click(await screen.findByRole('tab', { name: 'Review' }));
+    expect(screen.getByText('Automated review')).toBeInTheDocument();
+    expect(screen.getAllByText('The implementation updates task detail navigation.')).toHaveLength(2);
+    expect(screen.getByText('No material findings.')).toBeInTheDocument();
+  });
+
   it('runs an action optimistically and rolls back on error', async () => {
     const user = userEvent.setup();
     let reject: (e: Error) => void = () => undefined;

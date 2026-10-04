@@ -63,7 +63,12 @@ Follow the \`adversarial-review\` skill (https://github.com/thelimeburner/ai-eng
 - Try to prove the implementation wrong across requirements, authorization, input/data, concurrency, reliability, compatibility, security/privacy, performance, operations, tests and maintainability.
 - Do not rubber-stamp because tests pass. Do not edit code.
 - Every finding needs evidence, a concrete failure scenario, the smallest remediation and a regression test.
-- Produce the required output sections (Review scope, Findings ordered by severity, Non-findings worth noting, Review verdict).
+- Produce the required output sections (Diff explanation, Review scope, Findings ordered by severity, Non-findings worth noting, Review verdict).
+
+Run these review passes in order:
+
+1. Explain this diff to a senior engineer. For every changed file, explain why it changed, what assumptions were made, and what could be wrong.
+2. Try to break your implementation. Look for race conditions, incorrect assumptions, missing validation, authorization problems, bad error handling, backwards compatibility issues, and untested edge cases.
 
 Review the diff of the current branch against its base branch. Pull request: {{pr_url}}
 
@@ -238,7 +243,7 @@ export const PLANNING_ONLY_WORKFLOW: Workflow = {
 export const FAST_TRACK_WORKFLOW: Workflow = {
   id: 'wf-fast-track',
   name: 'Fast Track',
-  description: 'Implementation agent immediately, verify, then human review. For small, well-understood changes.',
+  description: 'Implementation agent immediately, adversarial review, verify, then human review. For small, well-understood changes.',
   entryStepId: 'todo',
   steps: [
     { id: 'todo', type: 'human', label: 'Todo', state: 'todo', position: { x: 40, y: 150 } },
@@ -249,26 +254,32 @@ export const FAST_TRACK_WORKFLOW: Workflow = {
       tools: [...WRITE_TOOLS, 'create_pr'], permissions: ['read', 'write', 'execute'], position: { x: 200, y: 150 },
     },
     {
+      id: 'adversarial-review', type: 'agent', label: 'Adversarial Review', state: 'adversarial-review',
+      engine: 'claude', model: 'claude-opus-5', mode: 'high', output: 'review',
+      prompt: REVIEW_PROMPT, tools: [...READ_TOOLS, 'run_command'], permissions: ['read', 'execute'], position: { x: 360, y: 150 },
+    },
+    {
       id: 'verify', type: 'agent', label: 'Verify & Readiness', state: 'verify',
       engine: 'claude', model: 'claude-opus-5', mode: 'high', output: 'verdict',
-      prompt: VERIFY_PROMPT, tools: [...READ_TOOLS, 'run_command'], permissions: ['read', 'execute'], position: { x: 360, y: 150 },
+      prompt: VERIFY_PROMPT, tools: [...READ_TOOLS, 'run_command'], permissions: ['read', 'execute'], position: { x: 520, y: 150 },
     },
-    { id: 'in-review', type: 'human', label: 'Review', state: 'in-review', position: { x: 520, y: 150 } },
-    { id: 'merge', type: 'agent', label: 'Merge Pull Requests', state: 'merge', output: 'merge', position: { x: 680, y: 60 } },
+    { id: 'in-review', type: 'human', label: 'Review', state: 'in-review', position: { x: 680, y: 150 } },
+    { id: 'merge', type: 'agent', label: 'Merge Pull Requests', state: 'merge', output: 'merge', position: { x: 840, y: 60 } },
     {
       id: 'implement-feedback', type: 'agent', label: 'Address Feedback', state: 'implement-feedback',
       engine: 'claude', model: 'claude-sonnet-5', mode: 'high', output: 'pr',
-      prompt: IMPLEMENT_PROMPT, tools: [...WRITE_TOOLS, 'create_pr'], permissions: ['read', 'write', 'execute'], position: { x: 360, y: 260 },
+      prompt: IMPLEMENT_PROMPT, tools: [...WRITE_TOOLS, 'create_pr'], permissions: ['read', 'write', 'execute'], position: { x: 520, y: 260 },
     },
-    { id: 'done', type: 'end', label: 'Done', state: 'done', position: { x: 840, y: 150 } },
+    { id: 'done', type: 'end', label: 'Done', state: 'done', position: { x: 1000, y: 150 } },
   ],
   edges: [
     { from: 'todo', to: 'implement', event: 'start', label: 'Start' },
-    { from: 'implement', to: 'verify', event: 'complete', label: 'PR opened' },
+    { from: 'implement', to: 'adversarial-review', event: 'complete', label: 'PR opened' },
+    { from: 'adversarial-review', to: 'verify', event: 'complete', label: 'reviewed' },
     { from: 'verify', to: 'in-review', event: 'complete', label: 'GO' },
     { from: 'verify', to: 'implement-feedback', event: 'reject', label: 'NO_GO' },
     { from: 'in-review', to: 'implement-feedback', event: 'feedback', label: 'changes' },
-    { from: 'implement-feedback', to: 'verify', event: 'complete', label: 'pushed' },
+    { from: 'implement-feedback', to: 'adversarial-review', event: 'complete', label: 'pushed' },
     { from: 'in-review', to: 'merge', event: 'accept', label: 'Accept & merge' },
     { from: 'merge', to: 'done', event: 'complete', label: 'merged' },
   ],

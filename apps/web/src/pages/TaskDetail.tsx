@@ -20,17 +20,19 @@ import { ChatTab } from './taskDetail/ChatTab';
 import { CodeTab } from './taskDetail/CodeTab';
 import { Pipeline } from './taskDetail/Pipeline';
 import { PlanTab } from './taskDetail/PlanTab';
+import { ReviewTab } from './taskDetail/ReviewTab';
 import { StepsTab } from './taskDetail/StepsTab';
 import { SubtasksTab } from './taskDetail/SubtasksTab';
 import { SummaryTab } from './taskDetail/SummaryTab';
 
-type Tab = 'summary' | 'plan' | 'chat' | 'code' | 'steps' | 'artifacts' | 'subtasks';
+type Tab = 'summary' | 'plan' | 'chat' | 'code' | 'review' | 'steps' | 'artifacts' | 'subtasks';
 
 const TAB_LABELS: Record<Tab, string> = {
   summary: 'Summary',
   plan: 'Plan',
   chat: 'Chat',
   code: 'Code',
+  review: 'Review',
   steps: 'Steps',
   artifacts: 'Artifacts',
   subtasks: 'Subtasks',
@@ -115,7 +117,8 @@ export function TaskDetail() {
   const actions = availableActions(task, workflow);
   const agentActive = isAgentActive(task, workflow);
   const step = workflow ? getStep(workflow, task.currentStepId ?? workflow.entryStepId) : null;
-  const tabs: Tab[] = ['summary', 'plan', 'chat', 'code', 'steps', 'artifacts', ...(task.subtasks.length > 0 ? (['subtasks'] as Tab[]) : [])];
+  const hasReviewStep = Boolean(workflow?.steps.some((workflowStep) => workflowStep.output === 'review') || task.artifacts.some((artifact) => artifact.name === 'adversarial-review.md'));
+  const tabs: Tab[] = ['summary', 'plan', 'chat', 'code', ...(hasReviewStep ? (['review'] as Tab[]) : []), 'steps', 'artifacts', ...(task.subtasks.length > 0 ? (['subtasks'] as Tab[]) : [])];
   const defaultTab: Tab = task.subtasks.length > 0 ? 'subtasks' : 'summary';
   const requestedTab = searchParams.get('tab') as Tab | null;
   const tab: Tab = requestedTab && tabs.includes(requestedTab) ? requestedTab : defaultTab;
@@ -295,6 +298,7 @@ export function TaskDetail() {
               />
             )}
             {tab === 'code' && <CodeTab task={task} />}
+            {tab === 'review' && <ReviewTab task={task} />}
             {tab === 'steps' && <StepsTab task={task} workflow={workflow} agentActive={agentActive} />}
             {tab === 'artifacts' && <ArtifactsTab task={task} />}
             {tab === 'subtasks' && <SubtasksTab task={task} workflows={workflows} />}
