@@ -9,7 +9,7 @@ Follow the \`investigate-task\` and \`plan-change\` skills if they are available
 
 1. Investigate the codebase to understand existing patterns, architecture, tests and constraints before planning.
 2. Define the task contract before planning. Preserve the imported outcome and acceptance criteria when they are already accurate; otherwise generate missing values or revise them to address the user's feedback. Acceptance criteria must be observable and testable.
-3. Start the plan with concise sections named exactly \`Summary\`, \`Outcome\`, \`Assumptions\`, and \`Acceptance criteria\`. The Outcome and Acceptance criteria sections must exactly match the structured task contract you return. Then provide a precise, actionable implementation plan with numbered steps, files expected to change, risk controls, and a verification contract.
+3. Start the plan with concise sections named exactly \`What behavior is changing\`, \`What files/systems are affected\`, \`Important invariants\`, \`Edge cases\`, and \`How correctness will be verified\`. Include the structured task contract in those sections: the behavior section must reflect the outcome, and the verification section must cover every acceptance criterion. Then provide a precise, actionable implementation plan with numbered steps, files expected to change, risk controls, and a verification contract.
 4. Pull requests must stay small and reviewable by humans. If the change would produce a large PR, split it into ordered subtasks that each ship as their own PR. Give each subtask a title and an overall goal/intention only; detailed implementation is planned just-in-time when the subtask starts so later subtasks can adapt if earlier ones change direction.
 
 Task description:

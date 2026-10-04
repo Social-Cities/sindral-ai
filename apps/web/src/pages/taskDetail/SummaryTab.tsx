@@ -4,7 +4,7 @@ import { Markdown } from '@/components/Markdown';
 import { Button } from '@/components/Button';
 import { ExternalLink } from '@/components/ExternalLink';
 import { shortPrLabel } from '@/lib/format';
-import { planOverview } from '@/lib/plan';
+import { planOverview, type PlanOverview } from '@/lib/plan';
 
 interface SummaryTabProps {
   task: TaskWithRelations;
@@ -15,10 +15,11 @@ interface SummaryTabProps {
   onViewPlan: () => void;
 }
 
-const PLAN_FIELDS = [
-  ['summary', 'Summary'],
-  ['assumptions', 'Assumptions'],
-] as const;
+const PLAN_FIELDS: { key: keyof PlanOverview; label: string }[] = [
+  { key: 'behaviorChange', label: 'Behavior change' },
+  { key: 'affectedSystems', label: 'Affected files/systems' },
+  { key: 'verification', label: 'Verification' },
+];
 
 export function SummaryTab({ task, workflow, canApprove, approving, onApprove, onViewPlan }: SummaryTabProps) {
   const agentActive = isAgentActive(task, workflow);
@@ -94,7 +95,7 @@ export function SummaryTab({ task, workflow, canApprove, approving, onApprove, o
               </button>
             </div>
             <div className="grid gap-3">
-              {PLAN_FIELDS.map(([key, label]) => (
+              {PLAN_FIELDS.map(({ key, label }) => (
                 <div key={key} className="p-4 rounded-lg bg-muted border border-border min-w-0">
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{label}</p>
                   <div className="overflow-x-auto">

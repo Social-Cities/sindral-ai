@@ -1,22 +1,39 @@
 export interface PlanOverview {
-  summary: string;
-  outcome: string;
-  assumptions: string;
-  acceptanceCriteria: string;
+  behaviorChange: string;
+  affectedSystems: string;
+  invariants: string;
+  edgeCases: string;
+  verification: string;
 }
 
 const MISSING = 'Not specified in this plan.';
 
 function normalizeHeading(value: string): keyof PlanOverview | null {
   const heading = value.trim().replace(/[:#]+$/g, '').toLowerCase();
-  if (heading === 'summary') return 'summary';
-  if (heading === 'outcome' || heading === 'desired outcome') return 'outcome';
-  if (heading === 'assumptions' || heading === 'plan assumptions') return 'assumptions';
-  if (heading === 'acceptance criteria' || heading === 'acceptance criterion') return 'acceptanceCriteria';
+  if (['what behavior is changing', 'behavior changing', 'behavior change', 'behavior changes', 'summary', 'outcome', 'desired outcome'].includes(heading)) return 'behaviorChange';
+  if (
+    [
+      'what files/systems are affected',
+      'what files and systems are affected',
+      'files/systems affected',
+      'files and systems affected',
+      'affected files/systems',
+      'affected files and systems',
+      'files expected to change',
+      'systems affected',
+    ].includes(heading)
+  ) {
+    return 'affectedSystems';
+  }
+  if (['important invariants', 'invariants', 'constraints', 'assumptions', 'plan assumptions'].includes(heading)) return 'invariants';
+  if (['edge cases', 'edge cases to handle', 'risks', 'risk controls'].includes(heading)) return 'edgeCases';
+  if (['how correctness will be verified', 'correctness verification', 'verification', 'verification contract', 'testing', 'acceptance criteria', 'acceptance criterion'].includes(heading)) {
+    return 'verification';
+  }
   return null;
 }
 
-/** Extracts the four user-facing plan fields from agent-authored markdown. */
+/** Extracts the user-facing plan summary fields from agent-authored markdown. */
 export function planOverview(plan: string): PlanOverview {
   const lines = plan.split(/\r?\n/);
   const sections: Partial<Record<keyof PlanOverview, string[]>> = {};
@@ -46,9 +63,10 @@ export function planOverview(plan: string): PlanOverview {
   };
 
   return {
-    summary: read('summary', fallbackSummary?.trim() || MISSING),
-    outcome: read('outcome'),
-    assumptions: read('assumptions'),
-    acceptanceCriteria: read('acceptanceCriteria'),
+    behaviorChange: read('behaviorChange', fallbackSummary?.trim() || MISSING),
+    affectedSystems: read('affectedSystems'),
+    invariants: read('invariants'),
+    edgeCases: read('edgeCases'),
+    verification: read('verification'),
   };
 }

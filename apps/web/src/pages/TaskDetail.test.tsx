@@ -93,19 +93,25 @@ describe('TaskDetail', () => {
         outcome: 'A better result.',
         acceptanceCriteria: '- Tests pass.',
         plan:
-          '# Plan\n\n## Summary\nStep one.\n\n## Outcome\nA better result.\n\n## Assumptions\n- API remains stable.\n\n| Assumption | Risk |\n| --- | --- |\n| Existing API | Low |\n\n## Acceptance criteria\n- Tests pass.\n\n## Steps\n- full detail',
+          '# Plan\n\n## What behavior is changing\nStep one.\n\n## What files/systems are affected\n- apps/web/src/pages/taskDetail/PlanTab.tsx\n\n## Important invariants\n- API remains stable.\n\n| Assumption | Risk |\n| --- | --- |\n| Existing API | Low |\n\n## Edge cases\n- Empty plans still show an empty state.\n\n## How correctness will be verified\n- Tests pass.\n\n## Steps\n- full detail',
       }),
     );
     expect(await screen.findByRole('button', { name: 'Approve Plan' })).toBeInTheDocument();
     expect(screen.getByText('Step one.')).toBeInTheDocument();
-    expect(screen.getByText('A better result.')).toBeInTheDocument();
-    expect(screen.getByText('API remains stable.')).toBeInTheDocument();
-    expect(screen.getByRole('table')).toBeInTheDocument();
-    expect(screen.getByText('Tests pass.')).toBeInTheDocument();
+    expect(screen.getByText('Plan at a glance')).toBeInTheDocument();
+    expect(screen.getByText('Affected files/systems')).toBeInTheDocument();
+    expect(screen.getByText('apps/web/src/pages/taskDetail/PlanTab.tsx')).toBeInTheDocument();
+    expect(screen.getAllByText('Tests pass.').length).toBeGreaterThan(0);
     expect(screen.queryByText('full detail')).not.toBeInTheDocument();
     expect(screen.getByText(/Pinned — changes to this workflow/)).toBeInTheDocument();
 
     await user.click(screen.getByRole('tab', { name: 'Plan' }));
+    expect(screen.getAllByRole('tab', { name: 'Summary' }).some((node) => node.getAttribute('aria-selected') === 'true')).toBe(true);
+    expect(screen.getByText('What behavior is changing')).toBeInTheDocument();
+    expect(screen.getByText('API remains stable.')).toBeInTheDocument();
+    expect(screen.getByRole('table')).toBeInTheDocument();
+    expect(screen.queryByText('full detail')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('tab', { name: 'Implementation plan' }));
     expect(screen.getByText('full detail')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Approve Plan' }));
     expect(api.runTaskAction).toHaveBeenCalledWith('t2', 'approve', 0);

@@ -17,7 +17,7 @@ const RESULT_SHAPES: Record<StepOutputKind, string> = {
   plan: `{
   "kind": "plan",
   "summary": "one paragraph for the user",
-  "plan": "full markdown implementation plan",
+  "plan": "full markdown implementation plan. Start with concise sections named exactly: What behavior is changing, What files/systems are affected, Important invariants, Edge cases, and How correctness will be verified. Then include the detailed implementation plan.",
   "outcome": "the concise user-visible result this task must achieve",
   "acceptanceCriteria": "a markdown list of observable, testable conditions",
   "subtasks": [ { "title": "...", "goal": "..." } ]   // ONLY if the change must be split into multiple PRs; omit otherwise
