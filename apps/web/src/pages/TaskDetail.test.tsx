@@ -217,9 +217,13 @@ describe('TaskDetail', () => {
     );
 
     await user.click(await screen.findByRole('tab', { name: 'Review' }));
-    expect(screen.getByText('Automated review')).toBeInTheDocument();
-    expect(screen.getAllByText('The implementation updates task detail navigation.')).toHaveLength(2);
+    expect(screen.getByRole('list', { name: 'Reviews' })).toBeInTheDocument();
+    expect(screen.getByText('The implementation updates task detail navigation.')).toBeInTheDocument();
+    expect(screen.queryByText('No material findings.')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Adversarial review/ }));
     expect(screen.getByText('No material findings.')).toBeInTheDocument();
+    expect(screen.queryByText('The implementation updates task detail navigation.')).not.toBeInTheDocument();
   });
 
   it('runs an action optimistically and rolls back on error', async () => {

@@ -8,7 +8,9 @@ import {
   chatTriggersFeedback,
   eventForResult,
   extractTaskContract,
+  extractMarkdownSection,
   getStep,
+  removeMarkdownSection,
   snapshotWorkflow,
   transition,
   type AgentResult,
@@ -61,6 +63,7 @@ export interface OrchestratorDeps {
 }
 
 export const REVIEW_ARTIFACT = 'adversarial-review.md';
+export const DIFF_EXPLANATION_ARTIFACT = 'diff-explanation.md';
 export const VERIFY_ARTIFACT = 'verify-report.md';
 export const CONFLICT_PROMPT_VERSION = 'rebase-conflict-v1';
 export const OUTCOME_LEASE_MS = 30_000;
@@ -932,14 +935,28 @@ export class Orchestrator {
         );
       }
       case 'review':
-        await this.repo.createArtifact(userId, {
-          taskId: task.id,
-          jobId: job.id,
-          name: REVIEW_ARTIFACT,
-          contentType: 'text/markdown',
-          content: result.report,
-          dedupeKey: `job:${job.id}:artifact:${REVIEW_ARTIFACT}`,
-        });
+        {
+          const diffExplanation = extractMarkdownSection(result.report, 'Diff explanation');
+          if (diffExplanation) {
+            await this.repo.createArtifact(userId, {
+              taskId: task.id,
+              jobId: job.id,
+              name: DIFF_EXPLANATION_ARTIFACT,
+              contentType: 'text/markdown',
+              content: diffExplanation,
+              dedupeKey: `job:${job.id}:artifact:${DIFF_EXPLANATION_ARTIFACT}`,
+            });
+          }
+          const reviewReport = diffExplanation ? removeMarkdownSection(result.report, 'Diff explanation') : result.report;
+          await this.repo.createArtifact(userId, {
+            taskId: task.id,
+            jobId: job.id,
+            name: REVIEW_ARTIFACT,
+            contentType: 'text/markdown',
+            content: reviewReport,
+            dedupeKey: `job:${job.id}:artifact:${REVIEW_ARTIFACT}`,
+          });
+        }
         return persistGeneratedContract();
       case 'verdict':
         await this.repo.createArtifact(userId, {

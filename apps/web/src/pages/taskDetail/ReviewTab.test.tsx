@@ -1,19 +1,12 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import userEvent from '@testing-library/user-event';
 import { makeTaskWithRelations } from '@/test/fixtures';
-import { extractMarkdownSection, ReviewTab } from './ReviewTab';
+import { ReviewTab } from './ReviewTab';
 
 describe('ReviewTab', () => {
-  it('extracts the diff explanation section from a review report', () => {
-    expect(
-      extractMarkdownSection(
-        '# Review\n\n## Diff explanation\nChanged `TaskDetail` to expose review output.\n\n### Assumptions\nThe report uses standard headings.\n\n## Findings ordered by severity\nNone.',
-        'Diff explanation',
-      ),
-    ).toBe('Changed `TaskDetail` to expose review output.\n\n### Assumptions\nThe report uses standard headings.');
-  });
-
-  it('renders the latest diff explanation and full review', () => {
+  it('renders diff explanation and adversarial review as separate review documents', async () => {
+    const user = userEvent.setup();
     render(
       <ReviewTab
         task={makeTaskWithRelations({
@@ -30,7 +23,51 @@ describe('ReviewTab', () => {
               createdAt: '2026-01-01T00:00:00.000Z',
             },
             {
+              id: 'new-diff',
+              taskId: 'task-1',
+              jobId: null,
+              name: 'diff-explanation.md',
+              contentType: 'text/markdown',
+              content: 'Changed the task detail view.',
+              byteSize: 30,
+              downloadUrl: null,
+              createdAt: '2026-01-02T00:00:00.000Z',
+            },
+            {
               id: 'new-review',
+              taskId: 'task-1',
+              jobId: null,
+              name: 'adversarial-review.md',
+              contentType: 'text/markdown',
+              content: '## Findings ordered by severity\nNo material findings.',
+              byteSize: 51,
+              downloadUrl: null,
+              createdAt: '2026-01-02T00:00:00.000Z',
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.getByRole('list', { name: 'Reviews' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Diff explanation/ })).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByText('Changed the task detail view.')).toBeInTheDocument();
+    expect(screen.queryByText('No material findings.')).not.toBeInTheDocument();
+
+    await user.click(screen.getAllByRole('button', { name: /Adversarial review/ })[0]!);
+    expect(screen.getByText('No material findings.')).toBeInTheDocument();
+    expect(screen.queryByText('Changed the task detail view.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Old explanation.')).not.toBeInTheDocument();
+  });
+
+  it('splits older combined review reports into two review documents', async () => {
+    const user = userEvent.setup();
+    render(
+      <ReviewTab
+        task={makeTaskWithRelations({
+          artifacts: [
+            {
+              id: 'combined-review',
               taskId: 'task-1',
               jobId: null,
               name: 'adversarial-review.md',
@@ -45,11 +82,10 @@ describe('ReviewTab', () => {
       />,
     );
 
-    expect(screen.getByRole('heading', { name: 'Diff explanation' })).toBeInTheDocument();
-    expect(screen.getAllByText('Changed the task detail view.')).toHaveLength(2);
-    expect(screen.getByText('Full review')).toBeInTheDocument();
+    expect(screen.getByText('Changed the task detail view.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Adversarial review/ }));
     expect(screen.getByText('No material findings.')).toBeInTheDocument();
-    expect(screen.queryByText('Old explanation.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Changed the task detail view.')).not.toBeInTheDocument();
   });
 
   it('offers the owner-authorized URL for stored reviews without rendering content', () => {

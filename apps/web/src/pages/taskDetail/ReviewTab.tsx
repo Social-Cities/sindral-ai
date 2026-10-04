@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Artifact, TaskWithRelations } from '@sindral/shared';
+import { extractMarkdownSection, removeMarkdownSection } from '@sindral/shared';
 import { EmptyState } from '@/components/EmptyState';
 import { Markdown } from '@/components/Markdown';
 import { formatDateTime } from '@/lib/format';
@@ -9,72 +10,87 @@ interface ReviewTabProps {
 }
 
 const REVIEW_ARTIFACT = 'adversarial-review.md';
+const DIFF_EXPLANATION_ARTIFACT = 'diff-explanation.md';
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KiB`;
 }
 
-function headingText(line: string): { depth: number; text: string } | null {
-  const match = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line.trim());
-  if (!match) return null;
-  return { depth: match[1]!.length, text: match[2]!.trim().toLowerCase() };
+interface ReviewDocument {
+  id: string;
+  label: 'Diff explanation' | 'Adversarial review';
+  artifact: Artifact;
+  content: string | null;
+  order: number;
 }
 
-export function extractMarkdownSection(markdown: string, title: string): string | null {
-  const lines = markdown.split(/\r?\n/);
-  const target = title.trim().toLowerCase();
-  const startIndex = lines.findIndex((line) => headingText(line)?.text === target);
-  if (startIndex === -1) return null;
-
-  const startHeading = headingText(lines[startIndex]!);
-  if (!startHeading) return null;
-  const endIndex = lines.findIndex((line, index) => {
-    if (index <= startIndex) return false;
-    const heading = headingText(line);
-    return Boolean(heading && heading.depth <= startHeading.depth);
-  });
-  return lines.slice(startIndex + 1, endIndex === -1 ? undefined : endIndex).join('\n').trim() || null;
-}
-
-function reviewArtifacts(task: TaskWithRelations): Artifact[] {
-  return task.artifacts
-    .filter((artifact) => artifact.name === REVIEW_ARTIFACT)
+function reviewDocuments(task: TaskWithRelations): ReviewDocument[] {
+  const artifacts = task.artifacts
+    .filter((artifact) => artifact.name === DIFF_EXPLANATION_ARTIFACT || artifact.name === REVIEW_ARTIFACT)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+  const docs = artifacts.map((artifact): ReviewDocument => {
+    if (artifact.name === DIFF_EXPLANATION_ARTIFACT) {
+      return { id: artifact.id, label: 'Diff explanation', artifact, content: artifact.content, order: 0 };
+    }
+    return {
+      id: artifact.id,
+      label: 'Adversarial review',
+      artifact,
+      content: artifact.content ? removeMarkdownSection(artifact.content, 'Diff explanation') : null,
+      order: 1,
+    };
+  });
+
+  const hasDiffArtifact = artifacts.some((artifact) => artifact.name === DIFF_EXPLANATION_ARTIFACT);
+  if (!hasDiffArtifact) {
+    const latestCombined = artifacts.find((artifact) => artifact.name === REVIEW_ARTIFACT && artifact.content && extractMarkdownSection(artifact.content, 'Diff explanation'));
+    if (latestCombined?.content) {
+      docs.push({
+        id: `${latestCombined.id}:diff-explanation`,
+        label: 'Diff explanation',
+        artifact: latestCombined,
+        content: extractMarkdownSection(latestCombined.content, 'Diff explanation'),
+        order: 0,
+      });
+    }
+  }
+
+  return docs.sort((a, b) => b.artifact.createdAt.localeCompare(a.artifact.createdAt) || a.order - b.order);
 }
 
 export function ReviewTab({ task }: ReviewTabProps) {
-  const artifacts = reviewArtifacts(task);
+  const documents = reviewDocuments(task);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   useEffect(() => {
-    if (!selectedId && artifacts.length > 0) setSelectedId(artifacts[0]?.id ?? null);
-  }, [artifacts, selectedId]);
+    if (!selectedId && documents.length > 0) setSelectedId(documents[0]?.id ?? null);
+  }, [documents, selectedId]);
 
-  if (artifacts.length === 0) {
-    return <EmptyState title="No automated review yet" description="The diff explanation will appear here after adversarial review completes." />;
+  if (documents.length === 0) {
+    return <EmptyState title="No automated review yet" description="Diff explanation and adversarial review will appear here after review completes." />;
   }
 
-  const selected = artifacts.find((artifact) => artifact.id === selectedId) ?? artifacts[0];
-  const diffExplanation = selected?.content ? extractMarkdownSection(selected.content, 'Diff explanation') : null;
+  const selected = documents.find((document) => document.id === selectedId) ?? documents[0];
 
   return (
     <div className="flex h-full min-h-0">
-      {artifacts.length > 1 && (
+      {documents.length > 1 && (
         <div className="w-56 shrink-0 overflow-y-auto py-3 border-r border-border">
-          <p className="label-caps px-3 mb-2">Review runs</p>
-          <ul aria-label="Review runs">
-            {artifacts.map((artifact) => (
-              <li key={artifact.id}>
+          <p className="label-caps px-3 mb-2">Reviews</p>
+          <ul aria-label="Reviews">
+            {documents.map((document) => (
+              <li key={document.id}>
                 <button
                   type="button"
-                  onClick={() => setSelectedId(artifact.id)}
-                  aria-current={selected?.id === artifact.id ? 'true' : undefined}
+                  onClick={() => setSelectedId(document.id)}
+                  aria-current={selected?.id === document.id ? 'true' : undefined}
                   className={`w-full text-left px-3 py-1.5 text-xs font-mono transition-colors ${
-                    selected?.id === artifact.id ? 'text-foreground bg-secondary' : 'text-muted-foreground hover:text-secondary-foreground'
+                    selected?.id === document.id ? 'text-foreground bg-secondary' : 'text-muted-foreground hover:text-secondary-foreground'
                   }`}
                 >
-                  <span className="block truncate">{formatDateTime(artifact.createdAt)}</span>
-                  <span className="block text-[9px] text-muted-foreground/70">{formatBytes(artifact.byteSize)}</span>
+                  <span className="block truncate">{document.label}</span>
+                  <span className="block text-[9px] text-muted-foreground/70">{formatDateTime(document.artifact.createdAt)}</span>
                 </button>
               </li>
             ))}
@@ -86,20 +102,20 @@ export function ReviewTab({ task }: ReviewTabProps) {
         {selected && (
           <div className="max-w-4xl space-y-6">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Automated review</p>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">{selected.label}</p>
               <div className="flex flex-wrap items-center gap-3 text-[10px] font-mono text-muted-foreground">
-                <span>{formatDateTime(selected.createdAt)}</span>
-                <span>{formatBytes(selected.byteSize)}</span>
+                <span>{formatDateTime(selected.artifact.createdAt)}</span>
+                <span>{formatBytes(selected.artifact.byteSize)}</span>
               </div>
             </div>
 
             {selected.content === null ? (
               <div className="p-4 rounded-lg bg-muted border border-border max-w-3xl">
                 <p className="text-xs text-muted-foreground mb-3">This review is stored securely and is not loaded into the page.</p>
-                {selected.downloadUrl ? (
+                {selected.artifact.downloadUrl ? (
                   <a
-                    href={selected.downloadUrl}
-                    download={selected.name}
+                    href={selected.artifact.downloadUrl}
+                    download={selected.artifact.name}
                     className="inline-flex rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
                   >
                     Download review
@@ -109,23 +125,9 @@ export function ReviewTab({ task }: ReviewTabProps) {
                 )}
               </div>
             ) : (
-              <>
-                <section>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Diff explanation</p>
-                  <div className="p-4 rounded-lg bg-muted border border-border">
-                    <Markdown>{diffExplanation ?? selected.content}</Markdown>
-                  </div>
-                </section>
-
-                {diffExplanation && (
-                  <section>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Full review</p>
-                    <div className="p-4 rounded-lg bg-muted border border-border">
-                      <Markdown>{selected.content}</Markdown>
-                    </div>
-                  </section>
-                )}
-              </>
+              <div className="p-4 rounded-lg bg-muted border border-border">
+                <Markdown>{selected.content}</Markdown>
+              </div>
             )}
           </div>
         )}

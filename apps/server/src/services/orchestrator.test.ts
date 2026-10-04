@@ -220,6 +220,28 @@ describe('full SDLC happy path', () => {
     expect((await ctx.repo.listPullRequests(userId, task.id)).map((pullRequest) => pullRequest.status)).toEqual(['merged', 'open']);
   });
 
+  it('stores diff explanation separately from the adversarial review report', async () => {
+    let task = await newTask();
+    await orch().applyUserEvent(userId, task.id, 'start');
+    await completeNext(ctx, userId, plan());
+    await orch().applyUserEvent(userId, task.id, 'approve');
+    await completeNext(ctx, userId, pr(9));
+
+    await completeNext(ctx, userId, {
+      kind: 'review',
+      summary: 'reviewed',
+      report: '# Review\n\n## Diff explanation\nChanged the task detail view.\n\n## Findings ordered by severity\nNo material findings.',
+      verdict: 'NO_MATERIAL_FINDINGS',
+    });
+
+    const artifacts = await ctx.repo.listArtifacts(userId, task.id);
+    expect(artifacts.map((artifact) => artifact.name)).toEqual(['diff-explanation.md', 'adversarial-review.md']);
+    expect(artifacts.find((artifact) => artifact.name === 'diff-explanation.md')?.content).toBe('Changed the task detail view.');
+    expect(artifacts.find((artifact) => artifact.name === 'adversarial-review.md')?.content).toBe('# Review\n\n## Findings ordered by severity\nNo material findings.');
+    task = await reload(ctx, userId, task);
+    expect(agentPayload((await queuedJobs(task.id))[0]!).context.review).toBe('# Review\n\n## Findings ordered by severity\nNo material findings.');
+  });
+
   it('keeps using the pinned snapshot after the live workflow changes', async () => {
     let task = await newTask();
     task = await orch().applyUserEvent(userId, task.id, 'start');

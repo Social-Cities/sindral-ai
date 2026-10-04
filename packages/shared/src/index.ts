@@ -5,6 +5,7 @@ export * from './stateMachine.js';
 export * from './prompts.js';
 export * from './tickets.js';
 export * from './taskContract.js';
+export * from './markdownSections.js';
 export * from './defaultWorkflows.js';
 export * from './schemas.js';
 export * from './api.js';
