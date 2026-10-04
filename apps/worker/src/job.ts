@@ -234,7 +234,11 @@ async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx:
       taskKey,
       taskTitle: payload.context.task_title,
       motivation: agentMotivation || payload.context.task_description.trim() || undefined,
+      proposedSolution: stringField(raw, 'proposedSolution') || stringField(raw, 'proposed_solution') || undefined,
       assumptions: typeof raw['assumptions'] === 'string' ? raw['assumptions'] : undefined,
+      risks: stringField(raw, 'risks') || undefined,
+      acceptanceCriteria: stringField(raw, 'acceptanceCriteria') || payload.context.acceptance_criteria.trim() || undefined,
+      testing: stringField(raw, 'testing') || undefined,
       summary,
       token: credentials.githubToken,
       redactor: ctx.redactor,
@@ -256,11 +260,20 @@ interface PublishOptions extends AgentJobContext {
   taskKey: string;
   taskTitle: string;
   motivation?: string;
+  proposedSolution?: string;
   assumptions?: string;
+  risks?: string;
+  acceptanceCriteria?: string;
+  testing?: string;
   summary: string;
   token: string | null;
   jobId: string;
   githubFeedback?: GitHubFeedbackReference;
+}
+
+function stringField(raw: Record<string, unknown>, key: string): string {
+  const value = raw[key];
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 async function publishPr(opts: PublishOptions): Promise<Record<string, unknown>> {
@@ -290,7 +303,11 @@ async function publishPr(opts: PublishOptions): Promise<Record<string, unknown>>
       taskKey: opts.taskKey,
       taskTitle: opts.taskTitle,
       motivation: opts.motivation,
+      proposedSolution: opts.proposedSolution,
       assumptions: opts.assumptions,
+      risks: opts.risks,
+      acceptanceCriteria: opts.acceptanceCriteria,
+      testing: opts.testing,
       summary: opts.summary,
       jobId: opts.jobId,
       githubFeedback: opts.githubFeedback,

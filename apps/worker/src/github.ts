@@ -6,8 +6,18 @@ import type { RepoRef } from './workspace.js';
 /** Marker embedded in PR bodies/comments so the server can recognise Sindral's own posts. */
 export const SINDRAL_MARKER = '<!-- sindral -->';
 export const COMMIT_AUTHOR = 'Sindral AI <sindral@users.noreply.github.com>';
-const MAX_PR_SECTION_LENGTH = 5_000;
+const MAX_PR_SECTION_LENGTH = 2_000;
 const TRUNCATION_NOTICE = '\n\n_Section truncated for readability._';
+
+interface PrTextSections {
+  motivation?: string;
+  proposedSolution?: string;
+  assumptions?: string;
+  risks?: string;
+  acceptanceCriteria?: string;
+  testing?: string;
+  summary: string;
+}
 
 export type GhRunner = (args: readonly string[], opts?: RunOptions) => Promise<RunResult>;
 
@@ -25,19 +35,9 @@ export function prTitle(taskKey: string, taskTitle: string): string {
   return `${taskKey}: ${title}`.slice(0, 250);
 }
 
-export function prBody(opts: { taskKey: string; motivation?: string; assumptions?: string; summary: string; taskUrl?: string }): string {
+export function prBody(opts: PrTextSections & { taskKey: string; taskUrl?: string }): string {
   return [
-    '## Motivation',
-    '',
-    prSection(opts.motivation, '_No motivation provided._'),
-    '',
-    '## Assumptions',
-    '',
-    prSection(opts.assumptions, '_No additional assumptions were identified._'),
-    '',
-    '## Outcomes',
-    '',
-    prSection(opts.summary, '_No outcomes provided._'),
+    ...prSections(opts),
     '',
     `Task ${opts.taskKey}${opts.taskUrl ? ` (${opts.taskUrl})` : ''}`,
     '',
@@ -47,15 +47,51 @@ export function prBody(opts: { taskKey: string; motivation?: string; assumptions
   ].join('\n');
 }
 
+function prSections(opts: PrTextSections): string[] {
+  return [
+    ...section('Motivation', opts.motivation, '_No motivation provided._'),
+    '',
+    ...section('Proposed Solution', opts.proposedSolution || opts.summary, '_No proposed solution provided._'),
+    '',
+    ...section('Assumptions', opts.assumptions, '_No additional assumptions were identified._'),
+    '',
+    ...section('Risks', opts.risks, '_No risks were identified._'),
+    '',
+    ...section('Acceptance Criteria', opts.acceptanceCriteria, '_No acceptance criteria provided._'),
+    '',
+    ...section('Testing', opts.testing, '_No testing details provided._'),
+  ];
+}
+
+function section(title: string, value: string | undefined, fallback: string): string[] {
+  return [`## ${title}`, '', prSection(value, fallback)];
+}
+
 function prSection(value: string | undefined, fallback: string): string {
-  const text = value?.trim() || fallback;
+  const text = normalizeSection(value?.trim() || fallback);
   if (text.length <= MAX_PR_SECTION_LENGTH) return text;
   return `${text.slice(0, MAX_PR_SECTION_LENGTH - TRUNCATION_NOTICE.length).trimEnd()}${TRUNCATION_NOTICE}`;
 }
 
-export function prComment(summary: string, jobId?: string, sourceUrl?: string | null): string {
+function normalizeSection(text: string): string {
+  if (hasMarkdownStructure(text)) return text;
+  const sentences = text.split(/(?<=[.!?])\s+(?=[A-Z0-9`])/).map((sentence) => sentence.trim()).filter(Boolean);
+  if (sentences.length <= 1 || (sentences.length < 3 && text.length <= 180)) return text;
+  return sentences.map((sentence) => `- ${sentence}`).join('\n');
+}
+
+function hasMarkdownStructure(text: string): boolean {
+  return /(^|\n)\s*(?:[-*+]\s+|\d+\.\s+|#{1,6}\s+|>\s+|\|.+\|)/.test(text) || /\n\s*\n/.test(text);
+}
+
+export function prComment(summary: string, jobId?: string, sourceUrl?: string | null, details: Partial<Omit<PrTextSections, 'summary'>> = {}): string {
   const marker = jobId ? `<!-- sindral:job:${jobId} -->` : SINDRAL_MARKER;
-  return [marker, summary.trim() || '_No summary provided._', ...(sourceUrl ? ['', `In response to ${sourceUrl}`] : [])].join('\n');
+  return [
+    marker,
+    '',
+    ...prSections({ ...details, summary }),
+    ...(sourceUrl ? ['', `In response to ${sourceUrl}`] : []),
+  ].join('\n');
 }
 
 export function commitMessage(taskKey: string, summary: string): string {
@@ -107,7 +143,11 @@ export interface EnsurePrOptions {
   taskKey: string;
   taskTitle: string;
   motivation?: string;
+  proposedSolution?: string;
   assumptions?: string;
+  risks?: string;
+  acceptanceCriteria?: string;
+  testing?: string;
   summary: string;
   jobId?: string;
   githubFeedback?: GitHubFeedbackReference;
@@ -153,7 +193,16 @@ export async function ensurePr(opts: EnsurePrOptions): Promise<EnsurePrResult> {
       '--title',
       prTitle(opts.taskKey, opts.taskTitle),
       '--body',
-      prBody({ taskKey: opts.taskKey, motivation: opts.motivation, assumptions: opts.assumptions, summary: opts.summary }),
+      prBody({
+        taskKey: opts.taskKey,
+        motivation: opts.motivation,
+        proposedSolution: opts.proposedSolution,
+        assumptions: opts.assumptions,
+        risks: opts.risks,
+        acceptanceCriteria: opts.acceptanceCriteria,
+        testing: opts.testing,
+        summary: opts.summary,
+      }),
     ],
     { cwd: opts.cwd },
   );
@@ -181,7 +230,14 @@ async function postPrUpdate(opts: EnsurePrOptions, prUrl: string): Promise<void>
     if (existing.failed || existing.exitCode !== 0) fail('gh api comment lookup', existing);
     if (existing.stdout.trim()) return;
   }
-  const body = prComment(opts.summary, opts.jobId, opts.githubFeedback?.commentUrl);
+  const body = prComment(opts.summary, opts.jobId, opts.githubFeedback?.commentUrl, {
+    motivation: opts.motivation,
+    proposedSolution: opts.proposedSolution,
+    assumptions: opts.assumptions,
+    risks: opts.risks,
+    acceptanceCriteria: opts.acceptanceCriteria,
+    testing: opts.testing,
+  });
   if (directReply) {
     const reply = await opts.gh(
       ['api', '--method', 'POST', `repos/${opts.repo.full}/pulls/${number}/comments/${opts.githubFeedback!.commentId}/replies`, '-f', `body=${body}`],

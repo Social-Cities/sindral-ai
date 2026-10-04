@@ -20,34 +20,63 @@ describe('PR text', () => {
     const body = prBody({
       taskKey: 'ENG-1',
       motivation: 'Reviewers need useful context.',
+      proposedSolution: 'Split the summary into reviewer-friendly sections.',
       assumptions: '- Existing callers remain compatible.',
+      risks: 'None.',
+      acceptanceCriteria: '- Reviewers can scan each required section.',
+      testing: '- Ran worker tests.',
       summary: 'Did the thing.',
     });
     expect(body).toContain('## Motivation\n\nReviewers need useful context.');
+    expect(body).toContain('## Proposed Solution\n\nSplit the summary into reviewer-friendly sections.');
     expect(body).toContain('## Assumptions\n\n- Existing callers remain compatible.');
-    expect(body).toContain('## Outcomes\n\nDid the thing.');
-    expect(body).toContain('Did the thing.');
+    expect(body).toContain('## Risks\n\nNone.');
+    expect(body).toContain('## Acceptance Criteria\n\n- Reviewers can scan each required section.');
+    expect(body).toContain('## Testing\n\n- Ran worker tests.');
     expect(body).toContain('Task ENG-1');
     expect(body.trim().endsWith(SINDRAL_MARKER)).toBe(true);
     expect(prComment('Fixed it').startsWith(`${SINDRAL_MARKER}\n`)).toBe(true);
-    expect(prComment('Fixed it')).toContain('Fixed it');
+    expect(prComment('Fixed it')).toContain('## Proposed Solution\n\nFixed it');
   });
 
   it('uses reviewer-friendly fallbacks when optional PR context is missing', () => {
     const body = prBody({ taskKey: 'ENG-1', summary: '' });
     expect(body).toContain('## Motivation\n\n_No motivation provided._');
     expect(body).toContain('## Assumptions\n\n_No additional assumptions were identified._');
-    expect(body).toContain('## Outcomes\n\n_No outcomes provided._');
+    expect(body).toContain('## Proposed Solution\n\n_No proposed solution provided._');
+    expect(body).toContain('## Risks\n\n_No risks were identified._');
+    expect(body).toContain('## Acceptance Criteria\n\n_No acceptance criteria provided._');
+    expect(body).toContain('## Testing\n\n_No testing details provided._');
   });
 
   it('bounds long PR sections while preserving the reviewer template and marker', () => {
-    const body = prBody({ taskKey: 'ENG-1', motivation: 'm'.repeat(100_000), assumptions: 'a'.repeat(100_000), summary: 'o'.repeat(100_000) });
-    expect(body.length).toBeLessThan(16_000);
+    const body = prBody({
+      taskKey: 'ENG-1',
+      motivation: 'm'.repeat(100_000),
+      proposedSolution: 'p'.repeat(100_000),
+      assumptions: 'a'.repeat(100_000),
+      risks: 'r'.repeat(100_000),
+      acceptanceCriteria: 'c'.repeat(100_000),
+      testing: 't'.repeat(100_000),
+      summary: 'o'.repeat(100_000),
+    });
+    expect(body.length).toBeLessThan(14_000);
     expect(body).toContain('## Motivation');
+    expect(body).toContain('## Proposed Solution');
     expect(body).toContain('## Assumptions');
-    expect(body).toContain('## Outcomes');
-    expect(body.match(/_Section truncated for readability\._/g)).toHaveLength(3);
+    expect(body).toContain('## Risks');
+    expect(body).toContain('## Acceptance Criteria');
+    expect(body).toContain('## Testing');
+    expect(body.match(/_Section truncated for readability\._/g)).toHaveLength(6);
     expect(body.trim().endsWith(SINDRAL_MARKER)).toBe(true);
+  });
+
+  it('breaks up long plain prose sections for GitHub readability', () => {
+    const body = prBody({
+      taskKey: 'ENG-1',
+      summary: 'Implemented the first change. Implemented the second change. Verified the result with focused tests.',
+    });
+    expect(body).toContain('- Implemented the first change.\n- Implemented the second change.\n- Verified the result with focused tests.');
   });
 
   it('uses the first non-empty summary line as the commit subject', () => {
@@ -64,7 +93,13 @@ describe('PR text', () => {
 describe('ensurePr', () => {
   const base = {
     cwd: '/wt', repo, branch: 'sindral/eng-1', baseBranch: 'main', taskKey: 'ENG-1', taskTitle: 'Add thing',
-    motivation: 'The old behavior is confusing.', assumptions: '- The API remains stable.', summary: 'Did it',
+    motivation: 'The old behavior is confusing.',
+    proposedSolution: '- Keep the API stable.\n- Update the worker formatting.',
+    assumptions: '- The API remains stable.',
+    risks: 'None.',
+    acceptanceCriteria: '- PRs use all required sections.',
+    testing: '- Unit tests passed.',
+    summary: 'Did it',
   };
 
   it('creates a PR when none exists', async () => {
@@ -82,8 +117,11 @@ describe('ensurePr', () => {
     expect(body).toContain(SINDRAL_MARKER);
     expect(body).toContain('Task ENG-1');
     expect(body).toContain('## Motivation\n\nThe old behavior is confusing.');
+    expect(body).toContain('## Proposed Solution\n\n- Keep the API stable.\n- Update the worker formatting.');
     expect(body).toContain('## Assumptions\n\n- The API remains stable.');
-    expect(body).toContain('## Outcomes\n\nDid it');
+    expect(body).toContain('## Risks\n\nNone.');
+    expect(body).toContain('## Acceptance Criteria\n\n- PRs use all required sections.');
+    expect(body).toContain('## Testing\n\n- Unit tests passed.');
     expect(calls.some((c) => c[1] === 'comment')).toBe(false);
   });
 
@@ -93,7 +131,11 @@ describe('ensurePr', () => {
     expect(result).toEqual({ url: 'https://github.com/acme/widgets/pull/3', created: false });
     const comment = calls.find((c) => c[1] === 'comment');
     expect(comment?.[2]).toBe('https://github.com/acme/widgets/pull/3');
-    expect(comment?.[comment.indexOf('--body') + 1]).toBe(`${SINDRAL_MARKER}\nDid it`);
+    const body = comment?.[comment.indexOf('--body') + 1] ?? '';
+    expect(body).toContain(SINDRAL_MARKER);
+    expect(body).toContain('## Motivation\n\nThe old behavior is confusing.');
+    expect(body).toContain('## Proposed Solution\n\n- Keep the API stable.\n- Update the worker formatting.');
+    expect(body).toContain('## Testing\n\n- Unit tests passed.');
     expect(calls.some((c) => c[1] === 'create')).toBe(false);
   });
 

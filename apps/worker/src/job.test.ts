@@ -200,7 +200,10 @@ describe('runJob', () => {
       expect(opts.cwd).toBe(wt);
       await fs.writeFile(opts.env['SINDRAL_RESULT_FILE']!, JSON.stringify({
         motivation: '   ',
+        proposedSolution: '- Added a per-user limiter.\n- Preserved the existing auth flow.',
         assumptions: '- Limits are scoped per authenticated user.',
+        risks: 'None.',
+        testing: '- Ran the limiter tests.',
         summary: 'Implemented and tested a per-user limiter.',
       }));
       return {};
@@ -243,8 +246,11 @@ describe('runJob', () => {
     const create = ghCalls.find((c) => c[1] === 'create');
     const body = create?.[create.indexOf('--body') + 1] ?? '';
     expect(body).toContain('## Motivation\n\nLimit requests per user.');
+    expect(body).toContain('## Proposed Solution\n\n- Added a per-user limiter.\n- Preserved the existing auth flow.');
     expect(body).toContain('## Assumptions\n\n- Limits are scoped per authenticated user.');
-    expect(body).toContain('## Outcomes\n\nImplemented and tested a per-user limiter.');
+    expect(body).toContain('## Risks\n\nNone.');
+    expect(body).toContain('## Acceptance Criteria\n\n- Requests above the limit are rejected.');
+    expect(body).toContain('## Testing\n\n- Ran the limiter tests.');
     expect(api.events.some((e) => e.type === 'message' && e.message.includes('pull/9'))).toBe(true);
   });
 

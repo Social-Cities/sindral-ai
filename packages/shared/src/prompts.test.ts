@@ -29,7 +29,10 @@ describe('protocolInstructions', () => {
   it('asks implementation agents for reviewer-friendly PR context', () => {
     const out = protocolInstructions('pr', '/tmp/result.json');
     expect(out).toContain('"motivation"');
+    expect(out).toContain('"proposedSolution"');
     expect(out).toContain('"assumptions"');
-    expect(out).toContain('what changed and how it was verified');
+    expect(out).toContain('"risks"');
+    expect(out).toContain('"testing"');
+    expect(out).toContain('reviewer-friendly summary');
   });
 });
