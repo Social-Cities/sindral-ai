@@ -207,6 +207,25 @@ describe('tasks API', () => {
     expect(outsideProject.statusCode).toBe(400);
   });
 
+  it('creates projects from existing repositories without creating GitHub repositories', async () => {
+    const createdProject = await ctx.app.inject({
+      method: 'POST',
+      url: '/api/projects',
+      headers: asA(),
+      payload: {
+        name: 'Platform',
+        description: 'Platform work',
+        repos: ['acme/api', 'acme/web'],
+      },
+    });
+
+    expect(createdProject.statusCode).toBe(201);
+    const project = createdProject.json<{ project: Project }>().project;
+    expect(project).toMatchObject({ name: 'Platform', description: 'Platform work' });
+    expect(project.repositories.map((repo) => repo.repository)).toEqual(['acme/api', 'acme/web']);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('returns 409 for invalid transitions and 404 for unknown tasks', async () => {
     const task = await createTask();
     const res = await taskAction(task.id, 'approve');

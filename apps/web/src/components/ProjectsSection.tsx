@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { CreateGitHubRepositoryInput } from '@sindral/shared';
 import { Button } from '@/components/Button';
@@ -19,18 +19,27 @@ function repositoryNameFromTitle(value: string): string {
     .slice(0, 100);
 }
 
+type RepositoryMode = 'new' | 'existing';
+
 export function ProjectsSection() {
   const projects = useProjects();
   const githubCatalog = useGitHubCatalog();
   const createProject = useCreateProject();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [repositoryMode, setRepositoryMode] = useState<RepositoryMode>('new');
   const [owner, setOwner] = useState('');
   const [repoName, setRepoName] = useState('');
   const [repoEdited, setRepoEdited] = useState(false);
+  const [existingRepos, setExistingRepos] = useState<string[]>([]);
   const [visibility, setVisibility] = useState<CreateGitHubRepositoryInput['visibility']>('private');
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<string | null>(null);
+
+  const catalogRepositories = useMemo(
+    () => [...(githubCatalog.data?.repositories ?? [])].sort((a, b) => a.fullName.localeCompare(b.fullName)),
+    [githubCatalog.data?.repositories],
+  );
 
   useEffect(() => {
     const firstOwner = githubCatalog.data?.owners[0]?.login;
@@ -44,93 +53,169 @@ export function ProjectsSection() {
     setCreated(null);
   }
 
+  function updateMode(value: RepositoryMode) {
+    setRepositoryMode(value);
+    setError(null);
+    setCreated(null);
+  }
+
+  function toggleExistingRepo(repository: string) {
+    setExistingRepos((current) =>
+      current.includes(repository)
+        ? current.filter((item) => item !== repository)
+        : [...current, repository],
+    );
+    setError(null);
+    setCreated(null);
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     setError(null);
     setCreated(null);
     const trimmedName = name.trim();
     const trimmedRepoName = repoName.trim();
-    if (!trimmedName || !owner || !trimmedRepoName) {
+    if (!trimmedName) {
+      setError('Enter a project title.');
+      return;
+    }
+    if (repositoryMode === 'new' && (!owner || !trimmedRepoName)) {
       setError('Enter a project title, owner and repository name.');
       return;
     }
+    if (repositoryMode === 'existing' && existingRepos.length === 0) {
+      setError('Select at least one existing repository.');
+      return;
+    }
     try {
-      const result = await createProject.mutateAsync({
-        name: trimmedName,
-        description: description.trim(),
-        repository: {
-          owner,
-          name: trimmedRepoName,
-          visibility,
-          description: description.trim() || undefined,
-        },
-      });
-      setCreated(result.project.repositories[0]?.repository ?? result.project.name);
+      const trimmedDescription = description.trim();
+      const result = await createProject.mutateAsync(repositoryMode === 'existing'
+        ? {
+            name: trimmedName,
+            description: trimmedDescription,
+            repos: existingRepos,
+          }
+        : {
+            name: trimmedName,
+            description: trimmedDescription,
+            repository: {
+              owner,
+              name: trimmedRepoName,
+              visibility,
+              description: trimmedDescription || undefined,
+            },
+          });
+      setCreated(repositoryMode === 'existing'
+        ? `Created project using ${result.project.repositories.length} ${result.project.repositories.length === 1 ? 'repository' : 'repositories'}.`
+        : `Created project and initialized ${result.project.repositories[0]?.repository ?? result.project.name}.`);
       setName('');
       setDescription('');
       setRepoName('');
       setRepoEdited(false);
+      setExistingRepos([]);
     } catch (err) {
       setError(errorText(err));
     }
   }
 
   const connected = githubCatalog.data?.connected === true;
+  const canSubmit = connected && Boolean(name.trim()) && (repositoryMode === 'existing' ? existingRepos.length > 0 : Boolean(owner && repoName.trim()));
 
   return (
     <div className="space-y-5">
       <form onSubmit={submit} className="space-y-3">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="inline-flex rounded-md border border-border bg-input p-1" aria-label="Repository source">
+          {(['new', 'existing'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => updateMode(mode)}
+              className={`rounded px-3 py-1.5 text-xs font-medium transition-colors ${
+                repositoryMode === mode ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
+              }`}
+              aria-pressed={repositoryMode === mode}
+            >
+              {mode === 'new' ? 'Create new repo' : 'Use existing repos'}
+            </button>
+          ))}
+        </div>
+        <div className={`grid grid-cols-1 gap-3 ${repositoryMode === 'new' ? 'sm:grid-cols-2' : ''}`}>
           <Input label="App title" value={name} onChange={(event) => updateName(event.target.value)} placeholder="Billing platform" maxLength={200} required />
-          <Input
-            label="Repository name"
-            value={repoName}
-            onChange={(event) => {
-              setRepoEdited(true);
-              setRepoName(event.target.value);
-              setError(null);
-              setCreated(null);
-            }}
-            placeholder="billing-platform"
-            mono
-            maxLength={100}
-            required
-          />
+          {repositoryMode === 'new' && (
+            <Input
+              label="Repository name"
+              value={repoName}
+              onChange={(event) => {
+                setRepoEdited(true);
+                setRepoName(event.target.value);
+                setError(null);
+                setCreated(null);
+              }}
+              placeholder="billing-platform"
+              mono
+              maxLength={100}
+              required
+            />
+          )}
         </div>
         <Input label="Description" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What this app is for" maxLength={2000} />
-        <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-3">
-          <label className="space-y-1">
-            <span className="label-caps block">Owner</span>
-            <select
-              aria-label="Repository owner"
-              value={owner}
-              onChange={(event) => setOwner(event.target.value)}
-              className="w-full rounded border border-border bg-input px-3 py-2 text-sm font-mono text-foreground outline-none focus:border-accent/40"
-              disabled={!connected}
-            >
-              {!connected && <option value="">Connect GitHub first</option>}
-              {githubCatalog.data?.owners.map((item) => <option key={item.login} value={item.login}>{item.login}</option>)}
-            </select>
-          </label>
-          <label className="space-y-1">
-            <span className="label-caps block">Visibility</span>
-            <select
-              aria-label="Repository visibility"
-              value={visibility}
-              onChange={(event) => setVisibility(event.target.value as CreateGitHubRepositoryInput['visibility'])}
-              className="w-full rounded border border-border bg-input px-3 py-2 text-sm text-foreground outline-none focus:border-accent/40"
-              disabled={!connected}
-            >
-              <option value="private">Private</option>
-              <option value="public">Public</option>
-            </select>
-          </label>
-        </div>
-        {githubCatalog.isLoading && <p className="text-xs text-muted-foreground">Loading GitHub owners…</p>}
-        {githubCatalog.data && !connected && <p className="text-xs text-muted-foreground">Connect GitHub above to create project repositories.</p>}
-        {created && <p className="text-xs text-[#34d399]" role="status">Created project and initialized {created}.</p>}
+        {repositoryMode === 'new' ? (
+          <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-3">
+            <label className="space-y-1">
+              <span className="label-caps block">Owner</span>
+              <select
+                aria-label="Repository owner"
+                value={owner}
+                onChange={(event) => setOwner(event.target.value)}
+                className="w-full rounded border border-border bg-input px-3 py-2 text-sm font-mono text-foreground outline-none focus:border-accent/40"
+                disabled={!connected}
+              >
+                {!connected && <option value="">Connect GitHub first</option>}
+                {githubCatalog.data?.owners.map((item) => <option key={item.login} value={item.login}>{item.login}</option>)}
+              </select>
+            </label>
+            <label className="space-y-1">
+              <span className="label-caps block">Visibility</span>
+              <select
+                aria-label="Repository visibility"
+                value={visibility}
+                onChange={(event) => setVisibility(event.target.value as CreateGitHubRepositoryInput['visibility'])}
+                className="w-full rounded border border-border bg-input px-3 py-2 text-sm text-foreground outline-none focus:border-accent/40"
+                disabled={!connected}
+              >
+                <option value="private">Private</option>
+                <option value="public">Public</option>
+              </select>
+            </label>
+          </div>
+        ) : (
+          <div>
+            <p className="label-caps mb-2">Repositories</p>
+            {catalogRepositories.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No writable repositories found for this GitHub account.</p>
+            ) : (
+              <div className="max-h-48 overflow-y-auto rounded-md border border-border bg-input divide-y divide-border">
+                {catalogRepositories.map((repository) => (
+                  <label key={repository.fullName} className="flex items-center gap-2 px-3 py-2 text-xs text-secondary-foreground">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-accent"
+                      checked={existingRepos.includes(repository.fullName)}
+                      onChange={() => toggleExistingRepo(repository.fullName)}
+                    />
+                    <span className="min-w-0 flex-1 font-mono text-foreground truncate">{repository.fullName}</span>
+                    <span className="text-[10px] text-muted-foreground">{repository.private ? 'Private' : 'Public'}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        {githubCatalog.isLoading && <p className="text-xs text-muted-foreground">Loading GitHub {repositoryMode === 'existing' ? 'repositories' : 'owners'}…</p>}
+        {githubCatalog.data && !connected && <p className="text-xs text-muted-foreground">Connect GitHub above to choose project repositories.</p>}
+        {created && <p className="text-xs text-[#34d399]" role="status">{created}</p>}
         {error && <p className="text-xs text-[#f87171]" role="alert">{error}</p>}
-        <Button type="submit" loading={createProject.isPending} disabled={!connected || !name.trim() || !owner || !repoName.trim()}>
+        <Button type="submit" loading={createProject.isPending} disabled={!canSubmit}>
           Create project
         </Button>
       </form>

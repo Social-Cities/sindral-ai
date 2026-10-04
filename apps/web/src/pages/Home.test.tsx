@@ -179,4 +179,67 @@ describe('Home', () => {
     }));
     expect(await screen.findByText('Created project and initialized acme/billing-platform.')).toBeInTheDocument();
   });
+
+  it('creates a new project from existing GitHub repositories', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getGitHubCatalog).mockResolvedValue({
+      connected: true,
+      source: 'oauth',
+      repositories: [
+        {
+          id: 1,
+          name: 'api',
+          fullName: 'acme/api',
+          private: true,
+          description: null,
+          url: 'https://github.com/acme/api',
+          defaultBranch: 'main',
+          pushedAt: '2026-01-01T00:00:00.000Z',
+          owner: 'acme',
+        },
+        {
+          id: 2,
+          name: 'web',
+          fullName: 'acme/web',
+          private: false,
+          description: null,
+          url: 'https://github.com/acme/web',
+          defaultBranch: 'main',
+          pushedAt: '2026-01-01T00:00:00.000Z',
+          owner: 'acme',
+        },
+      ],
+      owners: [{ login: 'acme', type: 'organization', avatarUrl: null, role: 'admin' }],
+    });
+    vi.mocked(api.createProject).mockResolvedValue({
+      project: {
+        id: 'project-1',
+        userId: 'user-1',
+        name: 'Platform',
+        description: 'Platform work',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        repositories: [
+          { id: 'repo-1', userId: 'user-1', projectId: 'project-1', repository: 'acme/api', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+          { id: 'repo-2', userId: 'user-1', projectId: 'project-1', repository: 'acme/web', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+        ],
+      },
+    });
+    renderWithProviders(<Home />);
+
+    await user.click(await screen.findByRole('tab', { name: 'New project' }));
+    await user.click(screen.getByRole('button', { name: 'Use existing repos' }));
+    await user.type(screen.getByLabelText('App title'), 'Platform');
+    await user.type(screen.getByLabelText('Description'), 'Platform work');
+    await user.click(screen.getByRole('checkbox', { name: /acme\/api/ }));
+    await user.click(screen.getByRole('checkbox', { name: /acme\/web/ }));
+    await user.click(screen.getByRole('button', { name: 'Create project' }));
+
+    await waitFor(() => expect(api.createProject).toHaveBeenCalledWith({
+      name: 'Platform',
+      description: 'Platform work',
+      repos: ['acme/api', 'acme/web'],
+    }));
+    expect(await screen.findByText('Created project using 2 repositories.')).toBeInTheDocument();
+  });
 });
