@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { Workflow } from '@sindral/shared';
 import { availableActions, getStep, isAgentActive } from '@sindral/shared';
 import { displayNameFor, useAuth } from '@/auth/AuthProvider';
@@ -10,7 +10,7 @@ import { ExternalLink } from '@/components/ExternalLink';
 import { Modal } from '@/components/Modal';
 import { PageLoader, Spinner } from '@/components/Spinner';
 import { StatusBadge } from '@/components/StatusBadge';
-import { useRepinTaskWorkflow, useSendMessage, useTask, useTaskAction } from '@/hooks/useTasks';
+import { useDeleteTask, useRepinTaskWorkflow, useSendMessage, useTask, useTaskAction } from '@/hooks/useTasks';
 import { useWorkflows } from '@/hooks/useWorkflows';
 import { ApiError } from '@/lib/api';
 import { formatDate } from '@/lib/format';
@@ -82,11 +82,13 @@ function workflowsMatch(a: Workflow, b: Workflow): boolean {
 
 export function TaskDetail() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const taskQuery = useTask(id);
   const workflowsQuery = useWorkflows();
   const [pendingCloseEvent, setPendingCloseEvent] = useState<'mark-done' | 'mark-wont-do' | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const task = taskQuery.data ?? null;
   const workflows = useMemo(() => workflowsQuery.data ?? [], [workflowsQuery.data]);
@@ -97,6 +99,7 @@ export function TaskDetail() {
   const action = useTaskAction(id ?? '', workflow);
   const repinWorkflow = useRepinTaskWorkflow(id ?? '');
   const send = useSendMessage(id ?? '', workflow);
+  const deleteTask = useDeleteTask();
 
   if (taskQuery.isLoading) return <PageLoader label="Loading task…" />;
   if (taskQuery.isError || !task) {
@@ -130,6 +133,7 @@ export function TaskDetail() {
   };
   const userInitial = (displayNameFor(user, 'U').charAt(0) || 'U').toUpperCase();
   const actionError = action.error ? errorMessage(action.error) : repinWorkflow.error ? errorMessage(repinWorkflow.error) : null;
+  const deleteError = deleteTask.error ? errorMessage(deleteTask.error) : null;
   const canApprovePlan = actions.some((item) => item.event === 'approve');
   const approvePlan = () => action.mutate('approve');
   const runAction = (event: string) => {
@@ -140,6 +144,16 @@ export function TaskDetail() {
     if (!pendingCloseEvent) return;
     action.mutate(pendingCloseEvent);
     setPendingCloseEvent(null);
+  };
+  const confirmDelete = async () => {
+    if (!id) return;
+    try {
+      await deleteTask.mutateAsync(id);
+      setConfirmingDelete(false);
+      navigate('/tasks');
+    } catch {
+      // The mutation keeps the error available for the confirmation dialog.
+    }
   };
 
   return (
@@ -190,6 +204,9 @@ export function TaskDetail() {
               {a.label}
             </Button>
           ))}
+          <Button variant="danger" onClick={() => setConfirmingDelete(true)} disabled={action.isPending || deleteTask.isPending}>
+            Delete
+          </Button>
           {agentActive && <Spinner label="Agent working…" />}
         </div>
       </div>
@@ -322,6 +339,29 @@ export function TaskDetail() {
         }
       >
         This stops queued work for the task and hides it from the default Active task view. If an agent is already working, wait for it to finish first. You can still find the task with the status filter.
+      </Modal>
+
+      <Modal
+        open={confirmingDelete}
+        title="Delete task?"
+        onClose={() => !deleteTask.isPending && setConfirmingDelete(false)}
+        footer={
+          <>
+            <Button variant="subtle" className="flex-1" onClick={() => setConfirmingDelete(false)} disabled={deleteTask.isPending}>
+              Cancel
+            </Button>
+            <Button variant="danger" className="flex-1" onClick={() => void confirmDelete()} loading={deleteTask.isPending}>
+              Delete task
+            </Button>
+          </>
+        }
+      >
+        <p>Deleting removes this task, its subtasks, messages, jobs, and artifacts. This cannot be undone.</p>
+        {deleteError && (
+          <p className="mt-3 text-[#f87171]" role="alert">
+            {deleteError}
+          </p>
+        )}
       </Modal>
     </div>
   );

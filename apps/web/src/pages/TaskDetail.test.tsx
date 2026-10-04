@@ -17,6 +17,7 @@ vi.mock('@/lib/api', async (importOriginal) => {
     runTaskAction: vi.fn(),
     repinTaskWorkflow: vi.fn(),
     sendMessage: vi.fn(),
+    deleteTask: vi.fn(),
     getTaskJobs: vi.fn().mockResolvedValue({ jobs: [] }),
     getJobLogs: vi.fn().mockResolvedValue({ logs: [] }),
     getTaskDiff: vi.fn().mockResolvedValue({ files: [] }),
@@ -34,6 +35,7 @@ describe('TaskDetail', () => {
     vi.mocked(api.runTaskAction).mockReset();
     vi.mocked(api.repinTaskWorkflow).mockReset();
     vi.mocked(api.sendMessage).mockReset();
+    vi.mocked(api.deleteTask).mockReset();
   });
 
   it('offers "Start Planning" for a todo task', async () => {
@@ -139,6 +141,19 @@ describe('TaskDetail', () => {
     await user.click(within(dialog).getByRole('button', { name: "Won't do" }));
 
     expect(api.runTaskAction).toHaveBeenCalledWith('close-me', 'mark-wont-do', 0);
+  });
+
+  it('confirms before deleting a task', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.deleteTask).mockResolvedValue({ ok: true });
+    setup(makeTaskWithRelations({ id: 'delete-me', state: 'todo', currentStepId: 'todo' }));
+
+    await user.click(await screen.findByRole('button', { name: 'Delete' }));
+    const dialog = screen.getByRole('dialog', { name: 'Delete task?' });
+    expect(within(dialog).getByText(/removes this task, its subtasks, messages, jobs, and artifacts/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Delete task' }));
+
+    await waitFor(() => expect(api.deleteTask).toHaveBeenCalledWith('delete-me'));
   });
 
   it('offers Troubleshoot and Retry on failure and shows the error', async () => {
