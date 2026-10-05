@@ -93,7 +93,7 @@ Operational procedures live in [`docs/operations`](docs/operations/deployment.md
 | `pnpm smoke` | live end-to-end check against a running server + Supabase (see `scripts/smoke.mjs`) |
 
 The smoke test drives the real stack: sign-up, task creation, the plan → feedback → approve →
-subtask flow, worker job claiming and fencing, tenant isolation, webhook HMAC, and Postgres
+implementation flow, worker job claiming and fencing, tenant isolation, webhook HMAC, and Postgres
 row-level security. Run it after schema or orchestrator changes:
 
 ```bash
@@ -108,4 +108,4 @@ pnpm smoke
 
 Four bundled workflows are seeded per user: **Full SDLC** (default), **Planning Only**, **Fast Track** and **Document (non-code)**. The Workflows page is a graph editor: steps are `human` gates, `agent` steps (engine, model, prompt with `{{task_description}}`/`{{plan}}`/`{{feedback}}` tokens, tools, permissions, output kind) or `end`. Edges carry events; a `feedback` edge on a human gate is triggered by chat. Tasks pin a snapshot of their workflow when they start, so editing a workflow never breaks an in-flight task.
 
-Large tasks are split by the planning agent into ordered subtasks with their own PRs. The parent's plan approval applies to the whole stack: each subtask is planned just-in-time and moves directly into implementation, and the next subtask starts when its predecessor reaches implementation review. Before every implementation or feedback push, the worker rebases that branch onto its current base. Changes to an earlier reviewed PR cascade through later review-ready branches; active reviews defer the restack until they finish, then rerun review and verification on the updated code.
+Code tasks are implemented as one coherent change per ticket. After implementation, a Review Slicer agent rewrites the local branch into ordered, reviewable commits, emits a commit-by-commit guide, and lets the worker publish the final PR. Reviewers can then browse the PR as one change while stepping through the commits in the intended order.

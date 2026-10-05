@@ -20,7 +20,7 @@ import { queryKeys } from './queryKeys';
 export function useTasks() {
   return useQuery({
     queryKey: queryKeys.tasks,
-    queryFn: async () => (await listTasks({ includeSubtasks: true })).tasks,
+    queryFn: async () => (await listTasks()).tasks,
     staleTime: 5_000,
   });
 }

@@ -86,9 +86,6 @@ struct TaskDetailView: View {
                     .foregroundStyle(Theme.secondaryForeground).frame(minHeight: 44)
                     .padding(.trailing, 6)
             }
-            if let parent = task.parentTaskId {
-                Button("↑ parent") { router.selectedTaskID = parent }.font(Theme.mono(12)).foregroundStyle(Theme.mutedForeground).frame(minHeight: 44)
-            }
             Text(task.key).font(Theme.mono(13)).foregroundStyle(Theme.mutedForeground)
             StatusBadge(state: task.state, step: task.currentStep(store.workflows))
             Spacer(minLength: 8)
@@ -146,7 +143,18 @@ struct TaskDetailView: View {
     // MARK: Tabs
 
     private func tabs(_ task: TaskDetail) -> [DetailTab] {
-        DetailTab.allCases.filter { $0 != .subtasks || !task.subtasks.isEmpty }
+        DetailTab.allCases.filter { tab in
+            tab != .review || hasReviewSurface(task)
+        }
+    }
+
+    private func hasReviewSurface(_ task: TaskDetail) -> Bool {
+        let reviewArtifactNames = Set(["review-slices.json", "diff-explanation.md", "adversarial-review.md"])
+        if task.artifacts.contains(where: { reviewArtifactNames.contains($0.name) }) { return true }
+        guard let workflow = task.resolvedWorkflow(store.workflows) else { return false }
+        return workflow.steps.contains { step in
+            step.id == "review-slice" || step.state == "review-slice" || step.output == "review-slice" || step.id == "adversarial-review"
+        }
     }
 
     private func tabBar(_ task: TaskDetail) -> some View {
@@ -186,7 +194,6 @@ struct TaskDetailView: View {
     private func count(_ tab: DetailTab, _ task: TaskDetail) -> Int? {
         switch tab {
         case .chat: task.messages.isEmpty ? nil : task.messages.count
-        case .subtasks: task.subtasks.count
         default: nil
         }
     }
@@ -197,14 +204,14 @@ struct TaskDetailView: View {
         case .summary:
             TaskSummaryView(task: task, canApprove: canApprove, approving: isActing,
                             onApprove: { Task { await run("approve") } }, onViewPlan: { selectedTab = .plan },
-                            onRequestChanges: { selectedTab = .chat }, onOpenTask: { router.selectedTaskID = $0 })
+                            onRequestChanges: { selectedTab = .chat })
         case .chat:
             TaskChatView(task: task, userInitial: String(store.displayName(fallbackEmail: session.user?.email).prefix(1)).uppercased()) { await load() }
         case .plan: TaskPlanView(task: task, canApprove: canApprove, approving: isActing) { Task { await run("approve") } }
         case .code: TaskCodeView(task: task)
+        case .review: TaskReviewView(task: task)
         case .steps: TaskStepsView(task: task)
         case .artifacts: TaskArtifactsView(artifacts: task.artifacts)
-        case .subtasks: TaskSubtasksView(tasks: task.subtasks) { router.selectedTaskID = $0 }
         }
     }
 
@@ -228,9 +235,14 @@ struct TaskDetailView: View {
 }
 
 enum DetailTab: String, CaseIterable, Identifiable {
-    case summary, plan, chat, code, steps, artifacts, subtasks
+    case summary, plan, chat, code, review, steps, artifacts
     var id: String { rawValue }
-    var title: String { rawValue.capitalized }
+    var title: String {
+        switch self {
+        case .review: "Review"
+        default: rawValue.capitalized
+        }
+    }
 }
 
 // MARK: - Pipeline
@@ -349,7 +361,6 @@ private struct TaskSummaryView: View {
     let onApprove: () -> Void
     let onViewPlan: () -> Void
     let onRequestChanges: () -> Void
-    let onOpenTask: (String) -> Void
 
     var body: some View {
         let step = task.currentStep(store.workflows)
@@ -415,35 +426,6 @@ private struct TaskSummaryView: View {
                         RatioColumns(ratios: [1, 1], spacing: 12, equalHeights: true) { contractBox("Outcome", task.outcome); contractBox("Acceptance criteria", task.acceptanceCriteria) }
                     } else {
                         VStack(spacing: 12) { contractBox("Outcome", task.outcome); contractBox("Acceptance criteria", task.acceptanceCriteria) }
-                    }
-                }
-
-                if !task.subtasks.isEmpty {
-                    let done = task.subtasks.filter { $0.state == "done" }.count
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            SectionLabel(text: "Subtasks")
-                            Spacer()
-                            Text("↳ \(done)/\(task.subtasks.count) done").font(Theme.mono(12)).foregroundStyle(Theme.mutedForeground)
-                        }
-                        VStack(spacing: 8) {
-                            ForEach(task.subtasks.sorted { ($0.sequence ?? 0) < ($1.sequence ?? 0) }) { sub in
-                                Button { onOpenTask(sub.id) } label: {
-                                    HStack(spacing: 10) {
-                                        Text("↳ \(sub.sequence ?? 0)").font(Theme.mono(12)).foregroundStyle(Theme.mutedForeground)
-                                        Text(sub.title).font(Theme.bodyMedium).foregroundStyle(Theme.foreground).lineLimit(2)
-                                        Spacer(minLength: 8)
-                                        StatusBadge(state: sub.state, step: sub.currentStep(store.workflows))
-                                    }
-                                    .padding(.horizontal, 16).frame(minHeight: 56)
-                                    .surface(Theme.card)
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(.leading, 14)
-                        .overlay(alignment: .leading) { Rectangle().fill(Theme.border).frame(width: 1) }
                     }
                 }
 
@@ -751,10 +733,158 @@ private struct TaskCodeView: View {
             ForEach(files) { file in DisclosureGroup { if let patch = file.patch { ScrollView(.horizontal) { Text(patch).font(Theme.mono(12)).textSelection(.enabled) } } else { Text("Patch unavailable").foregroundStyle(Theme.mutedForeground) } } label: { VStack(alignment: .leading) { Text(file.filename).font(Theme.mono(13)); Text("+\(file.additions) −\(file.deletions) · \(file.status)").font(Theme.font(12)).foregroundStyle(Theme.mutedForeground) } } }
         }
         .themedList()
-        .overlay { if files.isEmpty && !loading && error == nil && task.pullRequests.isEmpty { EmptyPane(title: "No code changes yet", systemImage: "chevron.left.forwardslash.chevron.right") } }
+        .overlay { if files.isEmpty && !loading && error == nil && task.pullRequests.isEmpty { EmptyPane(title: "No code changes yet", systemImage: "chevron.left.forwardslash.chevron.right", message: "The Review Slicer opens the PR after implementation finishes.") } }
         .task(id: repository) { await load() }
     }
     private func load() async { loading = true; defer { loading = false }; do { files = try await api.diff(taskId: task.id, repository: repository); error = nil } catch { self.error = error } }
+}
+
+private struct TaskReviewView: View {
+    let task: TaskDetail
+    @State private var selectedID: String?
+
+    var body: some View {
+        let docs = documents
+        Group {
+            if docs.isEmpty {
+                EmptyPane(title: "No automated review yet", systemImage: "doc.text.magnifyingglass", message: "Commit guide, diff explanation, and adversarial review will appear here after review completes.")
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 0) { sidebar(docs); document(docs) }
+                    VStack(spacing: 0) { compactPicker(docs); document(docs) }
+                }
+            }
+        }
+        .onAppear { selectFirstIfNeeded(docs) }
+        .onChange(of: docs.map(\.id)) { _ in selectFirstIfNeeded(documents) }
+    }
+
+    private var documents: [ReviewDocument] {
+        let artifacts = task.artifacts
+            .filter { ["review-slices.json", "diff-explanation.md", "adversarial-review.md"].contains($0.name) }
+            .sorted { $0.createdAt > $1.createdAt }
+        return artifacts.map { artifact in
+            switch artifact.name {
+            case "review-slices.json":
+                ReviewDocument(label: "Commit guide", artifact: artifact, content: commitGuideMarkdown(artifact.content), order: 0)
+            case "diff-explanation.md":
+                ReviewDocument(label: "Diff explanation", artifact: artifact, content: artifact.content, order: 1)
+            default:
+                ReviewDocument(label: "Adversarial review", artifact: artifact, content: artifact.content, order: 2)
+            }
+        }
+        .sorted { left, right in
+            left.artifact.createdAt == right.artifact.createdAt ? left.order < right.order : left.artifact.createdAt > right.artifact.createdAt
+        }
+    }
+
+    private func sidebar(_ docs: [ReviewDocument]) -> some View {
+        List(selection: $selectedID) {
+            Section("Reviews") {
+                ForEach(docs) { doc in
+                    Button { selectedID = doc.id } label: {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(doc.label).font(Theme.mono(12)).foregroundStyle(Theme.foreground).lineLimit(1)
+                            Text(Formatters.day(doc.artifact.createdAt)).font(Theme.mono(10)).foregroundStyle(Theme.mutedForeground).lineLimit(1)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .listRowBackground(selectedID == doc.id ? Theme.secondary : Theme.card)
+                }
+            }
+        }
+        .themedList()
+        .frame(width: 230)
+        .hairline(.trailing)
+    }
+
+    private func compactPicker(_ docs: [ReviewDocument]) -> some View {
+        Picker("Review", selection: Binding(get: { selectedID ?? docs.first?.id }, set: { selectedID = $0 })) {
+            ForEach(docs) { Text($0.label).tag(Optional($0.id)) }
+        }
+        .pickerStyle(.segmented)
+        .padding(16)
+        .hairline(.bottom)
+    }
+
+    private func document(_ docs: [ReviewDocument]) -> some View {
+        let selected = docs.first { $0.id == selectedID } ?? docs.first
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if let selected {
+                    VStack(alignment: .leading, spacing: 6) {
+                        SectionLabel(text: selected.label)
+                        HStack(spacing: 10) {
+                            Text(Formatters.day(selected.artifact.createdAt) + " · " + Formatters.time(selected.artifact.createdAt))
+                            Text(ByteCountFormatter.string(fromByteCount: Int64(selected.artifact.byteSize), countStyle: .file))
+                        }
+                        .font(Theme.mono(11)).foregroundStyle(Theme.mutedForeground)
+                    }
+                    if let content = selected.content {
+                        MarkdownText(source: content)
+                            .padding(16)
+                            .surface(Theme.muted, radius: Theme.Radius.row)
+                    } else {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("This review is stored securely and is not loaded into the page.")
+                                .font(Theme.secondaryBody).foregroundStyle(Theme.mutedForeground)
+                            if let link = selected.artifact.downloadUrl.flatMap(URL.init(string:)) {
+                                Link(destination: link) { Label("Download review", systemImage: "arrow.down.doc").foregroundStyle(Theme.accent) }
+                            }
+                        }
+                        .padding(16)
+                        .surface(Theme.muted, radius: Theme.Radius.row)
+                    }
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: 980, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func selectFirstIfNeeded(_ docs: [ReviewDocument]) {
+        guard selectedID == nil || !docs.contains(where: { $0.id == selectedID }) else { return }
+        selectedID = docs.first?.id
+    }
+
+    private func commitGuideMarkdown(_ content: String?) -> String? {
+        guard let content else { return nil }
+        guard let data = content.data(using: .utf8),
+              let guide = try? JSONDecoder().decode(ReviewSliceGuide.self, from: data),
+              !guide.slices.isEmpty else { return content }
+        var lines = ["# Commit guide"]
+        if let summary = guide.summary, !summary.isEmpty { lines.append(contentsOf: ["", summary]) }
+        for (index, slice) in guide.slices.enumerated() {
+            lines.append(contentsOf: ["", "## \(index + 1). \(slice.title)", "", "- Repository: `\(slice.repository)`", "- Commit: `\(slice.commit)`"])
+            if !slice.files.isEmpty { lines.append("- Files: \(slice.files.map { "`\($0)`" }.joined(separator: ", "))") }
+            lines.append(contentsOf: ["", slice.summary])
+            if let reviewNotes = slice.reviewNotes, !reviewNotes.isEmpty { lines.append(contentsOf: ["", "Reviewer notes: \(reviewNotes)"]) }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private struct ReviewDocument: Identifiable, Hashable {
+        var label: String
+        var artifact: Artifact
+        var content: String?
+        var order: Int
+        var id: String { artifact.id }
+    }
+
+    private struct ReviewSliceGuide: Decodable {
+        var summary: String?
+        var slices: [ReviewSlice]
+    }
+
+    private struct ReviewSlice: Decodable {
+        var repository: String
+        var commit: String
+        var title: String
+        var summary: String
+        var files: [String]
+        var reviewNotes: String?
+    }
 }
 
 private struct TaskStepsView: View {
@@ -787,22 +917,6 @@ private struct TaskArtifactsView: View {
         }
         .themedList()
         .overlay { if artifacts.isEmpty { EmptyPane(title: "No artifacts", systemImage: "archivebox") } }
-    }
-}
-
-private struct TaskSubtasksView: View {
-    @Environment(AppStore.self) private var store
-    let tasks: [SindralTask]; let onOpen: (String) -> Void
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 8) {
-                ForEach(tasks.sorted { ($0.sequence ?? 0) < ($1.sequence ?? 0) }) { task in
-                    Button { onOpen(task.id) } label: { TaskCard(task: task, step: task.currentStep(store.workflows), projectName: task.projectId.flatMap { id in store.projects.first { $0.id == id }?.name }, compact: true) }.buttonStyle(.plain)
-                }
-            }
-            .padding(24)
-        }
-        .overlay { if tasks.isEmpty { EmptyPane(title: "No subtasks", systemImage: "list.bullet.indent") } }
     }
 }
 

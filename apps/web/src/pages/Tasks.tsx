@@ -64,22 +64,6 @@ export function Tasks() {
     setSearchParams(params, { replace: true });
   }
 
-  const { parents, childrenOf } = useMemo(() => {
-    const childrenOf = new Map<string, Task[]>();
-    for (const t of tasks) {
-      if (t.parentTaskId) {
-        const list = childrenOf.get(t.parentTaskId) ?? [];
-        list.push(t);
-        childrenOf.set(t.parentTaskId, list);
-      }
-    }
-    for (const list of childrenOf.values()) list.sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));
-    const parentIds = new Set(tasks.map((t) => t.id));
-    // Orphaned subtasks (parent not in list) are shown as top-level cards.
-    const parents = tasks.filter((t) => !t.parentTaskId || !parentIds.has(t.parentTaskId)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-    return { parents, childrenOf };
-  }, [tasks]);
-
   const q = search.trim().toLowerCase();
   const matches = (t: Task) => {
     const matchesSearch = !q || t.title.toLowerCase().includes(q) || t.key.toLowerCase().includes(q) || t.description.toLowerCase().includes(q);
@@ -95,11 +79,7 @@ export function Tasks() {
     return matchesSearch && matchesStatus && matchesBucket && matchesProject;
   };
 
-  const filtered = parents.flatMap((parent) => {
-    if (matches(parent)) return [parent];
-    const matchingChildren = (childrenOf.get(parent.id) ?? []).filter(matches);
-    return TERMINAL_STATES.has(parent.state) ? matchingChildren : matchingChildren.length > 0 ? [parent] : [];
-  });
+  const filtered = tasks.filter(matches).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const visibleCount = filtered.length;
   const filterLabel = bucketFilter ? bucketFilter.replace('-', ' ') : statusFilter === 'active' ? 'Active' : statusFilter === 'all' ? 'All statuses' : getStateStyle(statusFilter).label;
 
@@ -216,22 +196,9 @@ export function Tasks() {
           />
         ) : (
           <div className="grid grid-cols-1 gap-3 max-w-4xl">
-            {filtered.map((task) => {
-              const children = childrenOf.get(task.id) ?? [];
-              const visibleChildren = children.filter(matches);
-              return (
-                <div key={task.id}>
-                  <TaskRow task={task} workflows={workflows} project={task.projectId ? projectById.get(task.projectId) : undefined} subtaskCount={children.length} subtaskDone={children.filter((c) => c.state === 'done').length} />
-                  {visibleChildren.length > 0 && (
-                    <div className="ml-6 mt-1.5 space-y-1.5 border-l border-border pl-3" aria-label={`Subtasks of ${task.key}`}>
-                      {visibleChildren.map((child) => (
-                        <TaskRow key={child.id} task={child} workflows={workflows} project={child.projectId ? projectById.get(child.projectId) : undefined} compact />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {filtered.map((task) => (
+              <TaskRow key={task.id} task={task} workflows={workflows} project={task.projectId ? projectById.get(task.projectId) : undefined} />
+            ))}
           </div>
         )}
       </div>
@@ -258,15 +225,13 @@ interface TaskRowProps {
   workflows: Workflow[];
   project?: Project;
   compact?: boolean;
-  subtaskCount?: number;
-  subtaskDone?: number;
 }
 
-export function TaskRow({ task, workflows, project, compact = false, subtaskCount = 0, subtaskDone = 0 }: TaskRowProps) {
+export function TaskRow({ task, workflows, project, compact = false }: TaskRowProps) {
   const wf = resolveWorkflow(task, workflows);
   const isPinned = !!task.pinnedWorkflow;
   const step = currentStep(task, workflows);
-  const href = subtaskCount > 0 ? `/tasks/${task.id}?tab=subtasks` : `/tasks/${task.id}`;
+  const href = `/tasks/${task.id}`;
   return (
     <Link
       to={href}
@@ -276,18 +241,12 @@ export function TaskRow({ task, workflows, project, compact = false, subtaskCoun
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 mb-1 flex-wrap">
-            {compact && task.sequence != null && <span className="text-[10px] font-mono text-muted-foreground">↳ {task.sequence}</span>}
             <span className="text-xs font-mono text-muted-foreground">{task.key}</span>
             {project && <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground">{project.name}</span>}
             {task.ticketUrl && <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-secondary text-muted-foreground">linked</span>}
             {task.prUrl && (
               <span className="text-[10px] font-mono px-1.5 py-0.5 rounded text-accent" style={{ background: '#818cf810' }}>
                 PR open
-              </span>
-            )}
-            {subtaskCount > 0 && (
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground" title="Subtasks done / total">
-                ↳ {subtaskDone}/{subtaskCount}
               </span>
             )}
             {wf && (

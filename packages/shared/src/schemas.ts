@@ -186,13 +186,47 @@ export const agentResultSchema = z.discriminatedUnion('kind', [
     summary: z.string().max(20_000),
     plan: z.string().max(200_000),
     ...taskContractResultFields,
-    subtasks: z.array(z.object({ title: shortText, goal: z.string().max(5000) })).max(20).optional(),
   }),
   z.object({
     kind: z.literal('pr'),
     summary: z.string().max(20_000),
     prUrl: z.string().url().max(2000),
     branch: z.string().max(200),
+    ...taskContractResultFields,
+    pullRequests: z
+      .array(
+        z.object({
+          repository: repo,
+          prUrl: z.string().url().max(2000),
+          number: z.number().int().positive(),
+          branch: z.string().min(1).max(200),
+          baseBranch: z.string().min(1).max(200),
+          headSha: z.string().regex(/^[0-9a-f]{40}$/i).optional(),
+        }),
+      )
+      .max(10)
+      .optional(),
+  }),
+  z.object({
+    kind: z.literal('implementation'),
+    summary: z.string().max(20_000),
+    ...taskContractResultFields,
+  }),
+  z.object({
+    kind: z.literal('review-slice'),
+    summary: z.string().max(20_000),
+    prUrl: z.string().url().max(2000),
+    branch: z.string().max(200),
+    slices: z.array(
+      z.object({
+        repository: repo,
+        commit: z.string().regex(/^[0-9a-f]{7,40}$/i),
+        title: shortText,
+        summary: z.string().max(20_000),
+        files: z.array(z.string().min(1).max(1000)).max(200),
+        reviewNotes: z.string().max(20_000).optional(),
+      }),
+    ).min(1).max(50),
     ...taskContractResultFields,
     pullRequests: z
       .array(

@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { completeNext, createTestApp, plan, pr, review, testConfig, verdict, type TestContext } from '../test/helpers.js';
+import { completeNext, createTestApp, implementation, plan, review, reviewSlice, testConfig, verdict, type TestContext } from '../test/helpers.js';
 
 let ctx: TestContext;
 let deliverySequence = 0;
@@ -46,7 +46,8 @@ async function taskInReview() {
   await orch.applyUserEvent(ctx.userA, task.id, 'start');
   await completeNext(ctx, ctx.userA, plan());
   await orch.applyUserEvent(ctx.userA, task.id, 'approve');
-  await completeNext(ctx, ctx.userA, pr(1));
+  await completeNext(ctx, ctx.userA, implementation());
+  await completeNext(ctx, ctx.userA, reviewSlice(1));
   await completeNext(ctx, ctx.userA, review());
   await completeNext(ctx, ctx.userA, verdict(true));
   return task;

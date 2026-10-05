@@ -44,8 +44,10 @@ export type Permission = 'read' | 'write' | 'execute';
  * the worker enforces and the server-side transition after completion.
  */
 export type StepOutputKind =
-  | 'plan' // markdown plan (+ optional subtasks)
+  | 'plan' // markdown plan
+  | 'implementation' // code change committed locally, before PR publication
   | 'pr' // code change pushed as a PR
+  | 'review-slice' // reviewer-friendly commit slices pushed as a PR
   | 'review' // adversarial review report
   | 'verdict' // production readiness GO / NO_GO
   | 'document' // non-code deliverable(s) uploaded as artifacts
@@ -245,8 +247,9 @@ export interface Task {
   branch: string | null;
   baseBranch: string | null;
   plan: string | null;
+  /** Legacy parent link retained for older records; new tasks are implemented as one change. */
   parentTaskId: string | null;
-  /** 1-based position within the parent's subtask stack. */
+  /** Legacy child ordering retained for older records. */
   sequence: number | null;
   failedStepId: string | null;
   lastError: string | null;
@@ -258,6 +261,7 @@ export interface TaskWithRelations extends Task {
   messages: Message[];
   events: TaskEvent[];
   artifacts: Artifact[];
+  /** Legacy child tasks retained for older records. */
   subtasks: Task[];
   repositories: TaskRepository[];
   pullRequests: PullRequest[];
@@ -277,6 +281,7 @@ export interface JobContext {
   pr_url: string;
   parent_plan: string;
   sibling_summaries: string;
+  review_slices: string;
   review: string;
   verify_report: string;
   error: string;
@@ -384,7 +389,6 @@ export interface PlanResult extends TaskContractResult {
   kind: 'plan';
   summary: string;
   plan: string;
-  subtasks?: { title: string; goal: string }[];
 }
 export interface PrResult extends TaskContractResult {
   kind: 'pr';
@@ -399,6 +403,25 @@ export interface PrResult extends TaskContractResult {
     baseBranch: string;
     headSha?: string;
   }[];
+}
+export interface ImplementationResult extends TaskContractResult {
+  kind: 'implementation';
+  summary: string;
+}
+export interface ReviewSliceResult extends TaskContractResult {
+  kind: 'review-slice';
+  summary: string;
+  prUrl: string;
+  branch: string;
+  slices: {
+    repository: string;
+    commit: string;
+    title: string;
+    summary: string;
+    files: string[];
+    reviewNotes?: string;
+  }[];
+  pullRequests?: PrResult['pullRequests'];
 }
 export interface ReviewResult extends TaskContractResult {
   kind: 'review';
@@ -472,7 +495,9 @@ export interface MergeResult {
 
 export type AgentResult =
   | PlanResult
+  | ImplementationResult
   | PrResult
+  | ReviewSliceResult
   | ReviewResult
   | VerdictResult
   | DocumentResult

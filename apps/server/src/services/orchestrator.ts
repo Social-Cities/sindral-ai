@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
   DEFAULT_TROUBLESHOOT_STEP,
-  START_EVENT,
   TERMINAL_STATES,
   TransitionError,
   UNIVERSAL_EVENTS,
@@ -64,11 +63,11 @@ export interface OrchestratorDeps {
 
 export const REVIEW_ARTIFACT = 'adversarial-review.md';
 export const DIFF_EXPLANATION_ARTIFACT = 'diff-explanation.md';
+export const REVIEW_SLICES_ARTIFACT = 'review-slices.json';
 export const VERIFY_ARTIFACT = 'verify-report.md';
 export const CONFLICT_PROMPT_VERSION = 'rebase-conflict-v1';
 export const OUTCOME_LEASE_MS = 30_000;
 export const MAX_JOB_ATTEMPTS = 3;
-const MIN_SUBTASKS = 2;
 const DEFAULT_CONFLICT_PROTECTED_PATHS = [
   'supabase/migrations/',
   '.github/workflows/',
@@ -112,9 +111,9 @@ export function branchNameFor(key: string): string {
 }
 
 /**
- * Drives tasks through their workflow: transitions, job dispatch, worker results,
- * subtask stacks and failure handling. All state lives in the repository; this
- * class is stateless and safe to construct per app.
+ * Drives tasks through their workflow: transitions, job dispatch, worker results
+ * and failure handling. All state lives in the repository; this class is
+ * stateless and safe to construct per app.
  */
 export class Orchestrator {
   private readonly repo: Repository;
@@ -315,19 +314,13 @@ export class Orchestrator {
   async applyUserEvent(userId: string, taskId: string, event: string, expectedVersion?: number, idempotencyKey?: string): Promise<Task> {
     const task = await this.getTask(userId, taskId);
     if (event === UNIVERSAL_EVENTS.RESTACKED) throw badRequest('The restacked event is reserved for stack maintenance');
-    if (task.parentTaskId && task.state === 'in-review') await this.assertNoActiveStackMaintenance(userId, task);
     const version = expectedVersion ?? task.version;
     const key = idempotencyKey ?? `direct:${task.id}:${version}:${event}`;
     const replay = await this.repo.getTaskTransitionReplay(userId, key, transitionRequestHash(userId, task.id, version, event, 'user', undefined));
     if (replay) {
-      await this.resumeManualClosureEffects(userId, replay.task, event);
       return replay.task;
     }
     if (task.version !== version) throw conflict(`Task version ${version} is stale; current version is ${task.version}`);
-    if (event === UNIVERSAL_EVENTS.MARK_DONE || event === UNIVERSAL_EVENTS.MARK_WONT_DO) {
-      const activeChildren = (await this.repo.listSubtasks(userId, task.id)).filter((child) => !TERMINAL_STATES.has(child.state));
-      if (activeChildren.length > 0) throw conflict('Close active subtasks before closing their parent task');
-    }
     return this.applyEvent(userId, task, event, {
       actor: 'user',
       expectedVersion: version,
@@ -347,7 +340,6 @@ export class Orchestrator {
     let task = await this.getTask(userId, taskId);
     const workflow = await this.resolveWorkflow(userId, task);
     const triggersFeedback = workflow !== null && chatTriggersFeedback(task, workflow);
-    if (triggersFeedback && task.parentTaskId) await this.prepareChildFeedback(userId, task);
     const message = await this.repo.createMessage(userId, {
       taskId,
       role: 'user',
@@ -382,42 +374,10 @@ export class Orchestrator {
     return { message, task };
   }
 
-  private async stackMaintenanceForTask(userId: string, task: Task): Promise<Job[]> {
-    if (!task.parentTaskId) return [];
-    return (await this.repo.listJobsForTask(userId, task.parentTaskId)).filter(
-      (job) =>
-        job.payload.kind === 'rebase-stack' &&
-        ['queued', 'claimed', 'running', 'applying'].includes(job.status) &&
-        job.payload.stack.some((entry) => entry.taskId === task.id),
-    );
-  }
-
-  private async assertNoActiveStackMaintenance(userId: string, task: Task): Promise<void> {
-    if ((await this.stackMaintenanceForTask(userId, task)).length > 0) {
-      throw conflict('Stack maintenance is updating this pull request; retry when it finishes');
-    }
-  }
-
-  /** A feedback writer will synchronize its own base before push, so queued background restacks can yield to it. */
-  private async prepareChildFeedback(userId: string, task: Task): Promise<void> {
-    const maintenance = await this.stackMaintenanceForTask(userId, task);
-    if (maintenance.some((job) => job.status !== 'queued')) {
-      throw conflict('Stack maintenance is updating this pull request; retry feedback when it finishes');
-    }
-    if (maintenance.length === 0 || !task.parentTaskId) return;
-    await this.repo.cancelQueuedJobs(userId, task.parentTaskId);
-    await this.repo.createEvent(userId, {
-      taskId: task.id,
-      type: 'stack-rebase-cancelled-for-feedback',
-      detail: { jobIds: maintenance.map((job) => job.id) },
-    });
-  }
-
   private async applyEvent(userId: string, task: Task, event: string, options: ApplyOptions): Promise<Task> {
     if (options.idempotencyKey) {
       const replay = await this.repo.getTaskTransitionReplayByKey(userId, options.idempotencyKey);
       if (replay) {
-        await this.resumeManualClosureEffects(userId, replay.task, event);
         return replay.task;
       }
     }
@@ -452,7 +412,6 @@ export class Orchestrator {
     };
     if (pinNow) patch.pinnedWorkflow = workflow;
     let queuedJob: Parameters<Repository['createJob']>[1] | undefined;
-    let parentDispatchStepId: string | null = null;
     for (const effect of t.effects) {
       if (effect.type === 'dispatch') {
         if (!workflow) throw new TransitionError('Task has no workflow', 'NO_WORKFLOW');
@@ -460,9 +419,6 @@ export class Orchestrator {
         if (!step) throw new TransitionError(`Unknown step ${effect.stepId}`, 'NO_STEP');
         if (step.output === 'merge') {
           if (!options.confirmedExternalMerge) queuedJob = await this.buildMergeJob(userId, task, step.id);
-        }
-        else if (step.output === 'pr' && task.parentTaskId === null && (await this.repo.listSubtasks(userId, task.id)).length > 0) {
-          parentDispatchStepId = step.id;
         } else queuedJob = await this.buildAgentJob(userId, task, step, options.feedbackOverride);
       } else if (effect.type === 'dispatch-troubleshoot') {
         if (!workflow) throw new TransitionError('Task has no workflow', 'NO_WORKFLOW');
@@ -489,27 +445,10 @@ export class Orchestrator {
       cancelQueuedJobs: event === UNIVERSAL_EVENTS.FAIL || event === UNIVERSAL_EVENTS.MARK_DONE || event === UNIVERSAL_EVENTS.MARK_WONT_DO,
     });
     if (applied.replayed) {
-      await this.resumeManualClosureEffects(userId, applied.task, event);
       return applied.task;
     }
 
-    let current = applied.task;
-    for (const effect of t.effects) {
-      switch (effect.type) {
-        case 'dispatch':
-          if (parentDispatchStepId === effect.stepId) current = await this.handleParentDispatch(userId, current, effect.stepId);
-          break;
-        case 'dispatch-troubleshoot':
-          break;
-        case 'complete-task':
-          await this.onTaskCompleted(userId, current);
-          break;
-      }
-    }
-    if (current.parentTaskId && this.isReviewOrDone(current, workflow)) {
-      await this.startNextSibling(userId, current);
-      await this.resumeDeferredStackRebase(userId, current);
-    }
+    const current = applied.task;
     await this.notifyIfNeedsAttention(userId, task, current, workflow, options);
 
     this.hub.publish(userId, { type: 'task.updated', taskId: task.id });
@@ -543,28 +482,7 @@ export class Orchestrator {
     }
   }
 
-  private isReviewOrDone(task: Task, workflow: Workflow | null): boolean {
-    if (TERMINAL_STATES.has(task.state)) return true;
-    const step = workflow ? getStep(workflow, task.currentStepId) : null;
-    return step?.type === 'human' && task.state === 'in-review';
-  }
-
   // ---------------------------------------------------------------- dispatch
-
-  private async handleParentDispatch(userId: string, task: Task, stepId: string): Promise<Task> {
-    // A parent whose plan produced subtasks does not implement anything itself:
-    // the first child is started instead and the parent waits on the stack.
-    const children = await this.repo.listSubtasks(userId, task.id);
-    if (children.length > 0) {
-      await this.repo.createEvent(userId, { taskId: task.id, type: 'subtasks-started', stepId, detail: { count: children.length } });
-      const first = children[0]!;
-      if (first.state === 'todo') await this.applyEvent(userId, first, START_EVENT, { actor: 'system', detail: { reason: 'parent-implement' } });
-      else if (children.every((c) => TERMINAL_STATES.has(c.state))) {
-        await this.settleParent(userId, task, children.some((c) => c.state === 'wont-do') ? 'wont-do' : 'done');
-      }
-    }
-    return (await this.repo.getTask(userId, task.id)) ?? task;
-  }
 
   private async buildAgentJob(
     userId: string,
@@ -624,20 +542,6 @@ export class Orchestrator {
       return matching[matching.length - 1]?.content ?? '';
     };
 
-    let parentPlan = '';
-    let siblingSummaries = '';
-    if (task.parentTaskId) {
-      const parent = await this.repo.getTask(userId, task.parentTaskId);
-      parentPlan = parent?.plan ?? '';
-      const siblings = (await this.repo.listSubtasks(userId, task.parentTaskId)).filter((s) => (s.sequence ?? 0) < (task.sequence ?? 0));
-      const lines: string[] = [];
-      for (const sibling of siblings) {
-        const summary = lastAgentSummary(await this.repo.listMessages(userId, sibling.id));
-        lines.push(`- **${sibling.key} ${sibling.title}** (${sibling.state}): ${summary || 'no summary yet'}`);
-      }
-      siblingSummaries = lines.join('\n');
-    }
-
     return {
       task_key: task.key,
       task_title: task.title,
@@ -647,8 +551,9 @@ export class Orchestrator {
       plan: task.plan ?? '',
       feedback,
       pr_url: task.prUrl ?? '',
-      parent_plan: parentPlan,
-      sibling_summaries: siblingSummaries,
+      parent_plan: '',
+      sibling_summaries: '',
+      review_slices: latest(REVIEW_SLICES_ARTIFACT),
       review: latest(REVIEW_ARTIFACT),
       verify_report: latest(VERIFY_ARTIFACT),
       error: task.lastError ?? '',
@@ -686,7 +591,6 @@ export class Orchestrator {
     const outcomeHash = this.jobOutcomeHash({ result });
     const claim = await this.beginJobOutcome(userId, job.id, attempt, outcomeHash, { result }, leaseToken);
     if (claim.state === 'replay') {
-      await this.reconcileParentFromChildren(userId, job.taskId);
       return;
     }
     if (claim.state === 'busy' || !claim.token) throw serviceUnavailable('Job outcome is already being applied; retry shortly');
@@ -739,12 +643,9 @@ export class Orchestrator {
             dedupeKey: `job:${job.id}:stale-result`,
           });
         }
-        if (result.kind === 'plan') current = await this.inheritParentPlanApproval(userId, current, job.id);
-        if (result.kind === 'pr' && current.parentTaskId) await this.enqueueStackRebase(userId, current, `job:${job.id}:stack-rebase`);
         this.hub.publish(userId, { type: 'task.updated', taskId: task.id });
       }
       await this.repo.finalizeJobOutcome(userId, job.id, attempt, outcomeHash, claim.token, 'completed');
-      await this.reconcileParentFromChildren(userId, job.taskId);
       this.recordResultMetrics(result);
       if (job.claimedAt) this.metrics?.observe('sindral_job_duration_seconds', Math.max(0, (this.now().getTime() - Date.parse(job.claimedAt)) / 1000), { kind: job.kind, outcome: 'completed' });
     } catch (error) {
@@ -763,7 +664,6 @@ export class Orchestrator {
     const outcomeHash = this.jobOutcomeHash({ error });
     const claim = await this.beginJobOutcome(userId, job.id, attempt, outcomeHash, { error }, leaseToken);
     if (claim.state === 'replay') {
-      await this.reconcileParentFromChildren(userId, job.taskId);
       return;
     }
     if (claim.state === 'busy' || !claim.token) throw serviceUnavailable('Job outcome is already being applied; retry shortly');
@@ -783,7 +683,6 @@ export class Orchestrator {
       }
       await this.failTask(userId, task, claim.job, error, attempt);
       await this.repo.finalizeJobOutcome(userId, job.id, attempt, outcomeHash, claim.token, 'failed');
-      await this.reconcileParentFromChildren(userId, job.taskId);
       if (job.kind === 'merge-pull-requests') this.metrics?.inc('sindral_merge_failures_total');
       if (job.kind === 'resolve-rebase-conflict') this.metrics?.inc('sindral_conflict_resolution_total', { outcome: 'escalated' });
       if (job.claimedAt) this.metrics?.observe('sindral_job_duration_seconds', Math.max(0, (this.now().getTime() - Date.parse(job.claimedAt)) / 1000), { kind: job.kind, outcome: 'failed' });
@@ -886,53 +785,23 @@ export class Orchestrator {
       case 'plan': {
         const { outcome, acceptanceCriteria } = generatedContract!;
         const updated = await this.repo.updateTask(userId, task.id, { plan: result.plan, outcome, acceptanceCriteria });
-        if (result.subtasks && result.subtasks.length >= MIN_SUBTASKS && task.parentTaskId === null) {
-          await this.createSubtasks(userId, updated ?? task, result.subtasks, `job:${job.id}:subtasks`);
-        }
         return updated ?? task;
       }
+      case 'implementation':
+        return persistGeneratedContract();
       case 'pr': {
-        const pullRequests = result.pullRequests ?? [];
-        if (pullRequests.length > 0) {
-          const selected = new Set(task.repos);
-          const returned = new Set(pullRequests.map((item) => item.repository));
-          if (returned.size !== pullRequests.length || returned.size !== selected.size || [...selected].some((repository) => !returned.has(repository))) {
-            throw badRequest('Pull request result must contain exactly one pull request for every selected repository');
-          }
-          for (const item of pullRequests) {
-            const ref = parsePrUrl(item.prUrl);
-            if (!ref || `${ref.owner}/${ref.repo}` !== item.repository || ref.number !== item.number) {
-              throw badRequest(`Pull request URL does not match ${item.repository}#${item.number}`);
-            }
-            if (task.branch && item.branch !== task.branch) throw badRequest(`Pull request branch does not match task branch ${task.branch}`);
-          }
-          if (result.prUrl !== pullRequests[0]!.prUrl || result.branch !== pullRequests[0]!.branch) {
-            throw badRequest('Legacy pull request fields do not match the first repository result');
-          }
-        }
-        for (const item of pullRequests) {
-          const repository = await this.repo.upsertTaskRepository(userId, task.id, {
-            repository: item.repository,
-            branch: item.branch,
-            baseBranch: item.baseBranch,
-          });
-          await this.repo.upsertPullRequest(userId, task.id, {
-            taskRepositoryId: repository.id,
-            repository: item.repository,
-            url: item.prUrl,
-            number: item.number,
-            branch: item.branch,
-            baseBranch: item.baseBranch,
-            headSha: item.headSha ?? null,
-          });
-        }
-        return (
-          (await this.repo.updateTask(userId, task.id, {
-            prUrl: result.prUrl,
-            branch: result.branch || task.branch,
-            ...(generatedContract ?? {}),
-          })) ?? task
-        );
+        return this.applyPullRequestResult(userId, task, result, generatedContract ?? undefined);
+      }
+      case 'review-slice': {
+        await this.repo.createArtifact(userId, {
+          taskId: task.id,
+          jobId: job.id,
+          name: REVIEW_SLICES_ARTIFACT,
+          contentType: 'application/json',
+          content: JSON.stringify({ summary: result.summary, slices: result.slices }, null, 2),
+          dedupeKey: `job:${job.id}:artifact:${REVIEW_SLICES_ARTIFACT}`,
+        });
+        return this.applyPullRequestResult(userId, task, result, generatedContract ?? undefined);
       }
       case 'review':
         {
@@ -992,6 +861,55 @@ export class Orchestrator {
     }
   }
 
+  private async applyPullRequestResult(
+    userId: string,
+    task: Task,
+    result: Extract<AgentResult, { kind: 'pr' | 'review-slice' }>,
+    generatedContract?: Pick<Task, 'outcome' | 'acceptanceCriteria'>,
+  ): Promise<Task> {
+    const pullRequests = result.pullRequests ?? [];
+    if (pullRequests.length > 0) {
+      const selected = new Set(task.repos);
+      const returned = new Set(pullRequests.map((item) => item.repository));
+      if (returned.size !== pullRequests.length || returned.size !== selected.size || [...selected].some((repository) => !returned.has(repository))) {
+        throw badRequest('Pull request result must contain exactly one pull request for every selected repository');
+      }
+      for (const item of pullRequests) {
+        const ref = parsePrUrl(item.prUrl);
+        if (!ref || `${ref.owner}/${ref.repo}` !== item.repository || ref.number !== item.number) {
+          throw badRequest(`Pull request URL does not match ${item.repository}#${item.number}`);
+        }
+        if (task.branch && item.branch !== task.branch) throw badRequest(`Pull request branch does not match task branch ${task.branch}`);
+      }
+      if (result.prUrl !== pullRequests[0]!.prUrl || result.branch !== pullRequests[0]!.branch) {
+        throw badRequest('Legacy pull request fields do not match the first repository result');
+      }
+    }
+    for (const item of pullRequests) {
+      const repository = await this.repo.upsertTaskRepository(userId, task.id, {
+        repository: item.repository,
+        branch: item.branch,
+        baseBranch: item.baseBranch,
+      });
+      await this.repo.upsertPullRequest(userId, task.id, {
+        taskRepositoryId: repository.id,
+        repository: item.repository,
+        url: item.prUrl,
+        number: item.number,
+        branch: item.branch,
+        baseBranch: item.baseBranch,
+        headSha: item.headSha ?? null,
+      });
+    }
+    return (
+      (await this.repo.updateTask(userId, task.id, {
+        prUrl: result.prUrl,
+        branch: result.branch || task.branch,
+        ...(generatedContract ?? {}),
+      })) ?? task
+    );
+  }
+
   /** Resolve and validate task-contract fields without mutating durable outcome state. */
   private taskContractFromResult(
     task: Task,
@@ -1013,63 +931,6 @@ export class Orchestrator {
     return { outcome, acceptanceCriteria };
   }
 
-  // ---------------------------------------------------------------- subtasks
-
-  private async createSubtasks(
-    userId: string,
-    parent: Task,
-    subtasks: { title: string; goal: string }[],
-    dedupePrefix?: string,
-  ): Promise<void> {
-    const existing = await this.repo.listSubtasks(userId, parent.id);
-    if (existing.length > 0 && (await this.repo.listEvents(userId, parent.id)).some((event) => event.type === 'subtasks-created')) return;
-    const existingBySequence = new Map(existing.map((child) => [child.sequence, child]));
-    let previousBranch: string | null = null;
-    for (const [index, sub] of subtasks.entries()) {
-      const sequence = index + 1;
-      const prior = existingBySequence.get(sequence);
-      let child = prior;
-      if (!child) {
-        const key = `SIN-${await this.repo.nextTaskNumber(userId)}`;
-        const branch = parent.repos.length > 0 ? branchNameFor(key) : null;
-        child = await this.repo.createTask(userId, {
-          key,
-          title: sub.title,
-          description: sub.goal,
-          projectId: parent.projectId,
-          outcome: sub.goal,
-          acceptanceCriteria: '',
-          state: 'todo',
-          currentStepId: null,
-          workflowId: parent.workflowId,
-          pinnedWorkflow: parent.pinnedWorkflow,
-          repos: parent.repos,
-          ticketUrl: null,
-          branch,
-          baseBranch: previousBranch,
-          parentTaskId: parent.id,
-          sequence,
-        });
-      }
-      await this.syncTaskRepositories(userId, child);
-      await this.repo.createEvent(userId, {
-        taskId: child.id,
-        type: 'created',
-        toState: 'todo',
-        detail: { actor: 'system', parentTaskId: parent.id },
-        dedupeKey: dedupePrefix ? `${dedupePrefix}:child:${sequence}:created` : null,
-      });
-      if (!prior) this.hub.publish(userId, { type: 'task.created', taskId: child.id });
-      previousBranch = child.branch;
-    }
-    await this.repo.createEvent(userId, {
-      taskId: parent.id,
-      type: 'subtasks-created',
-      detail: { count: subtasks.length },
-      dedupeKey: dedupePrefix ? `${dedupePrefix}:created` : null,
-    });
-  }
-
   private async syncTaskRepositories(userId: string, task: Task): Promise<void> {
     if (!task.branch && task.repos.length > 0) throw new Error(`Code task ${task.id} has no branch`);
     for (const repository of task.repos) {
@@ -1080,103 +941,6 @@ export class Orchestrator {
       });
     }
     await this.repo.deleteTaskRepositoriesNotIn(userId, task.id, task.repos);
-  }
-
-  private async startNextSibling(userId: string, child: Task): Promise<void> {
-    if (!child.parentTaskId || child.sequence === null) return;
-    const parentEvents = await this.repo.listEvents(userId, child.parentTaskId);
-    if (!parentEvents.some((event) => event.type === 'subtasks-started')) return;
-    const siblings = await this.repo.listSubtasks(userId, child.parentTaskId);
-    const next = siblings.find((candidate, index) => {
-      if (candidate.state !== 'todo') return false;
-      return siblings.slice(0, index).every((prior) => TERMINAL_STATES.has(prior.state) || prior.state === 'in-review');
-    });
-    if (next) {
-      await this.applyEvent(userId, next, START_EVENT, { actor: 'system', detail: { reason: 'previous-subtask-in-review', previous: child.id } });
-    }
-  }
-
-  /** A parent implementation approval also approves each just-in-time subtask plan. */
-  private async inheritParentPlanApproval(userId: string, task: Task, jobId: string): Promise<Task> {
-    if (!task.parentTaskId || task.state !== 'plan-review') return task;
-    const parentEvents = await this.repo.listEvents(userId, task.parentTaskId);
-    if (!parentEvents.some((event) => event.type === 'subtasks-started')) return task;
-    const workflow = await this.resolveWorkflow(userId, task);
-    const currentStep = workflow ? getStep(workflow, task.currentStepId) : null;
-    const implementationEdge = currentStep && workflow
-      ? workflow.edges.find((edge) => edge.from === currentStep.id && getStep(workflow, edge.to)?.output === 'pr')
-      : null;
-    if (!implementationEdge) return task;
-    return this.applyEvent(userId, task, implementationEdge.event, {
-      actor: 'system',
-      detail: { reason: 'parent-plan-approved', parentTaskId: task.parentTaskId },
-      idempotencyKey: `job:${jobId}:inherited-plan-approval`,
-    });
-  }
-
-  /** Resume a restack that was postponed while this task's automated review was running. */
-  private async resumeDeferredStackRebase(userId: string, task: Task): Promise<void> {
-    if (!task.parentTaskId || task.sequence === null || task.state !== 'in-review') return;
-    const events = await this.repo.listEvents(userId, task.id);
-    const resumed = new Set(
-      events
-        .filter((event) => event.type === 'stack-rebase-resumed')
-        .map((event) => event.detail?.['deferredEventId'])
-        .filter((id): id is string => typeof id === 'string'),
-    );
-    const pending = [...events].reverse().find((event) => event.type === 'stack-rebase-deferred' && !resumed.has(event.id));
-    if (!pending) return;
-    const siblings = await this.repo.listSubtasks(userId, task.parentTaskId);
-    const previous = siblings.find((candidate) => candidate.sequence === task.sequence! - 1);
-    if (!previous) return;
-    const job = await this.enqueueStackRebase(userId, previous, `deferred:${pending.id}`);
-    if (!job) return;
-    await this.repo.createEvent(userId, {
-      taskId: task.id,
-      type: 'stack-rebase-resumed',
-      detail: { deferredEventId: pending.id, jobId: job.id },
-      dedupeKey: `deferred:${pending.id}:resumed`,
-    });
-  }
-
-  private async onTaskCompleted(userId: string, task: Task): Promise<void> {
-    if (!task.parentTaskId) return;
-    await this.reconcileParentFromChildren(userId, task.parentTaskId);
-  }
-
-  /** Replays the idempotent follow-up work that happens after a manual child closure commits. */
-  private async resumeManualClosureEffects(userId: string, task: Task, event: string): Promise<void> {
-    if (event !== UNIVERSAL_EVENTS.MARK_DONE && event !== UNIVERSAL_EVENTS.MARK_WONT_DO) return;
-    if (!TERMINAL_STATES.has(task.state) || !task.parentTaskId) return;
-    await this.onTaskCompleted(userId, task);
-    await this.startNextSibling(userId, task);
-  }
-
-  private async reconcileParentFromChildren(userId: string, parentId: string): Promise<void> {
-    const parent = await this.repo.getTask(userId, parentId);
-    if (!parent || TERMINAL_STATES.has(parent.state)) return;
-    const siblings = await this.repo.listSubtasks(userId, parentId);
-    if (siblings.length === 0) return;
-    if (!siblings.every((s) => TERMINAL_STATES.has(s.state))) return;
-    await this.settleParent(userId, parent, siblings.some((s) => s.state === 'wont-do') ? 'wont-do' : 'done');
-  }
-
-  private async settleParent(userId: string, parent: Task, state: 'done' | 'wont-do'): Promise<void> {
-    if (TERMINAL_STATES.has(parent.state)) return;
-    const event = state === 'done' ? UNIVERSAL_EVENTS.MARK_DONE : UNIVERSAL_EVENTS.MARK_WONT_DO;
-    try {
-      await this.applyEvent(userId, parent, event, {
-        actor: 'system',
-        expectedVersion: parent.version,
-        idempotencyKey: `subtasks:${parent.id}:settled`,
-        detail: { reason: 'subtasks-complete' },
-      });
-    } catch (error) {
-      const current = await this.repo.getTask(userId, parent.id);
-      if (current && TERMINAL_STATES.has(current.state)) return;
-      if (error instanceof ConflictError && /active work/.test(error.message)) return;
-      throw error;
-    }
   }
 
   /** After a child changes, rebase the contiguous review-ready portion of the later PR stack. */
@@ -1449,13 +1213,12 @@ export class Orchestrator {
       dedupeKey: `job:${job.id}:conflict-resolution-artifact`,
     });
     if (result.resolved) {
-      const resumed = await this.applyEvent(userId, task, UNIVERSAL_EVENTS.CONFLICT_RESOLVED, {
+      await this.applyEvent(userId, task, UNIVERSAL_EVENTS.CONFLICT_RESOLVED, {
         actor: 'worker',
         detail: { jobId: job.id },
         idempotencyKey: `job:${job.id}:resolution-transition`,
       });
-      const updated = (await this.repo.updateTask(userId, task.id, { lastError: null })) ?? resumed;
-      if (updated.parentTaskId) await this.enqueueStackRebase(userId, updated, `job:${job.id}:resolved-stack-rebase`);
+      await this.repo.updateTask(userId, task.id, { lastError: null });
     } else if (task.state === 'conflict-resolution') {
       const error = result.error ?? 'Automatic conflict resolution requires human review';
       await this.repo.updateTask(userId, task.id, { lastError: error });
@@ -1639,12 +1402,4 @@ function messagesSinceLastAgentMessage(messages: Message[]): Message[] {
     if (m.role === 'agent') lastAgent = i;
   });
   return messages.slice(lastAgent + 1);
-}
-
-function lastAgentSummary(messages: Message[]): string {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const m = messages[i]!;
-    if (m.role === 'agent') return m.content;
-  }
-  return '';
 }

@@ -13,28 +13,30 @@ describe('bundled workflows', () => {
 
   it('full sdlc happy path matches the engineering plan', () => {
     expect(happyPath(wf).map((s) => s.state)).toEqual([
-      'todo', 'planning', 'plan-review', 'implement', 'adversarial-review', 'verify', 'in-review', 'merge', 'done',
+      'todo', 'planning', 'plan-review', 'implement', 'review-slice', 'adversarial-review', 'verify', 'in-review', 'merge', 'done',
     ]);
   });
 
   it('other workflows have sensible happy paths', () => {
     expect(happyPath(PLANNING_ONLY_WORKFLOW).map((s) => s.state)).toEqual(['todo', 'planning', 'plan-review', 'done']);
-    expect(happyPath(FAST_TRACK_WORKFLOW).map((s) => s.state)).toEqual(['todo', 'implement', 'adversarial-review', 'verify', 'in-review', 'merge', 'done']);
+    expect(happyPath(FAST_TRACK_WORKFLOW).map((s) => s.state)).toEqual(['todo', 'implement', 'review-slice', 'adversarial-review', 'verify', 'in-review', 'merge', 'done']);
     expect(happyPath(DOCUMENT_WORKFLOW).map((s) => s.state)).toEqual(['todo', 'implement', 'in-review', 'done']);
   });
 
-  it('code workflows run adversarial review after implementation', () => {
+  it('code workflows prepare review slices before adversarial review', () => {
     const reviewPrompt = FAST_TRACK_WORKFLOW.steps.find((step) => step.id === 'adversarial-review')?.prompt;
     expect(reviewPrompt).toContain('Explain this diff to a senior engineer');
     expect(reviewPrompt).toContain('Try to break your implementation');
+    const slicerPrompt = FAST_TRACK_WORKFLOW.steps.find((step) => step.id === 'review-slice')?.prompt;
+    expect(slicerPrompt).toContain('commit-by-commit review guide');
 
     let t = transition(at('todo', 'todo'), FAST_TRACK_WORKFLOW, 'start');
     expect(t.nextState).toBe('implement');
     t = transition(at('implement', 'implement'), FAST_TRACK_WORKFLOW, 'complete');
     expect(t).toMatchObject({
-      nextState: 'adversarial-review',
-      nextStepId: 'adversarial-review',
-      effects: [{ type: 'dispatch', stepId: 'adversarial-review' }],
+      nextState: 'review-slice',
+      nextStepId: 'review-slice',
+      effects: [{ type: 'dispatch', stepId: 'review-slice' }],
     });
   });
 });
@@ -68,6 +70,8 @@ describe('transition', () => {
     let t = transition(at('plan-review', 'plan-review'), wf, 'approve');
     expect(t.nextState).toBe('implement');
     t = transition(at('implement', 'implement'), wf, 'complete');
+    expect(t.nextState).toBe('review-slice');
+    t = transition(at('review-slice', 'review-slice'), wf, 'complete');
     expect(t.nextState).toBe('adversarial-review');
     t = transition(at('adversarial-review', 'adversarial-review'), wf, 'complete');
     expect(t.nextState).toBe('verify');
@@ -140,19 +144,6 @@ describe('transition', () => {
     expect(resolved).toMatchObject({ nextState: 'adversarial-review', nextStepId: 'adversarial-review', failedStepId: null, effects: [{ type: 'dispatch', stepId: 'adversarial-review' }] });
     const escalated = transition(at('conflict-resolution', 'in-review', 'in-review'), wf, 'conflict-escalated');
     expect(escalated).toMatchObject({ nextState: 'failure', failedStepId: 'in-review' });
-  });
-
-  it('invalidates implementation review after a successful restack', () => {
-    expect(transition(at('in-review', 'in-review'), wf, 'restacked')).toMatchObject({
-      nextState: 'adversarial-review',
-      nextStepId: 'adversarial-review',
-      effects: [{ type: 'dispatch', stepId: 'adversarial-review' }],
-    });
-    expect(() => transition(at('implement', 'implement'), wf, 'restacked')).toThrow(/implementation review/);
-    expect(transition(at('in-review', 'in-review'), FAST_TRACK_WORKFLOW, 'restacked')).toMatchObject({
-      nextState: 'adversarial-review',
-      effects: [{ type: 'dispatch', stepId: 'adversarial-review' }],
-    });
   });
 
   it('retry from failure re-dispatches the failed step', () => {

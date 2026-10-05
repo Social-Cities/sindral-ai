@@ -26,13 +26,14 @@ describe('protocolInstructions', () => {
     expect(out).toContain('"acceptanceCriteria"');
   });
 
-  it('asks implementation agents for reviewer-friendly PR context', () => {
-    const out = protocolInstructions('pr', '/tmp/result.json');
+  it('asks review-slicing agents for reviewer-friendly PR context', () => {
+    const out = protocolInstructions('review-slice', '/tmp/result.json');
     expect(out).toContain('"motivation"');
     expect(out).toContain('"proposedSolution"');
     expect(out).toContain('"assumptions"');
     expect(out).toContain('"risks"');
     expect(out).toContain('"testing"');
     expect(out).toContain('reviewer-friendly summary');
+    expect(out).toContain('"slices"');
   });
 });

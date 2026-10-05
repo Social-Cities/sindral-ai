@@ -113,19 +113,20 @@ enum DemoFixtures {
             WorkflowStep(id: id, type: "human", label: label, state: id, position: .init(x: x, y: y))
         }
         return Workflow(
-            id: "wf-default", name: "Full SDLC", description: "Plan → human approval → implement → review.", entryStepId: "todo",
+            id: "wf-default", name: "Full SDLC", description: "Plan → human approval → implement → slice for review → review.", entryStepId: "todo",
             steps: [
                 human("todo", "Todo", 20, 180),
                 agent("planning", "Planning Agent", 200, 180, output: "plan"),
                 human("plan-review", "Plan Review", 380, 180),
                 agent("planning-feedback", "Revise Plan", 380, 40, output: "plan"),
-                agent("implement", "Implement Agent", 560, 180, model: "claude-sonnet-5", output: "pr"),
-                agent("adversarial-review", "Adversarial Review", 740, 180, output: "review"),
-                agent("verify", "Verify & Readiness", 740, 410, output: "verdict"),
-                human("in-review", "In Review", 560, 410),
-                agent("merge", "Merge Pull Requests", 380, 410, engine: nil, model: nil, output: "merge"),
-                WorkflowStep(id: "done", type: "end", label: "Done", state: "done", position: .init(x: 200, y: 410)),
-                agent("implement-feedback", "Address Feedback", 560, 570, model: "claude-sonnet-5", output: "pr"),
+                agent("implement", "Implement Agent", 560, 180, model: "claude-sonnet-5", output: "implementation"),
+                agent("review-slice", "Review Slicer", 740, 180, model: "claude-opus-5", output: "review-slice"),
+                agent("adversarial-review", "Adversarial Review", 920, 180, output: "review"),
+                agent("verify", "Verify & Readiness", 920, 410, output: "verdict"),
+                human("in-review", "In Review", 740, 410),
+                agent("merge", "Merge Pull Requests", 560, 410, engine: nil, model: nil, output: "merge"),
+                WorkflowStep(id: "done", type: "end", label: "Done", state: "done", position: .init(x: 380, y: 410)),
+                agent("implement-feedback", "Address Feedback", 740, 570, model: "claude-sonnet-5", output: "review-slice"),
             ],
             edges: [
                 .init(from: "todo", to: "planning", event: "start", label: "Start Planning"),
@@ -133,12 +134,13 @@ enum DemoFixtures {
                 .init(from: "plan-review", to: "planning-feedback", event: "feedback", label: "revise"),
                 .init(from: "planning-feedback", to: "plan-review", event: "complete", label: "plan revised"),
                 .init(from: "plan-review", to: "implement", event: "approve", label: "Approve Plan"),
-                .init(from: "implement", to: "adversarial-review", event: "complete", label: "PR opened"),
+                .init(from: "implement", to: "review-slice", event: "complete", label: "implemented"),
+                .init(from: "review-slice", to: "adversarial-review", event: "complete", label: "PR opened"),
                 .init(from: "adversarial-review", to: "verify", event: "complete", label: "reviewed"),
                 .init(from: "verify", to: "in-review", event: "complete", label: "GO"),
                 .init(from: "verify", to: "implement-feedback", event: "reject", label: "NO_GO"),
                 .init(from: "in-review", to: "implement-feedback", event: "feedback", label: "changes"),
-                .init(from: "implement-feedback", to: "adversarial-review", event: "complete", label: "pushed"),
+                .init(from: "implement-feedback", to: "adversarial-review", event: "complete", label: "sliced"),
                 .init(from: "in-review", to: "merge", event: "accept", label: "Accept & merge"),
                 .init(from: "merge", to: "done", event: "complete", label: "merged"),
             ],
@@ -148,8 +150,8 @@ enum DemoFixtures {
 
     static let workers = [Worker(id: "w1", name: "MacBook Pro", hostname: "lucs-mbp.local", version: "0.1.0", status: "online", runningJobs: 1, lastSeenAt: ago(minutes: 1))]
 
-    private static func task(_ id: String, key: String, title: String, state: String, step: String?, updated: String, description: String = "", outcome: String = "", criteria: String = "", ticket: String? = nil, pr: String? = nil, parent: String? = nil, sequence: Int? = nil, plan: String? = nil, lastError: String? = nil) -> SindralTask {
-        SindralTask(id: id, userId: "demo-user", version: 3, key: key, title: title, description: description, projectId: nil, outcome: outcome, acceptanceCriteria: criteria, state: state, currentStepId: step, workflowId: "wf-default", pinnedWorkflow: nil, repos: ["social-cities/sindral-ai"], ticketUrl: ticket, prUrl: pr, branch: pr == nil ? nil : "sindral/\(key.lowercased())", baseBranch: "main", plan: plan, parentTaskId: parent, sequence: sequence, failedStepId: lastError == nil ? nil : "merge", lastError: lastError, createdAt: ago(days: 4), updatedAt: updated)
+    private static func task(_ id: String, key: String, title: String, state: String, step: String?, updated: String, description: String = "", outcome: String = "", criteria: String = "", ticket: String? = nil, pr: String? = nil, plan: String? = nil, lastError: String? = nil) -> SindralTask {
+        SindralTask(id: id, userId: "demo-user", version: 3, key: key, title: title, description: description, projectId: nil, outcome: outcome, acceptanceCriteria: criteria, state: state, currentStepId: step, workflowId: "wf-default", pinnedWorkflow: nil, repos: ["social-cities/sindral-ai"], ticketUrl: ticket, prUrl: pr, branch: pr == nil ? nil : "sindral/\(key.lowercased())", baseBranch: "main", plan: plan, parentTaskId: nil, sequence: nil, failedStepId: lastError == nil ? nil : "merge", lastError: lastError, createdAt: ago(days: 4), updatedAt: updated)
     }
 
     static let tasks: [SindralTask] = [
@@ -158,13 +160,10 @@ enum DemoFixtures {
              outcome: "Worker endpoints are rate limited per worker key, with limits configurable by environment variable.",
              criteria: "- 429 + Retry-After past the limit\n- Worker honours Retry-After\n- Tests cover burst and refill",
              pr: "https://github.com/social-cities/sindral-ai/pull/51"),
-        task("t54", key: "SIN-54", title: "Import Jira sub-tasks as Sindral subtasks", state: "implement", step: "implement", updated: ago(minutes: 12),
-             description: "When a Jira ticket with sub-tasks is imported, create one Sindral subtask per sub-task, keep their order, and run them in sequence under the parent task.",
-             outcome: "Jira sub-tasks appear as ordered Sindral subtasks under the imported parent.",
-             criteria: "- Order preserved\n- Re-import doesn't duplicate\n- Parent shows done/total"),
-        task("t54a", key: "SIN-54-1", title: "Read sub-tasks from the Jira API", state: "done", step: "done", updated: ago(hours: 2), parent: "t54", sequence: 1),
-        task("t54b", key: "SIN-54-2", title: "Create ordered subtasks on import", state: "implement", step: "implement", updated: ago(minutes: 20), parent: "t54", sequence: 2),
-        task("t54c", key: "SIN-54-3", title: "Show done/total on the parent card", state: "todo", step: "todo", updated: ago(hours: 3), parent: "t54", sequence: 3),
+        task("t54", key: "SIN-54", title: "Split completed work into reviewable commits", state: "review-slice", step: "review-slice", updated: ago(minutes: 12),
+             description: "After the implementation agent finishes, rewrite the branch into ordered commits and produce a commit-by-commit guide for reviewers.",
+             outcome: "Each ticket lands as one PR with a readable commit sequence and review guide.",
+             criteria: "- Net behavior is unchanged\n- Commits are ordered logically\n- Review guide explains each commit"),
         task("t57", key: "SIN-57", title: "Surface GitHub PR comments in the chat thread", state: "plan-review", step: "plan-review", updated: ago(hours: 1),
              description: "Review comments left on a Sindral PR should show up in the task's chat thread so feedback lives in one place.",
              ticket: "https://linear.app/social-cities/issue/SIN-57",
@@ -191,7 +190,18 @@ enum DemoFixtures {
             messages = []
         }
         let prs = t.prUrl.map { [PullRequest(id: "pr-\(id)", repository: "social-cities/sindral-ai", url: $0, number: 51, branch: t.branch ?? "", baseBranch: "main", status: "open", mergedAt: nil)] } ?? []
-        return TaskDetail(id: t.id, userId: t.userId, version: t.version, key: t.key, title: t.title, description: t.description, projectId: t.projectId, outcome: t.outcome, acceptanceCriteria: t.acceptanceCriteria, state: t.state, currentStepId: t.currentStepId, workflowId: t.workflowId, pinnedWorkflow: t.pinnedWorkflow, repos: t.repos, ticketUrl: t.ticketUrl, prUrl: t.prUrl, branch: t.branch, baseBranch: t.baseBranch, plan: t.plan, parentTaskId: t.parentTaskId, sequence: t.sequence, failedStepId: t.failedStepId, lastError: t.lastError, createdAt: t.createdAt, updatedAt: t.updatedAt, messages: messages, events: [], artifacts: [], subtasks: tasks.filter { $0.parentTaskId == id }, repositories: [], pullRequests: prs)
+        return TaskDetail(id: t.id, userId: t.userId, version: t.version, key: t.key, title: t.title, description: t.description, projectId: t.projectId, outcome: t.outcome, acceptanceCriteria: t.acceptanceCriteria, state: t.state, currentStepId: t.currentStepId, workflowId: t.workflowId, pinnedWorkflow: t.pinnedWorkflow, repos: t.repos, ticketUrl: t.ticketUrl, prUrl: t.prUrl, branch: t.branch, baseBranch: t.baseBranch, plan: t.plan, parentTaskId: t.parentTaskId, sequence: t.sequence, failedStepId: t.failedStepId, lastError: t.lastError, createdAt: t.createdAt, updatedAt: t.updatedAt, messages: messages, events: [], artifacts: artifacts(for: id), repositories: [], pullRequests: prs)
+    }
+
+    static func artifacts(for id: String) -> [Artifact] {
+        guard id == "t51" else { return [] }
+        let guide = """
+        {"summary":"The branch was split into three ordered commits so reviewers can read policy, worker behavior, and tests separately.","slices":[{"repository":"social-cities/sindral-ai","commit":"8e72c44","title":"Add worker rate-limit policy","summary":"Introduces configurable token bucket limits and shared retry metadata.","files":["apps/server/src/config.ts","apps/server/src/rateLimit.ts"],"reviewNotes":"Start here to confirm the limit semantics."},{"repository":"social-cities/sindral-ai","commit":"bb91d2a","title":"Apply limits to worker polling","summary":"Checks the bucket before issuing jobs and returns 429 with Retry-After when exhausted.","files":["apps/server/src/routes/worker.ts","apps/worker/src/poll.ts"]},{"repository":"social-cities/sindral-ai","commit":"ce48119","title":"Cover burst and refill behavior","summary":"Adds server and worker tests for burst limits, refill timing, and Retry-After handling.","files":["apps/server/src/routes/worker.test.ts","apps/worker/src/poll.test.ts"]}]}
+        """
+        return [
+            Artifact(id: "artifact-slices-t51", taskId: id, jobId: "job-review-slice", name: "review-slices.json", contentType: "application/json", content: guide, byteSize: guide.utf8.count, downloadUrl: nil, createdAt: ago(minutes: 8)),
+            Artifact(id: "artifact-review-t51", taskId: id, jobId: "job-review", name: "adversarial-review.md", contentType: "text/markdown", content: "## Findings\nNo blocking findings.\n\n## Residual risk\nRate-limit windows should be watched after rollout to confirm production worker cadence.", byteSize: 126, downloadUrl: nil, createdAt: ago(minutes: 6)),
+        ]
     }
 }
 #endif

@@ -5,6 +5,45 @@ import { makeTaskWithRelations } from '@/test/fixtures';
 import { ReviewTab } from './ReviewTab';
 
 describe('ReviewTab', () => {
+  it('renders review slices as a commit guide', () => {
+    render(
+      <ReviewTab
+        task={makeTaskWithRelations({
+          artifacts: [
+            {
+              id: 'slices',
+              taskId: 'task-1',
+              jobId: null,
+              name: 'review-slices.json',
+              contentType: 'application/json',
+              content: JSON.stringify({
+                summary: 'Review in this order.',
+                slices: [
+                  {
+                    repository: 'acme/app',
+                    commit: 'abcdef1',
+                    title: 'Add the API contract',
+                    summary: 'Introduces the shared types first.',
+                    files: ['packages/shared/src/types.ts'],
+                    reviewNotes: 'Start here before reading the UI commit.',
+                  },
+                ],
+              }),
+              byteSize: 260,
+              downloadUrl: null,
+              createdAt: '2026-01-02T00:00:00.000Z',
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.getAllByText('Commit guide').length).toBeGreaterThan(0);
+    expect(screen.getByText('Review in this order.')).toBeInTheDocument();
+    expect(screen.getByText('1. Add the API contract')).toBeInTheDocument();
+    expect(screen.getByText(/Start here before reading the UI commit/)).toBeInTheDocument();
+  });
+
   it('renders diff explanation and adversarial review as separate review documents', async () => {
     const user = userEvent.setup();
     render(

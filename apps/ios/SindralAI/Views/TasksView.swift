@@ -63,18 +63,13 @@ struct TasksView: View {
     }
 }
 
-/// Filtering and parent/child grouping, mirroring `apps/web/src/pages/Tasks.tsx`.
+/// Filtering and sorting, mirroring `apps/web/src/pages/Tasks.tsx`.
 struct TaskListModel {
-    struct Row: Identifiable { let task: SindralTask; let children: [SindralTask]; let visibleChildren: [SindralTask]; var id: String { task.id } }
+    struct Row: Identifiable { let task: SindralTask; var id: String { task.id } }
     let rows: [Row]
     let activeCount: Int
 
     init(tasks: [SindralTask], workflows: [Workflow], filter: TaskFilter, projectID: String?, search: String) {
-        var childrenOf: [String: [SindralTask]] = [:]
-        for task in tasks { if let parent = task.parentTaskId { childrenOf[parent, default: []].append(task) } }
-        for key in childrenOf.keys { childrenOf[key]?.sort { ($0.sequence ?? 0) < ($1.sequence ?? 0) } }
-        let ids = Set(tasks.map(\.id))
-        let parents = tasks.filter { $0.parentTaskId == nil || !ids.contains($0.parentTaskId!) }.sorted { $0.updatedAt > $1.updatedAt }
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
         func matches(_ task: SindralTask) -> Bool {
             let searchMatches = q.isEmpty || task.title.lowercased().contains(q) || task.key.lowercased().contains(q) || task.description.lowercased().contains(q)
@@ -86,14 +81,8 @@ struct TaskListModel {
             let projectMatches = projectID == nil || task.projectId == projectID
             return searchMatches && filterMatches && projectMatches
         }
-        rows = parents.flatMap { parent -> [Row] in
-            let children = childrenOf[parent.id] ?? []
-            let visible = children.filter(matches)
-            if matches(parent) { return [Row(task: parent, children: children, visibleChildren: visible)] }
-            if TaskStates.terminal.contains(parent.state) { return visible.map { Row(task: $0, children: [], visibleChildren: []) } }
-            return visible.isEmpty ? [] : [Row(task: parent, children: children, visibleChildren: visible)]
-        }
-        activeCount = parents.filter { !TaskStates.terminal.contains($0.state) && (projectID == nil || $0.projectId == projectID) }.count
+        rows = tasks.filter(matches).sorted { $0.updatedAt > $1.updatedAt }.map(Row.init(task:))
+        activeCount = tasks.filter { !TaskStates.terminal.contains($0.state) && (projectID == nil || $0.projectId == projectID) }.count
     }
 }
 
@@ -179,17 +168,7 @@ private struct TaskListPane: View {
                             .padding(.top, 40)
                     }
                     ForEach(model.rows) { row in
-                        card(row.task, subtaskCount: row.children.count, subtaskDone: row.children.filter { $0.state == "done" }.count)
-                        if !row.visibleChildren.isEmpty {
-                            VStack(spacing: 6) {
-                                ForEach(row.visibleChildren) { card($0, compact: true) }
-                            }
-                            .padding(.leading, 12)
-                            .overlay(alignment: .leading) { Rectangle().fill(Theme.border).frame(width: 1) }
-                            .padding(.leading, 20)
-                            .accessibilityElement(children: .contain)
-                            .accessibilityLabel("Subtasks of \(row.task.key)")
-                        }
+                        card(row.task)
                     }
                 }
                 .padding(.horizontal, 12).padding(.top, 6).padding(.bottom, 16)
@@ -200,9 +179,9 @@ private struct TaskListPane: View {
         .hairline(.trailing)
     }
 
-    private func card(_ task: SindralTask, compact: Bool = false, subtaskCount: Int = 0, subtaskDone: Int = 0) -> some View {
+    private func card(_ task: SindralTask) -> some View {
         Button { router.selectedTaskID = task.id } label: {
-            TaskCard(task: task, step: task.currentStep(store.workflows), projectName: task.projectId.flatMap { id in store.projects.first { $0.id == id }?.name }, selected: router.selectedTaskID == task.id, compact: compact, subtaskCount: subtaskCount, subtaskDone: subtaskDone)
+            TaskCard(task: task, step: task.currentStep(store.workflows), projectName: task.projectId.flatMap { id in store.projects.first { $0.id == id }?.name }, selected: router.selectedTaskID == task.id)
         }
         .buttonStyle(.plain)
     }

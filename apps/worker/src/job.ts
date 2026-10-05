@@ -223,12 +223,12 @@ async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx:
   const raw = parsed.value;
 
   let candidate: Record<string, unknown> = raw;
-  if (raw.kind === 'pr') {
+  if (raw.kind === 'pr' || raw.kind === 'review-slice') {
     const summary = summaryOf(raw);
     if (!summary) throw new Error(describeFailure(`the result has no summary${exitNote}`, run.tail, ctx.redactor));
-    if (workspace.repos.length === 0) throw new Error('A "pr" step requires at least one repository on the task');
+    if (workspace.repos.length === 0) throw new Error(`A "${raw.kind}" step requires at least one repository on the task`);
     const agentMotivation = typeof raw['motivation'] === 'string' ? raw['motivation'].trim() : '';
-    candidate = await publishPr({
+    const published = await publishPr({
       ...ctx,
       workspace,
       taskKey,
@@ -245,6 +245,7 @@ async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx:
       jobId: dispatch.job.id,
       githubFeedback: payload.context.github_feedback,
     });
+    candidate = { ...raw, ...published, kind: raw.kind };
   } else if (raw.kind === 'document') {
     const collected = await collectOutputArtifacts(outputDir);
     candidate = { ...raw, artifacts: mergeArtifacts(raw['artifacts'], collected) };

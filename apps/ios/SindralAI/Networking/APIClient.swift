@@ -65,7 +65,7 @@ final class APIClient {
         try await request(path, method: method, body: Optional<String>.none, headers: headers)
     }
 
-    func listTasks() async throws -> [SindralTask] { let response: TasksResponse = try await request("api/tasks?includeSubtasks=true"); return response.tasks }
+    func listTasks() async throws -> [SindralTask] { let response: TasksResponse = try await request("api/tasks"); return response.tasks }
     func task(_ id: String) async throws -> TaskDetail { let response: TaskResponse<TaskDetail> = try await request("api/tasks/\(id)"); return response.task }
     func createTask(title: String, description: String, ticket: TicketImport?, projectId: String? = nil, repos: [String], workflowId: String?, newRepository: NewGitHubRepository? = nil) async throws -> SindralTask {
         struct Body: Encodable { let title: String; let description: String; let ticketUrl: String?; let key: String?; let projectId: String?; let workflowId: String?; let repos: [String]; let newRepository: NewGitHubRepository? }

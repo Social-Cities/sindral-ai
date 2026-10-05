@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WORKER_PROTOCOL_HEADER, WORKER_PROTOCOL_VERSION, type Project, type Task, type WorkflowRecord } from '@sindral/shared';
-import { claimNext, completeMerge, completeNext, createTestApp, plan, pr, review, testConfig, verdict, type TestContext } from '../test/helpers.js';
+import { claimNext, completeMerge, completeNext, createTestApp, implementation, plan, review, reviewSlice, testConfig, verdict, type TestContext } from '../test/helpers.js';
 
 const fetchMock = vi.fn<typeof fetch>();
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -912,7 +912,8 @@ describe('end to end through HTTP', () => {
     const fast = workflows.find((w) => w.name === 'Fast Track')!;
     const task = await createTask(asA(), { title: 'quick', repos: ['acme/app'], workflowId: fast.id });
     await taskAction(task.id, 'start');
-    await completeNext(ctx, ctx.userA, pr(3));
+    await completeNext(ctx, ctx.userA, implementation());
+    await completeNext(ctx, ctx.userA, reviewSlice(3));
     expect(await ctx.repo.getTask(ctx.userA, task.id)).toMatchObject({
       outcome: 'The requested behavior is delivered.',
       acceptanceCriteria: '- The requested behavior is verified.',
@@ -933,7 +934,7 @@ describe('end to end through HTTP', () => {
     expect(verifyJob.payload.context.review).toBe('# Review');
     await ctx.app.ctx.orchestrator.completeJob(ctx.userA, verifyJob.id, verdict(true), verifyJob.attempt, verifyJob.leaseToken);
     expect((await ctx.repo.getTask(ctx.userA, task.id))?.state).toBe('in-review');
-    expect((await ctx.app.inject({ method: 'GET', url: `/api/tasks/${task.id}/artifacts`, headers: asA() })).json<{ artifacts: { name: string }[] }>().artifacts.map((a) => a.name)).toEqual(['adversarial-review.md', 'verify-report.md']);
+    expect((await ctx.app.inject({ method: 'GET', url: `/api/tasks/${task.id}/artifacts`, headers: asA() })).json<{ artifacts: { name: string }[] }>().artifacts.map((a) => a.name)).toEqual(['review-slices.json', 'adversarial-review.md', 'verify-report.md']);
     const accepted = await taskAction(task.id, 'accept');
     expect(accepted.json<{ task: Task }>().task.state).toBe('merge');
     await completeMerge(ctx, ctx.userA);
@@ -946,7 +947,8 @@ describe('end to end through HTTP', () => {
       const fast = (await guarded.app.ctx.workflows.list(guarded.userA)).find((workflow) => workflow.name === 'Fast Track')!;
       let task = await guarded.app.ctx.orchestrator.createTask(guarded.userA, { title: 'guarded merge', description: '', repos: ['acme/app'], workflowId: fast.id });
       task = await guarded.app.ctx.orchestrator.applyUserEvent(guarded.userA, task.id, 'start');
-      await completeNext(guarded, guarded.userA, pr(8));
+      await completeNext(guarded, guarded.userA, implementation());
+      await completeNext(guarded, guarded.userA, reviewSlice(8));
       await completeNext(guarded, guarded.userA, review());
       await completeNext(guarded, guarded.userA, verdict(true));
       task = (await guarded.repo.getTask(guarded.userA, task.id))!;

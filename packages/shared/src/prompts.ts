@@ -19,9 +19,15 @@ const RESULT_SHAPES: Record<StepOutputKind, string> = {
   "summary": "one paragraph for the user",
   "plan": "full markdown implementation plan. Start with concise sections named exactly: What behavior is changing, What files/systems are affected, Important invariants, Edge cases, and How correctness will be verified. Then include the detailed implementation plan.",
   "outcome": "the concise user-visible result this task must achieve",
-  "acceptanceCriteria": "a markdown list of observable, testable conditions",
-  "subtasks": [ { "title": "...", "goal": "..." } ]   // ONLY if the change must be split into multiple PRs; omit otherwise
+  "acceptanceCriteria": "a markdown list of observable, testable conditions"
 }`,
+  implementation: `{
+  "kind": "implementation",
+  "summary": "a concise reviewer-friendly summary of the implementation work completed locally",
+  "outcome": "required only when the current task outcome is empty",
+  "acceptanceCriteria": "required only when the current task acceptance criteria are empty"
+}
+(Commit all your changes on the current branch. Do NOT push or open a PR yourself; a later review-slicing step does that.)`,
   pr: `{
   "kind": "pr",
   "motivation": "a concise reviewer-friendly explanation of why this change was needed",
@@ -34,6 +40,28 @@ const RESULT_SHAPES: Record<StepOutputKind, string> = {
   "acceptanceCriteria": "required only when the current task acceptance criteria are empty"
 }
 (Commit all your changes on the current branch. Do NOT push or open a PR yourself; the worker does that.)`,
+  'review-slice': `{
+  "kind": "review-slice",
+  "motivation": "a concise reviewer-friendly explanation of why this change was needed",
+  "proposedSolution": "a concise markdown list or short paragraphs describing what changed",
+  "assumptions": "a markdown list of implementation assumptions and constraints, or 'None.'",
+  "risks": "a markdown list of risks, tradeoffs, or rollout concerns, or 'None.'",
+  "testing": "a markdown list of checks you ran and their results, or 'Not run.'",
+  "summary": "a concise reviewer-friendly summary of the sliced implementation",
+  "slices": [
+    {
+      "repository": "owner/name",
+      "commit": "commit sha or unambiguous short sha",
+      "title": "reviewable commit title",
+      "summary": "what this commit does and why it belongs as one review unit",
+      "files": ["path/to/file.ts"],
+      "reviewNotes": "optional focused guidance for reviewers"
+    }
+  ],
+  "outcome": "required only when the current task outcome is empty",
+  "acceptanceCriteria": "required only when the current task acceptance criteria are empty"
+}
+(Rewrite the local branch into ordered reviewable commits if needed. Do NOT push or open a PR yourself; the worker does that.)`,
   review: `{
   "kind": "review",
   "summary": "one paragraph",

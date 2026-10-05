@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_TROUBLESHOOT_STEP, TransitionError, type AgentJobPayload, type Task } from '@sindral/shared';
-import { claimNext, completeMerge, completeNext, createTestApp, plan, pr, reload, review, verdict, type TestContext } from '../test/helpers.js';
+import { claimNext, completeMerge, completeNext, createTestApp, implementation, plan, pr, reload, review, reviewSlice, verdict, type TestContext } from '../test/helpers.js';
 import { HttpError } from '../errors.js';
 
 let ctx: TestContext;
@@ -139,23 +139,29 @@ describe('full SDLC happy path', () => {
     expect(agentPayload(implJob).context.acceptance_criteria).toBe('- The requested behavior is verified.');
     expect(agentPayload(implJob).step.prompt).toContain('Treat this contract as the definition of done.');
 
-    await completeNext(ctx, userId, pr(7));
+    await completeNext(ctx, userId, implementation());
+    task = await reload(ctx, userId, task);
+    expect(task.state).toBe('review-slice');
+    expect(agentPayload((await queuedJobs(task.id))[0]!).step.id).toBe('review-slice');
+
+    await completeNext(ctx, userId, reviewSlice(7));
     task = await reload(ctx, userId, task);
     expect(task.state).toBe('adversarial-review');
     expect(task.prUrl).toBe('https://github.com/acme/app/pull/7');
     expect(agentPayload((await queuedJobs(task.id))[0]!).context.pr_url).toBe('https://github.com/acme/app/pull/7');
+    expect(agentPayload((await queuedJobs(task.id))[0]!).context.review_slices).toContain('Implement requested behavior');
 
     await completeNext(ctx, userId, review());
     task = await reload(ctx, userId, task);
     expect(task.state).toBe('verify');
     const artifacts = await ctx.repo.listArtifacts(userId, task.id);
-    expect(artifacts.map((a) => a.name)).toEqual(['adversarial-review.md']);
+    expect(artifacts.map((a) => a.name)).toEqual(['review-slices.json', 'adversarial-review.md']);
     expect(agentPayload((await queuedJobs(task.id))[0]!).context.review).toBe('# Review');
 
     await completeNext(ctx, userId, verdict(true));
     task = await reload(ctx, userId, task);
     expect(task.state).toBe('in-review');
-    expect((await ctx.repo.listArtifacts(userId, task.id)).map((a) => a.name)).toEqual(['adversarial-review.md', 'verify-report.md']);
+    expect((await ctx.repo.listArtifacts(userId, task.id)).map((a) => a.name)).toEqual(['review-slices.json', 'adversarial-review.md', 'verify-report.md']);
 
     task = await orch().applyUserEvent(userId, task.id, 'accept');
     expect(task.state).toBe('merge');
@@ -170,7 +176,8 @@ describe('full SDLC happy path', () => {
       'todo->planning',
       'planning->plan-review',
       'plan-review->implement',
-      'implement->adversarial-review',
+      'implement->review-slice',
+      'review-slice->adversarial-review',
       'adversarial-review->verify',
       'verify->in-review',
       'in-review->merge',
@@ -185,11 +192,16 @@ describe('full SDLC happy path', () => {
     await orch().applyUserEvent(userId, task.id, 'start');
     await completeNext(ctx, userId, plan());
     await orch().applyUserEvent(userId, task.id, 'approve');
+    await completeNext(ctx, userId, implementation());
     await completeNext(ctx, userId, {
-      kind: 'pr',
+      kind: 'review-slice',
       summary: 'Opened both pull requests',
       prUrl: 'https://github.com/acme/app/pull/1',
       branch: task.branch!,
+      slices: [
+        { repository: 'acme/app', commit: 'a'.repeat(40), title: 'App changes', summary: 'Updates the app.', files: ['app.ts'] },
+        { repository: 'acme/api', commit: 'b'.repeat(40), title: 'API changes', summary: 'Updates the API.', files: ['api.ts'] },
+      ],
       pullRequests: [
         { repository: 'acme/app', prUrl: 'https://github.com/acme/app/pull/1', number: 1, branch: task.branch!, baseBranch: 'main', headSha: 'a'.repeat(40) },
         { repository: 'acme/api', prUrl: 'https://github.com/acme/api/pull/2', number: 2, branch: task.branch!, baseBranch: 'main', headSha: 'b'.repeat(40) },
@@ -225,7 +237,8 @@ describe('full SDLC happy path', () => {
     await orch().applyUserEvent(userId, task.id, 'start');
     await completeNext(ctx, userId, plan());
     await orch().applyUserEvent(userId, task.id, 'approve');
-    await completeNext(ctx, userId, pr(9));
+    await completeNext(ctx, userId, implementation());
+    await completeNext(ctx, userId, reviewSlice(9));
 
     await completeNext(ctx, userId, {
       kind: 'review',
@@ -235,7 +248,7 @@ describe('full SDLC happy path', () => {
     });
 
     const artifacts = await ctx.repo.listArtifacts(userId, task.id);
-    expect(artifacts.map((artifact) => artifact.name)).toEqual(['diff-explanation.md', 'adversarial-review.md']);
+    expect(artifacts.map((artifact) => artifact.name)).toEqual(['review-slices.json', 'diff-explanation.md', 'adversarial-review.md']);
     expect(artifacts.find((artifact) => artifact.name === 'diff-explanation.md')?.content).toBe('Changed the task detail view.');
     expect(artifacts.find((artifact) => artifact.name === 'adversarial-review.md')?.content).toBe('# Review\n\n## Findings ordered by severity\nNo material findings.');
     task = await reload(ctx, userId, task);
@@ -358,7 +371,8 @@ describe('feedback loops', () => {
     await orch().applyUserEvent(userId, task.id, 'start');
     await completeNext(ctx, userId, plan());
     await orch().applyUserEvent(userId, task.id, 'approve');
-    await completeNext(ctx, userId, pr());
+    await completeNext(ctx, userId, implementation());
+    await completeNext(ctx, userId, reviewSlice());
     await completeNext(ctx, userId, review());
     await completeNext(ctx, userId, verdict(false, 'Fix the null check'));
     task = await reload(ctx, userId, task);
@@ -367,7 +381,7 @@ describe('feedback loops', () => {
     expect(agentPayload(job).context.feedback).toBe('Fix the null check');
     expect(agentPayload(job).context.verify_report).toBe('# Verify');
     expect(agentPayload(job).prUrl).toBe('https://github.com/acme/app/pull/1');
-    await completeNext(ctx, userId, pr());
+    await completeNext(ctx, userId, reviewSlice());
     task = await reload(ctx, userId, task);
     expect(task.state).toBe('adversarial-review');
   });
@@ -377,12 +391,13 @@ describe('feedback loops', () => {
     await orch().applyUserEvent(userId, task.id, 'start');
     await completeNext(ctx, userId, plan());
     await orch().applyUserEvent(userId, task.id, 'approve');
-    await completeNext(ctx, userId, pr());
+    await completeNext(ctx, userId, implementation());
+    await completeNext(ctx, userId, reviewSlice());
     await completeNext(ctx, userId, review());
     await completeNext(ctx, userId, verdict(true));
     const { task: after } = await orch().postUserMessage(userId, task.id, 'Rename the helper', 'web');
     expect(after.state).toBe('implement-feedback');
-    await completeNext(ctx, userId, pr());
+    await completeNext(ctx, userId, reviewSlice());
     await completeNext(ctx, userId, review());
     await completeNext(ctx, userId, verdict(true));
     task = await reload(ctx, userId, task);
@@ -481,22 +496,26 @@ describe('task contracts outside planning workflows', () => {
     expect(await ctx.repo.getJob(userId, job!.id)).toMatchObject({ status: 'failed', error: 'Result omitted the task contract' });
   });
 
-  it('does not persist a generated contract from an invalid first PR result', async () => {
+  it('does not persist a generated contract from an invalid first review-slice result', async () => {
     const fastTrack = (await ctx.app.ctx.workflows.list(userId)).find((workflow) => workflow.name === 'Fast Track')!;
     const task = await newTask({ workflowId: fastTrack.id });
     await orch().applyUserEvent(userId, task.id, 'start');
-    const invalidPr = pr();
-    if (invalidPr.kind !== 'pr') throw new Error('expected PR result');
+    await completeNext(ctx, userId, implementation());
+    const invalidReviewSlice = reviewSlice();
+    if (invalidReviewSlice.kind !== 'review-slice') throw new Error('expected review-slice result');
 
     await expect(
       completeNext(ctx, userId, {
-        ...invalidPr,
+        ...invalidReviewSlice,
         outcome: 'Rejected outcome',
         acceptanceCriteria: '- Rejected criterion.',
         branch: 'wrong-branch',
       }),
     ).rejects.toThrow(/Legacy pull request fields do not match/);
-    expect(await ctx.repo.getTask(userId, task.id)).toMatchObject({ outcome: '', acceptanceCriteria: '' });
+    expect(await ctx.repo.getTask(userId, task.id)).toMatchObject({
+      outcome: 'The requested behavior is delivered.',
+      acceptanceCriteria: '- The requested behavior is verified.',
+    });
   });
 });
 
@@ -731,505 +750,6 @@ describe('failure handling', () => {
   });
 });
 
-describe('subtask stacks', () => {
-  const SUBTASKS = [
-    { title: 'Add schema', goal: 'Create the DB schema' },
-    { title: 'Add API', goal: 'Expose the endpoints' },
-    { title: 'Add UI', goal: 'Wire the screens' },
-  ];
-
-  async function plannedParent(): Promise<{ parent: Task; children: Task[] }> {
-    const parent = await newTask({ title: 'Big feature' });
-    await orch().applyUserEvent(userId, parent.id, 'start');
-    await completeNext(ctx, userId, plan('# Parent plan', SUBTASKS));
-    const children = await ctx.repo.listSubtasks(userId, parent.id);
-    return { parent: await reload(ctx, userId, parent), children };
-  }
-
-  it('creates ordered children with chained base branches and the parent snapshot', async () => {
-    const { parent, children } = await plannedParent();
-    expect(parent.state).toBe('plan-review');
-    expect(children.map((c) => c.sequence)).toEqual([1, 2, 3]);
-    expect(children.map((c) => c.key)).toEqual(['SIN-2', 'SIN-3', 'SIN-4']);
-    expect(children.map((c) => c.baseBranch)).toEqual([null, 'sindral/sin-2', 'sindral/sin-3']);
-    expect(children.every((c) => c.parentTaskId === parent.id && c.state === 'todo')).toBe(true);
-    expect(children[0]!.pinnedWorkflow?.name).toBe('Full SDLC');
-    expect(children[0]!.description).toBe('Create the DB schema');
-    expect(children[0]!.repos).toEqual(['acme/app']);
-    const list = await ctx.repo.listTasks(userId, {});
-    expect(list.map((t) => t.id)).toEqual([parent.id]);
-  });
-
-  it('does not create subtasks for a single subtask or for a subtask plan', async () => {
-    const parent = await newTask();
-    await orch().applyUserEvent(userId, parent.id, 'start');
-    await completeNext(ctx, userId, plan('# p', [{ title: 'only', goal: 'one' }]));
-    expect(await ctx.repo.listSubtasks(userId, parent.id)).toHaveLength(0);
-  });
-
-  it('keeps the first completed subtask stack when a plan is revised', async () => {
-    const { parent, children } = await plannedParent();
-    await orch().postUserMessage(userId, parent.id, 'Revise the plan without replacing the active stack', 'web');
-    await completeNext(ctx, userId, plan('# Revised', [...SUBTASKS, { title: 'Unexpected extra', goal: 'Do not append this' }]));
-
-    expect((await ctx.repo.listSubtasks(userId, parent.id)).map((child) => child.id)).toEqual(children.map((child) => child.id));
-  });
-
-  it('starts child #1 instead of dispatching the parent implement step, then runs children serially', async () => {
-    const { parent, children } = await plannedParent();
-    let p = await orch().applyUserEvent(userId, parent.id, 'approve');
-    expect(p.state).toBe('implement');
-    expect(await queuedJobs(parent.id)).toHaveLength(0);
-
-    let c1 = await reload(ctx, userId, children[0]!);
-    expect(c1.state).toBe('planning');
-    const c1Job = (await queuedJobs(c1.id))[0]!;
-    expect(agentPayload(c1Job).context.parent_plan).toBe('# Parent plan');
-    expect(agentPayload(c1Job).context.sibling_summaries).toBe('');
-    expect((await reload(ctx, userId, children[1]!)).state).toBe('todo');
-
-    // child 1 through to in-review
-    await completeNext(ctx, userId, plan('# c1 plan'));
-    c1 = await reload(ctx, userId, c1);
-    expect(c1.state).toBe('implement');
-    expect((await ctx.repo.listEvents(userId, c1.id)).find((event) => event.detail?.['reason'] === 'parent-plan-approved')).toMatchObject({
-      type: 'transition',
-      detail: { event: 'approve', actor: 'system', reason: 'parent-plan-approved', parentTaskId: parent.id },
-    });
-    expect(agentPayload((await queuedJobs(c1.id))[0]!).step.id).toBe('implement');
-    await completeNext(ctx, userId, pr(10, 'sindral/sin-2'));
-    await completeNext(ctx, userId, review());
-    await completeNext(ctx, userId, verdict(true));
-    c1 = await reload(ctx, userId, c1);
-    expect(c1.state).toBe('in-review');
-
-    // child 2 was started when child 1 hit in-review
-    const c2 = await reload(ctx, userId, children[1]!);
-    expect(c2.state).toBe('planning');
-    const c2Job = (await queuedJobs(c2.id))[0]!;
-    expect(agentPayload(c2Job).context.sibling_summaries).toContain('SIN-2 Add schema');
-    expect(agentPayload(c2Job).context.sibling_summaries).toContain('GO');
-    expect(agentPayload(c2Job).baseBranch).toBe('sindral/sin-2');
-    expect((await reload(ctx, userId, children[2]!)).state).toBe('todo');
-
-    p = await reload(ctx, userId, parent);
-    expect(p.state).toBe('implement');
-  });
-
-  it('requires active children to close first and settles a declined stack as wont-do', async () => {
-    const { parent, children } = await plannedParent();
-    await orch().applyUserEvent(userId, parent.id, 'approve');
-
-    await expect(orch().applyUserEvent(userId, parent.id, 'mark-wont-do')).rejects.toThrow(/Close active subtasks/);
-
-    for (const child of children) {
-      await orch().applyUserEvent(userId, child.id, 'mark-wont-do');
-    }
-
-    expect((await reload(ctx, userId, parent)).state).toBe('wont-do');
-    expect((await ctx.repo.listSubtasks(userId, parent.id)).map((child) => child.state)).toEqual(['wont-do', 'wont-do', 'wont-do']);
-    expect((await ctx.repo.listEvents(userId, parent.id)).at(-1)).toMatchObject({
-      type: 'transition',
-      toState: 'wont-do',
-      detail: { event: 'mark-wont-do', actor: 'system', reason: 'subtasks-complete' },
-    });
-  });
-
-  it('serializes child closure against active parent maintenance', async () => {
-    const { parent, children } = await plannedParent();
-    const maintenance = await ctx.repo.createJob(userId, {
-      taskId: parent.id,
-      kind: 'rebase-stack',
-      stepId: null,
-      payload: { kind: 'rebase-stack', repos: ['acme/app'], stack: [] },
-    });
-    const claim = (await ctx.repo.claimJobs(userId, 'maintenance-worker', 10)).find((job) => job.id === maintenance.id)!;
-    await orch().applyUserEvent(userId, parent.id, 'approve');
-
-    await expect(orch().applyUserEvent(userId, children[0]!.id, 'mark-wont-do')).rejects.toThrow(/active work/);
-
-    await orch().completeJob(userId, claim.id, { kind: 'rebase', summary: 'maintenance complete', rebased: [] }, claim.attempt, claim.leaseToken);
-    for (const child of children) await orch().applyUserEvent(userId, child.id, 'mark-wont-do');
-    expect((await reload(ctx, userId, parent)).state).toBe('wont-do');
-  });
-
-  it('reconciles a terminal child stack when a finalized parent outcome is replayed', async () => {
-    const { parent, children } = await plannedParent();
-    await orch().applyUserEvent(userId, parent.id, 'approve');
-    for (const child of children) await ctx.repo.updateTask(userId, child.id, { state: 'wont-do' });
-    const maintenance = await ctx.repo.createJob(userId, {
-      taskId: parent.id,
-      kind: 'rebase-stack',
-      stepId: null,
-      payload: { kind: 'rebase-stack', repos: ['acme/app'], stack: [] },
-    });
-    const claim = (await ctx.repo.claimJobs(userId, 'replay-worker', 10)).find((job) => job.id === maintenance.id)!;
-    const result = { kind: 'rebase' as const, summary: 'already applied', rebased: [] };
-    const outcomeHash = createHash('sha256').update(JSON.stringify({ result })).digest('hex');
-    const outcome = await ctx.repo.beginJobOutcome(userId, claim.id, claim.attempt, outcomeHash, { result }, claim.leaseToken);
-    expect(outcome.state).toBe('acquired');
-    await ctx.repo.finalizeJobOutcome(userId, claim.id, claim.attempt, outcomeHash, outcome.token!, 'completed');
-
-    await orch().completeJob(userId, claim.id, result, claim.attempt, claim.leaseToken);
-
-    expect((await reload(ctx, userId, parent)).state).toBe('wont-do');
-  });
-
-  it('ignores rebase failures for a sibling that is already wont-do', async () => {
-    const { parent, children } = await plannedParent();
-    const sibling = children[1]!;
-    await orch().applyUserEvent(userId, sibling.id, 'mark-wont-do');
-    const rebase = await ctx.repo.createJob(userId, {
-      taskId: parent.id,
-      kind: 'rebase-stack',
-      stepId: null,
-      payload: { kind: 'rebase-stack', repos: ['acme/app'], stack: [{ taskId: sibling.id, branch: sibling.branch!, baseBranch: sibling.baseBranch! }] },
-    });
-    const claim = (await ctx.repo.claimJobs(userId, 'rebase-worker', 10)).find((job) => job.id === rebase.id)!;
-
-    await orch().completeJob(userId, claim.id, {
-      kind: 'rebase',
-      summary: 'stale failure',
-      rebased: [{ taskId: sibling.id, branch: sibling.branch!, ok: false, error: 'ignore me' }],
-    }, claim.attempt, claim.leaseToken);
-
-    expect(await reload(ctx, userId, sibling)).toMatchObject({ state: 'wont-do', lastError: null });
-    expect(await ctx.repo.listMessages(userId, sibling.id)).toEqual([]);
-    expect((await ctx.repo.getJob(userId, rebase.id))?.status).toBe('completed');
-  });
-
-  it('prunes a closing child from queued parent rebase work', async () => {
-    const { parent, children } = await plannedParent();
-    const [closing, remaining] = children;
-    const onlyClosing = await ctx.repo.createJob(userId, {
-      taskId: parent.id,
-      kind: 'rebase-stack',
-      stepId: null,
-      payload: { kind: 'rebase-stack', repos: ['acme/app'], stack: [{ taskId: closing!.id, branch: closing!.branch!, baseBranch: 'main' }] },
-    });
-    const mixed = await ctx.repo.createJob(userId, {
-      taskId: parent.id,
-      kind: 'rebase-stack',
-      stepId: null,
-      payload: {
-        kind: 'rebase-stack',
-        repos: ['acme/app'],
-        stack: [
-          { taskId: closing!.id, branch: closing!.branch!, baseBranch: 'main' },
-          { taskId: remaining!.id, branch: remaining!.branch!, baseBranch: closing!.branch! },
-        ],
-      },
-    });
-
-    await orch().applyUserEvent(userId, closing!.id, 'mark-wont-do');
-
-    expect((await ctx.repo.getJob(userId, onlyClosing.id))?.status).toBe('cancelled');
-    expect((await ctx.repo.getJob(userId, mixed.id))?.payload).toMatchObject({ stack: [{ taskId: remaining!.id }] });
-    const claimed = await ctx.repo.claimJobs(userId, 'rebase-worker', 10);
-    expect(claimed.flatMap((job) => (job.payload.kind === 'rebase-stack' ? job.payload.stack.map((entry) => entry.taskId) : []))).not.toContain(closing!.id);
-  });
-
-  it('resumes parent settlement and sibling progression when a manual closure is replayed', async () => {
-    const { parent, children } = await plannedParent();
-    await orch().applyUserEvent(userId, parent.id, 'approve');
-    const service = orch();
-    const completion = vi.spyOn(
-      service as unknown as { onTaskCompleted(userId: string, task: Task): Promise<void> },
-      'onTaskCompleted',
-    );
-
-    const first = await reload(ctx, userId, children[0]!);
-    completion.mockRejectedValueOnce(new Error('simulated process exit after transition commit'));
-    await expect(service.applyUserEvent(userId, first.id, 'mark-wont-do', first.version, 'close-first')).rejects.toThrow(/simulated process exit/);
-    expect((await reload(ctx, userId, children[1]!)).state).toBe('todo');
-    completion.mockRestore();
-
-    await service.applyUserEvent(userId, first.id, 'mark-wont-do', first.version, 'close-first');
-    expect((await reload(ctx, userId, children[1]!)).state).toBe('planning');
-
-    await service.applyUserEvent(userId, children[1]!.id, 'mark-wont-do');
-    const last = await reload(ctx, userId, children[2]!);
-    const finalCompletion = vi.spyOn(
-      service as unknown as { onTaskCompleted(userId: string, task: Task): Promise<void> },
-      'onTaskCompleted',
-    );
-    finalCompletion.mockRejectedValueOnce(new Error('simulated process exit before parent settlement'));
-    await expect(service.applyUserEvent(userId, last.id, 'mark-done', last.version, 'close-last')).rejects.toThrow(/simulated process exit/);
-    expect((await reload(ctx, userId, parent)).state).toBe('implement');
-    finalCompletion.mockRestore();
-
-    await service.applyUserEvent(userId, last.id, 'mark-done', last.version, 'close-last');
-    expect((await reload(ctx, userId, parent)).state).toBe('wont-do');
-  });
-
-  it('enqueues a rebase-stack job when an earlier child pushes while later children have PRs', async () => {
-    const { parent, children } = await plannedParent();
-    await orch().applyUserEvent(userId, parent.id, 'approve');
-    // c1 → in-review
-    await completeNext(ctx, userId, plan());
-    await completeNext(ctx, userId, pr(10, 'sindral/sin-2'));
-    await completeNext(ctx, userId, review());
-    await completeNext(ctx, userId, verdict(true));
-    // c2 → in-review (has PR now)
-    await completeNext(ctx, userId, plan());
-    await completeNext(ctx, userId, pr(11, 'sindral/sin-3'));
-    await completeNext(ctx, userId, review());
-    await completeNext(ctx, userId, verdict(true));
-    expect((await reload(ctx, userId, children[2]!)).state).toBe('planning');
-
-    // feedback on c1 → new push → rebase c2 (c3 has no PR yet)
-    await orch().postUserMessage(userId, children[0]!.id, 'tweak', 'web');
-    expect((await reload(ctx, userId, children[0]!)).state).toBe('implement-feedback');
-    const c1Job = (await ctx.repo.listJobsForTask(userId, children[0]!.id)).find((j) => j.status === 'queued')!;
-    await ctx.repo.claimJobs(userId, 'w', 1); // c3 planning job is older; claim + ignore it so c1 is next
-    const claimed = await ctx.repo.claimJobs(userId, 'w', 5);
-    expect(claimed.map((j) => j.id)).toContain(c1Job.id);
-    const c1Claim = claimed.find((job) => job.id === c1Job.id)!;
-    await orch().completeJob(userId, c1Claim.id, pr(10, 'sindral/sin-2'), c1Claim.attempt, c1Claim.leaseToken);
-
-    const parentJobs = await ctx.repo.listJobsForTask(userId, parent.id);
-    const rebase = parentJobs.find((j) => j.kind === 'rebase-stack')!;
-    expect(rebase).toBeDefined();
-    expect(rebase.status).toBe('queued');
-    expect(rebase.payload).toEqual({
-      kind: 'rebase-stack',
-      repos: ['acme/app'],
-      stack: [{ taskId: children[1]!.id, branch: 'sindral/sin-3', baseBranch: 'sindral/sin-2' }],
-    });
-
-    // A plain failure still parks the sibling in failure.
-    const rebaseClaim = (await ctx.repo.claimJobs(userId, 'w', 10)).find((job) => job.id === rebase.id)!;
-    await expect(orch().completeJob(userId, rebaseClaim.id, pr(), rebaseClaim.attempt, rebaseClaim.leaseToken)).rejects.toMatchObject({ statusCode: 400 });
-    await orch().completeJob(userId, rebaseClaim.id, {
-      kind: 'rebase',
-      summary: 'rebased',
-      rebased: [{ taskId: children[1]!.id, branch: 'sindral/sin-3', ok: false, error: 'conflict in schema.sql' }],
-    }, rebaseClaim.attempt, rebaseClaim.leaseToken);
-    const c2 = await reload(ctx, userId, children[1]!);
-    expect(c2.state).toBe('failure');
-    expect(c2.lastError).toBe('conflict in schema.sql');
-    expect(c2.failedStepId).toBe('in-review');
-    expect((await reload(ctx, userId, parent)).state).toBe('implement');
-  });
-
-  it('defers restacking during automated review, then re-runs review after the rebase', async () => {
-    const { parent, children } = await plannedParent();
-    const [earlier, reviewing] = children;
-    await ctx.repo.updateTask(userId, reviewing!.id, {
-      prUrl: 'https://github.com/acme/app/pull/11',
-      state: 'adversarial-review',
-      currentStepId: 'adversarial-review',
-    });
-    const [taskRepository] = await ctx.repo.listTaskRepositories(userId, reviewing!.id);
-    await ctx.repo.upsertPullRequest(userId, reviewing!.id, {
-      taskRepositoryId: taskRepository!.id,
-      repository: 'acme/app',
-      url: 'https://github.com/acme/app/pull/11',
-      number: 11,
-      branch: reviewing!.branch!,
-      baseBranch: earlier!.branch!,
-      headSha: 'a'.repeat(40),
-    });
-    const service = orch() as unknown as {
-      enqueueStackRebase(userId: string, child: Task, dedupePrefix: string): Promise<unknown>;
-      resumeDeferredStackRebase(userId: string, task: Task): Promise<void>;
-    };
-
-    expect(await service.enqueueStackRebase(userId, earlier!, 'upstream-change')).toBeNull();
-    const deferred = (await ctx.repo.listEvents(userId, reviewing!.id)).find((event) => event.type === 'stack-rebase-deferred');
-    expect(deferred).toMatchObject({ detail: { triggerTaskId: earlier!.id } });
-    expect((await ctx.repo.listJobsForTask(userId, parent.id)).filter((job) => job.kind === 'rebase-stack')).toHaveLength(0);
-
-    const ready = (await ctx.repo.updateTask(userId, reviewing!.id, { state: 'in-review', currentStepId: 'in-review' }))!;
-    await service.resumeDeferredStackRebase(userId, ready);
-    const rebase = (await ctx.repo.listJobsForTask(userId, parent.id)).find((job) => job.kind === 'rebase-stack')!;
-    expect(rebase.payload).toEqual({
-      kind: 'rebase-stack',
-      repos: ['acme/app'],
-      stack: [{ taskId: reviewing!.id, branch: reviewing!.branch!, baseBranch: earlier!.branch! }],
-    });
-
-    const claim = (await ctx.repo.claimJobs(userId, 'restack-worker', 10)).find((job) => job.id === rebase.id)!;
-    await orch().completeJob(userId, claim.id, {
-      kind: 'rebase',
-      summary: 'rebased onto the revised first subtask',
-      rebased: [{ taskId: reviewing!.id, branch: reviewing!.branch!, ok: true, headSha: 'b'.repeat(40) }],
-    }, claim.attempt, claim.leaseToken);
-
-    expect(await reload(ctx, userId, reviewing!)).toMatchObject({ state: 'adversarial-review', currentStepId: 'adversarial-review' });
-    expect(agentPayload((await queuedJobs(reviewing!.id))[0]!).step.id).toBe('adversarial-review');
-    expect((await ctx.repo.listPullRequests(userId, reviewing!.id))[0]?.headSha).toBe('b'.repeat(40));
-    expect((await ctx.repo.listEvents(userId, reviewing!.id)).some((event) => event.type === 'stack-rebase-resumed')).toBe(true);
-  });
-
-  it('lets implementation feedback take over from queued restacking without racing the branch', async () => {
-    const { parent, children } = await plannedParent();
-    const [earlier, reviewed] = children;
-    await ctx.repo.updateTask(userId, reviewed!.id, {
-      prUrl: 'https://github.com/acme/app/pull/11',
-      state: 'in-review',
-      currentStepId: 'in-review',
-    });
-    const service = orch() as unknown as {
-      enqueueStackRebase(userId: string, child: Task, dedupePrefix: string): Promise<unknown>;
-    };
-    await service.enqueueStackRebase(userId, earlier!, 'queued-before-feedback');
-    const rebase = (await ctx.repo.listJobsForTask(userId, parent.id)).find((job) => job.kind === 'rebase-stack')!;
-
-    const response = await orch().postUserMessage(userId, reviewed!.id, 'Please revise the API shape', 'web');
-
-    expect(response.task.state).toBe('implement-feedback');
-    expect((await ctx.repo.getJob(userId, rebase.id))?.status).toBe('cancelled');
-    expect((await ctx.repo.listEvents(userId, reviewed!.id)).some((event) => event.type === 'stack-rebase-cancelled-for-feedback')).toBe(true);
-    expect(agentPayload((await queuedJobs(reviewed!.id))[0]!).step.id).toBe('implement-feedback');
-  });
-
-  it('blocks acceptance while a claimed restack is changing the reviewed branch', async () => {
-    const { parent, children } = await plannedParent();
-    const [earlier, reviewed] = children;
-    const ready = (await ctx.repo.updateTask(userId, reviewed!.id, {
-      prUrl: 'https://github.com/acme/app/pull/11',
-      state: 'in-review',
-      currentStepId: 'in-review',
-    }))!;
-    const service = orch() as unknown as {
-      enqueueStackRebase(userId: string, child: Task, dedupePrefix: string): Promise<unknown>;
-    };
-    await service.enqueueStackRebase(userId, earlier!, 'claimed-before-accept');
-    expect((await ctx.repo.claimJobs(userId, 'restack-worker', 1))[0]?.taskId).toBe(parent.id);
-
-    await expect(orch().applyUserEvent(userId, ready.id, 'accept')).rejects.toThrow(/Stack maintenance/);
-    expect((await reload(ctx, userId, ready)).state).toBe('in-review');
-  });
-
-  it('waits for every repository to restack before invalidating implementation review', async () => {
-    const parent = await newTask({ repos: ['acme/app', 'acme/api'] });
-    await orch().applyUserEvent(userId, parent.id, 'start');
-    await completeNext(ctx, userId, plan('# Parent plan', SUBTASKS.slice(0, 2)));
-    const [earlier, later] = await ctx.repo.listSubtasks(userId, parent.id);
-    await ctx.repo.updateTask(userId, later!.id, {
-      prUrl: 'https://github.com/acme/app/pull/11',
-      state: 'in-review',
-      currentStepId: 'in-review',
-    });
-    const service = orch() as unknown as {
-      enqueueStackRebase(userId: string, child: Task, dedupePrefix: string): Promise<unknown>;
-    };
-    await service.enqueueStackRebase(userId, earlier!, 'multi-repo-change');
-    const jobs = (await ctx.repo.listJobsForTask(userId, parent.id)).filter((job) => job.kind === 'rebase-stack');
-    expect(jobs).toHaveLength(2);
-    const claims = await ctx.repo.claimJobs(userId, 'restack-worker', 10);
-    const result = {
-      kind: 'rebase' as const,
-      summary: 'rebased repository',
-      rebased: [{ taskId: later!.id, branch: later!.branch!, ok: true }],
-    };
-
-    await orch().completeJob(userId, claims.find((claim) => claim.id === jobs[0]!.id)!.id, result, 1, claims.find((claim) => claim.id === jobs[0]!.id)!.leaseToken);
-    expect((await reload(ctx, userId, later!)).state).toBe('in-review');
-    const second = (await ctx.repo.claimJobs(userId, 'restack-worker', 10)).find((claim) => claim.id === jobs[1]!.id)!;
-    await orch().completeJob(userId, second.id, result, second.attempt, second.leaseToken);
-    expect((await reload(ctx, userId, later!)).state).toBe('adversarial-review');
-  });
-
-  it('queues a bounded resolver for a pinned rebase conflict and escalates an unsafe result', async () => {
-    const { parent, children } = await plannedParent();
-    const sibling = children[1]!;
-    await ctx.repo.updateTask(userId, sibling.id, {
-      prUrl: 'https://github.com/acme/app/pull/11',
-      state: 'in-review',
-      currentStepId: 'in-review',
-      pinnedWorkflow: parent.pinnedWorkflow,
-    });
-    const rebase = await ctx.repo.createJob(userId, {
-      taskId: parent.id,
-      kind: 'rebase-stack',
-      stepId: null,
-      payload: {
-        kind: 'rebase-stack',
-        repos: ['acme/app'],
-        stack: [{ taskId: sibling.id, branch: sibling.branch!, baseBranch: sibling.baseBranch! }],
-      },
-    });
-    const rebaseClaim = (await ctx.repo.claimJobs(userId, 'w', 10)).find((job) => job.id === rebase.id)!;
-    await orch().completeJob(userId, rebaseClaim.id, {
-      kind: 'rebase',
-      summary: 'conflict',
-      rebased: [
-        {
-          taskId: sibling.id,
-          branch: sibling.branch!,
-          ok: false,
-          error: 'conflict in src/schema.ts',
-          conflict: {
-            repository: 'acme/app',
-            baseBranch: sibling.baseBranch!,
-            sourceSha: 'a'.repeat(40),
-            targetSha: 'b'.repeat(40),
-            conflictedPaths: ['src/schema.ts'],
-          },
-        },
-      ],
-    }, rebaseClaim.attempt, rebaseClaim.leaseToken);
-
-    const resolver = (await ctx.repo.listJobsForTask(userId, sibling.id)).find((job) => job.kind === 'resolve-rebase-conflict');
-    expect(resolver?.payload).toMatchObject({
-      kind: 'resolve-rebase-conflict',
-      taskId: sibling.id,
-      repository: 'acme/app',
-      branch: sibling.branch,
-      conflictedPaths: ['src/schema.ts'],
-      policy: { allowedPaths: ['src/schema.ts'], maxFiles: 20, maxChangedLines: 1000 },
-    });
-    expect((await reload(ctx, userId, sibling)).state).toBe('conflict-resolution');
-
-    const resolverClaim = (await ctx.repo.claimJobs(userId, 'w', 10)).find((job) => job.id === resolver!.id)!;
-    await orch().completeJob(userId, resolverClaim.id, {
-      kind: 'conflict-resolution',
-      summary: 'Needs a human',
-      taskId: sibling.id,
-      branch: sibling.branch!,
-      resolved: false,
-      rationale: 'The two changes specify different schemas.',
-      resolvedPaths: [],
-      checks: [],
-      error: 'Ambiguous intent',
-    }, resolverClaim.attempt, resolverClaim.leaseToken);
-    const failedSibling = await reload(ctx, userId, sibling);
-    expect(failedSibling.state).toBe('failure');
-    expect(failedSibling.lastError).toBe('Ambiguous intent');
-    expect((await ctx.repo.listEvents(userId, sibling.id)).some((event) => event.type === 'conflict-resolution-escalated')).toBe(true);
-    const evidence = (await ctx.repo.listArtifacts(userId, sibling.id)).find((artifact) => artifact.name.startsWith('conflict-resolution-'));
-    expect(evidence).toBeDefined();
-    expect(JSON.parse(evidence!.content!)).toMatchObject({ promptVersion: 'rebase-conflict-v1', outcome: 'escalated', error: 'Ambiguous intent' });
-  });
-
-  it('completes the parent when every child is done', async () => {
-    const parent = await newTask();
-    await orch().applyUserEvent(userId, parent.id, 'start');
-    await completeNext(ctx, userId, plan('# p', SUBTASKS.slice(0, 2)));
-    await orch().applyUserEvent(userId, parent.id, 'approve');
-    const [c1, c2] = await ctx.repo.listSubtasks(userId, parent.id);
-    for (const [index, child] of [c1!, c2!].entries()) {
-      await completeNext(ctx, userId, plan());
-      // Each subtask has its own branch; the worker must report the branch it was given.
-      await completeNext(ctx, userId, pr(10 + index, child.branch!));
-      await completeNext(ctx, userId, review());
-      await completeNext(ctx, userId, verdict(true));
-    }
-    expect((await reload(ctx, userId, parent)).state).toBe('implement');
-    await orch().applyUserEvent(userId, c1!.id, 'accept');
-    await completeMerge(ctx, userId);
-    expect((await reload(ctx, userId, parent)).state).toBe('implement');
-    await orch().applyUserEvent(userId, c2!.id, 'accept');
-    await completeMerge(ctx, userId);
-    const done = await reload(ctx, userId, parent);
-    expect(done.state).toBe('done');
-    expect(done.currentStepId).toBe('done');
-    const events = await ctx.repo.listEvents(userId, parent.id);
-    expect(events.at(-1)).toMatchObject({ type: 'transition', toState: 'done', detail: { event: 'mark-done', actor: 'system', reason: 'subtasks-complete' } });
-  });
-});
 
 describe('job claiming', () => {
   it('serialises jobs per task and hands out the oldest first', async () => {

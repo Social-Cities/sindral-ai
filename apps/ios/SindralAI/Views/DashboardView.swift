@@ -99,11 +99,11 @@ struct DashboardView: View {
     }
 
     private func count(_ bucket: DashboardBucket) -> Int {
-        store.tasks.filter { $0.parentTaskId == nil && $0.bucket(store.workflows) == bucket }.count
+        store.tasks.filter { $0.bucket(store.workflows) == bucket }.count
     }
 
     private var activeTasks: [SindralTask] {
-        Array(store.tasks.filter { $0.parentTaskId == nil && $0.state != "todo" && !TaskStates.terminal.contains($0.state) }
+        Array(store.tasks.filter { $0.state != "todo" && !TaskStates.terminal.contains($0.state) }
             .sorted { $0.updatedAt > $1.updatedAt }.prefix(4))
     }
 }

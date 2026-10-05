@@ -152,7 +152,9 @@ struct SindralTask: Codable, Identifiable, Hashable, Sendable {
     let branch: String?
     let baseBranch: String?
     let plan: String?
+    /// Legacy API compatibility for tasks created by older parent-task flows.
     let parentTaskId: String?
+    /// Legacy API compatibility for tasks created by older parent-task flows.
     let sequence: Int?
     let failedStepId: String?
     let lastError: String?
@@ -180,7 +182,9 @@ struct TaskDetail: Codable, Identifiable, Hashable, Sendable {
     let branch: String?
     let baseBranch: String?
     let plan: String?
+    /// Legacy API compatibility for tasks created by older parent-task flows.
     let parentTaskId: String?
+    /// Legacy API compatibility for tasks created by older parent-task flows.
     let sequence: Int?
     let failedStepId: String?
     let lastError: String?
@@ -189,7 +193,6 @@ struct TaskDetail: Codable, Identifiable, Hashable, Sendable {
     let messages: [Message]
     let events: [TaskEvent]
     let artifacts: [Artifact]
-    let subtasks: [SindralTask]
     let repositories: [TaskRepository]
     let pullRequests: [PullRequest]
 

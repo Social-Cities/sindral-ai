@@ -22,10 +22,9 @@ import { Pipeline } from './taskDetail/Pipeline';
 import { PlanTab } from './taskDetail/PlanTab';
 import { ReviewTab } from './taskDetail/ReviewTab';
 import { StepsTab } from './taskDetail/StepsTab';
-import { SubtasksTab } from './taskDetail/SubtasksTab';
 import { SummaryTab } from './taskDetail/SummaryTab';
 
-type Tab = 'summary' | 'plan' | 'chat' | 'code' | 'review' | 'steps' | 'artifacts' | 'subtasks';
+type Tab = 'summary' | 'plan' | 'chat' | 'code' | 'review' | 'steps' | 'artifacts';
 
 const TAB_LABELS: Record<Tab, string> = {
   summary: 'Summary',
@@ -35,7 +34,6 @@ const TAB_LABELS: Record<Tab, string> = {
   review: 'Review',
   steps: 'Steps',
   artifacts: 'Artifacts',
-  subtasks: 'Subtasks',
 };
 
 /** Button styling per workflow event, matching the prototype's colours. */
@@ -120,9 +118,12 @@ export function TaskDetail() {
   const actions = availableActions(task, workflow);
   const agentActive = isAgentActive(task, workflow);
   const step = workflow ? getStep(workflow, task.currentStepId ?? workflow.entryStepId) : null;
-  const hasReviewStep = Boolean(workflow?.steps.some((workflowStep) => workflowStep.output === 'review') || task.artifacts.some((artifact) => artifact.name === 'adversarial-review.md'));
-  const tabs: Tab[] = ['summary', 'plan', 'chat', 'code', ...(hasReviewStep ? (['review'] as Tab[]) : []), 'steps', 'artifacts', ...(task.subtasks.length > 0 ? (['subtasks'] as Tab[]) : [])];
-  const defaultTab: Tab = task.subtasks.length > 0 ? 'subtasks' : 'summary';
+  const hasReviewStep = Boolean(
+    workflow?.steps.some((workflowStep) => workflowStep.output === 'review' || workflowStep.output === 'review-slice') ||
+      task.artifacts.some((artifact) => artifact.name === 'adversarial-review.md' || artifact.name === 'review-slices.json'),
+  );
+  const tabs: Tab[] = ['summary', 'plan', 'chat', 'code', ...(hasReviewStep ? (['review'] as Tab[]) : []), 'steps', 'artifacts'];
+  const defaultTab: Tab = 'summary';
   const requestedTab = searchParams.get('tab') as Tab | null;
   const tab: Tab = requestedTab && tabs.includes(requestedTab) ? requestedTab : defaultTab;
   const setTab = (next: Tab) => {
@@ -168,11 +169,6 @@ export function TaskDetail() {
         </Link>
 
         <div className="flex items-center gap-2 min-w-0">
-          {task.parentTaskId && (
-            <Link to={`/tasks/${task.parentTaskId}?tab=subtasks`} className="text-[10px] font-mono text-muted-foreground hover:text-accent">
-              ↑ parent
-            </Link>
-          )}
           <span className="text-xs font-mono text-muted-foreground">{task.key}</span>
           <StatusBadge state={task.state} step={step} />
         </div>
@@ -229,7 +225,6 @@ export function TaskDetail() {
               >
                 {TAB_LABELS[t]}
                 {t === 'chat' && task.messages.length > 0 && <span className="ml-1.5 text-[10px] font-mono text-muted-foreground">{task.messages.length}</span>}
-                {t === 'subtasks' && <span className="ml-1.5 text-[10px] font-mono text-muted-foreground">{task.subtasks.length}</span>}
               </button>
             ))}
           </div>
@@ -318,7 +313,6 @@ export function TaskDetail() {
             {tab === 'review' && <ReviewTab task={task} />}
             {tab === 'steps' && <StepsTab task={task} workflow={workflow} agentActive={agentActive} />}
             {tab === 'artifacts' && <ArtifactsTab task={task} />}
-            {tab === 'subtasks' && <SubtasksTab task={task} workflows={workflows} />}
           </div>
         </div>
       </div>
@@ -356,7 +350,7 @@ export function TaskDetail() {
           </>
         }
       >
-        <p>Deleting removes this task, its subtasks, messages, jobs, and artifacts. This cannot be undone.</p>
+        <p>Deleting removes this task, its messages, jobs, and artifacts. This cannot be undone.</p>
         {deleteError && (
           <p className="mt-3 text-[#f87171]" role="alert">
             {deleteError}

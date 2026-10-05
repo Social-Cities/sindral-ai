@@ -71,6 +71,7 @@ struct StateStyle: Hashable {
         "plan-review": .init(label: "Plan Review", color: Color(hex: 0x38BDF8), pulses: false),
         "planning-feedback": .init(label: "Plan Feedback", color: Color(hex: 0xFB923C), pulses: true),
         "implement": .init(label: "Implementing", color: Color(hex: 0xA78BFA), pulses: true),
+        "review-slice": .init(label: "Review Slicer", color: Color(hex: 0x818CF8), pulses: true),
         "adversarial-review": .init(label: "Adversarial Review", color: Color(hex: 0xF472B6), pulses: true),
         "verify": .init(label: "Verifying", color: Color(hex: 0x2DD4BF), pulses: true),
         "in-review": .init(label: "In Review", color: Color(hex: 0x22D3EE), pulses: false),
@@ -265,7 +266,7 @@ struct SectionLabel: View {
     }
 }
 
-/// Small mono chip (`PR open`, `linked`, `↳ 1/3`).
+/// Small mono chip (`PR open`, `linked`).
 struct MetaChip: View {
     let text: String
     var color: Color = Theme.secondaryForeground

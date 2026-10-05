@@ -37,6 +37,7 @@ export function context(overrides: Partial<JobContext> = {}): JobContext {
     pr_url: '',
     parent_plan: '',
     sibling_summaries: '',
+    review_slices: '',
     review: '',
     verify_report: '',
     error: '',

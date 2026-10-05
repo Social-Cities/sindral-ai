@@ -11,6 +11,7 @@ interface ReviewTabProps {
 
 const REVIEW_ARTIFACT = 'adversarial-review.md';
 const DIFF_EXPLANATION_ARTIFACT = 'diff-explanation.md';
+const REVIEW_SLICES_ARTIFACT = 'review-slices.json';
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -19,27 +20,61 @@ function formatBytes(bytes: number): string {
 
 interface ReviewDocument {
   id: string;
-  label: 'Diff explanation' | 'Adversarial review';
+  label: 'Commit guide' | 'Diff explanation' | 'Adversarial review';
   artifact: Artifact;
   content: string | null;
   order: number;
 }
 
+interface ReviewSliceGuide {
+  summary?: string;
+  slices?: {
+    repository: string;
+    commit: string;
+    title: string;
+    summary: string;
+    files: string[];
+    reviewNotes?: string;
+  }[];
+}
+
+function commitGuideMarkdown(content: string | null): string | null {
+  if (!content) return null;
+  try {
+    const guide = JSON.parse(content) as ReviewSliceGuide;
+    if (!Array.isArray(guide.slices) || guide.slices.length === 0) return null;
+    const lines = ['# Commit guide'];
+    if (guide.summary) lines.push('', guide.summary);
+    for (const [index, slice] of guide.slices.entries()) {
+      lines.push('', `## ${index + 1}. ${slice.title}`, '', `- Repository: \`${slice.repository}\``, `- Commit: \`${slice.commit}\``);
+      if (slice.files.length > 0) lines.push(`- Files: ${slice.files.map((file) => `\`${file}\``).join(', ')}`);
+      lines.push('', slice.summary);
+      if (slice.reviewNotes) lines.push('', `Reviewer notes: ${slice.reviewNotes}`);
+    }
+    return lines.join('\n');
+  } catch {
+    return content;
+  }
+}
+
 function reviewDocuments(task: TaskWithRelations): ReviewDocument[] {
   const artifacts = task.artifacts
-    .filter((artifact) => artifact.name === DIFF_EXPLANATION_ARTIFACT || artifact.name === REVIEW_ARTIFACT)
+    .filter((artifact) => artifact.name === REVIEW_SLICES_ARTIFACT || artifact.name === DIFF_EXPLANATION_ARTIFACT || artifact.name === REVIEW_ARTIFACT)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
   const docs = artifacts.map((artifact): ReviewDocument => {
+    if (artifact.name === REVIEW_SLICES_ARTIFACT) {
+      return { id: artifact.id, label: 'Commit guide', artifact, content: commitGuideMarkdown(artifact.content), order: 0 };
+    }
     if (artifact.name === DIFF_EXPLANATION_ARTIFACT) {
-      return { id: artifact.id, label: 'Diff explanation', artifact, content: artifact.content, order: 0 };
+      return { id: artifact.id, label: 'Diff explanation', artifact, content: artifact.content, order: 1 };
     }
     return {
       id: artifact.id,
       label: 'Adversarial review',
       artifact,
       content: artifact.content ? removeMarkdownSection(artifact.content, 'Diff explanation') : null,
-      order: 1,
+      order: 2,
     };
   });
 
@@ -52,7 +87,7 @@ function reviewDocuments(task: TaskWithRelations): ReviewDocument[] {
         label: 'Diff explanation',
         artifact: latestCombined,
         content: extractMarkdownSection(latestCombined.content, 'Diff explanation'),
-        order: 0,
+        order: 1,
       });
     }
   }
@@ -68,7 +103,7 @@ export function ReviewTab({ task }: ReviewTabProps) {
   }, [documents, selectedId]);
 
   if (documents.length === 0) {
-    return <EmptyState title="No automated review yet" description="Diff explanation and adversarial review will appear here after review completes." />;
+    return <EmptyState title="No automated review yet" description="Commit guide, diff explanation, and adversarial review will appear here after review completes." />;
   }
 
   const selected = documents.find((document) => document.id === selectedId) ?? documents[0];

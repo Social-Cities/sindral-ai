@@ -10,7 +10,7 @@ Follow the \`investigate-task\` and \`plan-change\` skills if they are available
 1. Investigate the codebase to understand existing patterns, architecture, tests and constraints before planning.
 2. Define the task contract before planning. Preserve the imported outcome and acceptance criteria when they are already accurate; otherwise generate missing values or revise them to address the user's feedback. Acceptance criteria must be observable and testable.
 3. Start the plan with concise sections named exactly \`What behavior is changing\`, \`What files/systems are affected\`, \`Important invariants\`, \`Edge cases\`, and \`How correctness will be verified\`. Include the structured task contract in those sections: the behavior section must reflect the outcome, and the verification section must cover every acceptance criterion. Then provide a precise, actionable implementation plan with numbered steps, files expected to change, risk controls, and a verification contract.
-4. Pull requests must stay small and reviewable by humans. If the change would produce a large PR, split it into ordered subtasks that each ship as their own PR. Give each subtask a title and an overall goal/intention only; detailed implementation is planned just-in-time when the subtask starts so later subtasks can adapt if earlier ones change direction.
+4. Optimize for one coherent implementation per ticket. Do not split the task into subtasks for reviewability alone; a later review-slicing step will arrange the final branch into ordered, human-reviewable commits and explain each one.
 
 Task description:
 {{task_description}}
@@ -27,11 +27,7 @@ Previous plan (empty if this is the first pass):
 User feedback to address (empty if none):
 {{feedback}}
 
-Parent task plan (only present for subtasks):
-{{parent_plan}}
-
-Outcome of earlier subtasks in this stack (only present for subtasks):
-{{sibling_summaries}}`;
+`;
 
 const IMPLEMENT_PROMPT = `You are a senior software engineer implementing task {{task_key}}: "{{task_title}}".
 
@@ -39,7 +35,7 @@ Follow the \`design-tests\` and \`implement-change\` skills if available; otherw
 
 - Implement the approved plan precisely with the smallest maintainable diff. Follow repository conventions.
 - Every change must be typechecked and accompanied by unit tests. Run the repository's real build/typecheck/test commands and fix failures before finishing.
-- Commit your work with clear messages on the current branch. Do not push and do not open a PR; the worker does that.
+- Commit your work with clear messages on the current branch. Do not push and do not open a PR; a later review-slicing step publishes the PR.
 - If you discover the plan is materially wrong, stop and explain in the summary instead of inventing behaviour.
 
 Task description:
@@ -55,6 +51,33 @@ Approved plan:
 {{plan}}
 
 Feedback to address (empty on the first implementation pass; on later passes this contains reviewer comments from the user, GitHub or the verification agent):
+{{feedback}}`;
+
+const REVIEW_SLICE_PROMPT = `You are a senior engineer preparing task {{task_key}}: "{{task_title}}" for human code review.
+
+The implementation is complete on the current branch. Your job is to make the final PR easy to review as one change by arranging the branch into ordered, logical commits and writing a commit-by-commit review guide.
+
+Rules:
+- Preserve the net behavior of the implementation. You may rewrite local commit history, reorder commits, split commits, squash noisy fixups, and improve commit messages, but do not introduce unrelated behavior changes.
+- Each final commit should be a self-contained review unit with a clear title. Prefer a small number of meaningful commits over one giant commit or many mechanical crumbs.
+- Run lightweight validation after rewriting history. If full tests are too expensive, explain the focused checks you ran.
+- Do not push and do not open a PR; the worker publishes the final branch after you return the result.
+
+For every final commit in order, include the repository, commit sha, title, changed files, a concise explanation, and any focused reviewer notes.
+
+Task description:
+{{task_description}}
+
+Required outcome:
+{{task_outcome}}
+
+Acceptance criteria:
+{{acceptance_criteria}}
+
+Approved plan:
+{{plan}}
+
+Implementation / reviewer feedback to preserve (may be empty):
 {{feedback}}`;
 
 const REVIEW_PROMPT = `You are an independent reviewer for task {{task_key}}: "{{task_title}}". You did not write this change.
@@ -82,7 +105,10 @@ Acceptance criteria to review against:
 {{acceptance_criteria}}
 
 Approved plan:
-{{plan}}`;
+{{plan}}
+
+Review slice guide:
+{{review_slices}}`;
 
 const VERIFY_PROMPT = `You are the final technical gate for task {{task_key}}: "{{task_title}}".
 
@@ -170,27 +196,33 @@ export const FULL_SDLC_WORKFLOW: Workflow = {
     },
     {
       id: 'implement', type: 'agent', label: 'Implement Agent', state: 'implement',
-      engine: 'claude', model: 'claude-sonnet-5', mode: 'high', output: 'pr',
-      prompt: IMPLEMENT_PROMPT, tools: [...WRITE_TOOLS, 'create_pr'], permissions: ['read', 'write', 'execute'], position: { x: 520, y: 60 },
+      engine: 'claude', model: 'claude-sonnet-5', mode: 'high', output: 'implementation',
+      prompt: IMPLEMENT_PROMPT, tools: [...WRITE_TOOLS], permissions: ['read', 'write', 'execute'], position: { x: 520, y: 60 },
+    },
+    {
+      id: 'review-slice', type: 'agent', label: 'Review Slicer', state: 'review-slice',
+      engine: 'claude', model: 'claude-opus-5', mode: 'high', output: 'review-slice',
+      prompt: REVIEW_SLICE_PROMPT, tools: [...WRITE_TOOLS, 'create_pr'], permissions: ['read', 'write', 'execute'], position: { x: 680, y: 60 },
     },
     {
       id: 'adversarial-review', type: 'agent', label: 'Adversarial Review', state: 'adversarial-review',
       engine: 'claude', model: 'claude-opus-5', mode: 'high', output: 'review',
-      prompt: REVIEW_PROMPT, tools: [...READ_TOOLS, 'run_command'], permissions: ['read', 'execute'], position: { x: 680, y: 60 },
+      prompt: REVIEW_PROMPT, tools: [...READ_TOOLS, 'run_command'], permissions: ['read', 'execute'], position: { x: 840, y: 60 },
     },
     {
       id: 'verify', type: 'agent', label: 'Verify & Readiness', state: 'verify',
       engine: 'claude', model: 'claude-opus-5', mode: 'high', output: 'verdict',
-      prompt: VERIFY_PROMPT, tools: [...READ_TOOLS, 'run_command'], permissions: ['read', 'execute'], position: { x: 840, y: 60 },
+      prompt: VERIFY_PROMPT, tools: [...READ_TOOLS, 'run_command'], permissions: ['read', 'execute'], position: { x: 1000, y: 60 },
     },
-    { id: 'in-review', type: 'human', label: 'In Review', state: 'in-review', position: { x: 840, y: 150 } },
-    { id: 'merge', type: 'agent', label: 'Merge Pull Requests', state: 'merge', output: 'merge', position: { x: 1000, y: 60 } },
+    { id: 'in-review', type: 'human', label: 'In Review', state: 'in-review', position: { x: 1000, y: 150 } },
+    { id: 'merge', type: 'agent', label: 'Merge Pull Requests', state: 'merge', output: 'merge', position: { x: 1160, y: 60 } },
     {
       id: 'implement-feedback', type: 'agent', label: 'Address Feedback', state: 'implement-feedback',
-      engine: 'claude', model: 'claude-sonnet-5', mode: 'high', output: 'pr',
-      prompt: IMPLEMENT_PROMPT, tools: [...WRITE_TOOLS, 'create_pr'], permissions: ['read', 'write', 'execute'], position: { x: 680, y: 240 },
+      engine: 'claude', model: 'claude-sonnet-5', mode: 'high', output: 'review-slice',
+      prompt: `${IMPLEMENT_PROMPT}\n\nAfter addressing feedback, also rewrite the branch into ordered reviewable commits and return the review-slice result for the final commit order.`,
+      tools: [...WRITE_TOOLS, 'create_pr'], permissions: ['read', 'write', 'execute'], position: { x: 680, y: 240 },
     },
-    { id: 'done', type: 'end', label: 'Done', state: 'done', position: { x: 1160, y: 150 } },
+    { id: 'done', type: 'end', label: 'Done', state: 'done', position: { x: 1320, y: 150 } },
   ],
   edges: [
     { from: 'todo', to: 'planning', event: 'start', label: 'Start Planning' },
@@ -198,12 +230,13 @@ export const FULL_SDLC_WORKFLOW: Workflow = {
     { from: 'plan-review', to: 'planning-feedback', event: 'feedback', label: 'revise' },
     { from: 'planning-feedback', to: 'plan-review', event: 'complete', label: 'plan revised' },
     { from: 'plan-review', to: 'implement', event: 'approve', label: 'Approve Plan' },
-    { from: 'implement', to: 'adversarial-review', event: 'complete', label: 'PR opened' },
+    { from: 'implement', to: 'review-slice', event: 'complete', label: 'implemented' },
+    { from: 'review-slice', to: 'adversarial-review', event: 'complete', label: 'PR opened' },
     { from: 'adversarial-review', to: 'verify', event: 'complete', label: 'reviewed' },
     { from: 'verify', to: 'in-review', event: 'complete', label: 'GO' },
     { from: 'verify', to: 'implement-feedback', event: 'reject', label: 'NO_GO' },
     { from: 'in-review', to: 'implement-feedback', event: 'feedback', label: 'changes' },
-    { from: 'implement-feedback', to: 'adversarial-review', event: 'complete', label: 'pushed' },
+    { from: 'implement-feedback', to: 'adversarial-review', event: 'complete', label: 'sliced' },
     { from: 'in-review', to: 'merge', event: 'accept', label: 'Accept & merge' },
     { from: 'merge', to: 'done', event: 'complete', label: 'merged' },
   ],
@@ -249,37 +282,44 @@ export const FAST_TRACK_WORKFLOW: Workflow = {
     { id: 'todo', type: 'human', label: 'Todo', state: 'todo', position: { x: 40, y: 150 } },
     {
       id: 'implement', type: 'agent', label: 'Implement Agent', state: 'implement',
-      engine: 'claude', model: 'claude-sonnet-5', mode: 'high', output: 'pr',
+      engine: 'claude', model: 'claude-sonnet-5', mode: 'high', output: 'implementation',
       prompt: IMPLEMENT_PROMPT.replace('Approved plan:\n{{plan}}', 'There is no separate plan; plan briefly, then implement.'),
-      tools: [...WRITE_TOOLS, 'create_pr'], permissions: ['read', 'write', 'execute'], position: { x: 200, y: 150 },
+      tools: [...WRITE_TOOLS], permissions: ['read', 'write', 'execute'], position: { x: 200, y: 150 },
+    },
+    {
+      id: 'review-slice', type: 'agent', label: 'Review Slicer', state: 'review-slice',
+      engine: 'claude', model: 'claude-opus-5', mode: 'high', output: 'review-slice',
+      prompt: REVIEW_SLICE_PROMPT, tools: [...WRITE_TOOLS, 'create_pr'], permissions: ['read', 'write', 'execute'], position: { x: 360, y: 150 },
     },
     {
       id: 'adversarial-review', type: 'agent', label: 'Adversarial Review', state: 'adversarial-review',
       engine: 'claude', model: 'claude-opus-5', mode: 'high', output: 'review',
-      prompt: REVIEW_PROMPT, tools: [...READ_TOOLS, 'run_command'], permissions: ['read', 'execute'], position: { x: 360, y: 150 },
+      prompt: REVIEW_PROMPT, tools: [...READ_TOOLS, 'run_command'], permissions: ['read', 'execute'], position: { x: 520, y: 150 },
     },
     {
       id: 'verify', type: 'agent', label: 'Verify & Readiness', state: 'verify',
       engine: 'claude', model: 'claude-opus-5', mode: 'high', output: 'verdict',
-      prompt: VERIFY_PROMPT, tools: [...READ_TOOLS, 'run_command'], permissions: ['read', 'execute'], position: { x: 520, y: 150 },
+      prompt: VERIFY_PROMPT, tools: [...READ_TOOLS, 'run_command'], permissions: ['read', 'execute'], position: { x: 680, y: 150 },
     },
-    { id: 'in-review', type: 'human', label: 'Review', state: 'in-review', position: { x: 680, y: 150 } },
-    { id: 'merge', type: 'agent', label: 'Merge Pull Requests', state: 'merge', output: 'merge', position: { x: 840, y: 60 } },
+    { id: 'in-review', type: 'human', label: 'Review', state: 'in-review', position: { x: 840, y: 150 } },
+    { id: 'merge', type: 'agent', label: 'Merge Pull Requests', state: 'merge', output: 'merge', position: { x: 1000, y: 60 } },
     {
       id: 'implement-feedback', type: 'agent', label: 'Address Feedback', state: 'implement-feedback',
-      engine: 'claude', model: 'claude-sonnet-5', mode: 'high', output: 'pr',
-      prompt: IMPLEMENT_PROMPT, tools: [...WRITE_TOOLS, 'create_pr'], permissions: ['read', 'write', 'execute'], position: { x: 520, y: 260 },
+      engine: 'claude', model: 'claude-sonnet-5', mode: 'high', output: 'review-slice',
+      prompt: `${IMPLEMENT_PROMPT}\n\nAfter addressing feedback, also rewrite the branch into ordered reviewable commits and return the review-slice result for the final commit order.`,
+      tools: [...WRITE_TOOLS, 'create_pr'], permissions: ['read', 'write', 'execute'], position: { x: 680, y: 260 },
     },
-    { id: 'done', type: 'end', label: 'Done', state: 'done', position: { x: 1000, y: 150 } },
+    { id: 'done', type: 'end', label: 'Done', state: 'done', position: { x: 1160, y: 150 } },
   ],
   edges: [
     { from: 'todo', to: 'implement', event: 'start', label: 'Start' },
-    { from: 'implement', to: 'adversarial-review', event: 'complete', label: 'PR opened' },
+    { from: 'implement', to: 'review-slice', event: 'complete', label: 'implemented' },
+    { from: 'review-slice', to: 'adversarial-review', event: 'complete', label: 'PR opened' },
     { from: 'adversarial-review', to: 'verify', event: 'complete', label: 'reviewed' },
     { from: 'verify', to: 'in-review', event: 'complete', label: 'GO' },
     { from: 'verify', to: 'implement-feedback', event: 'reject', label: 'NO_GO' },
     { from: 'in-review', to: 'implement-feedback', event: 'feedback', label: 'changes' },
-    { from: 'implement-feedback', to: 'adversarial-review', event: 'complete', label: 'pushed' },
+    { from: 'implement-feedback', to: 'adversarial-review', event: 'complete', label: 'sliced' },
     { from: 'in-review', to: 'merge', event: 'accept', label: 'Accept & merge' },
     { from: 'merge', to: 'done', event: 'complete', label: 'merged' },
   ],
@@ -326,4 +366,4 @@ export const MODEL_OPTIONS: Record<'claude' | 'codex', string[]> = {
 
 export const ALL_TOOLS = ['read_file', 'write_file', 'run_command', 'search_codebase', 'list_directory', 'create_pr', 'web_search'] as const;
 export const ALL_PERMISSIONS = ['read', 'write', 'execute'] as const;
-export const ALL_OUTPUT_KINDS = ['plan', 'pr', 'review', 'verdict', 'document', 'troubleshoot', 'conflict-resolution', 'merge'] as const;
+export const ALL_OUTPUT_KINDS = ['plan', 'implementation', 'pr', 'review-slice', 'review', 'verdict', 'document', 'troubleshoot', 'conflict-resolution', 'merge'] as const;

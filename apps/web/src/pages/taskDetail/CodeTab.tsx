@@ -26,7 +26,7 @@ export function CodeTab({ task }: CodeTabProps) {
   }, [files, selected]);
 
   if (!hasPr) {
-    return <EmptyState title="No pull request yet" description="The diff appears here once an implementation agent opens a PR for this task." />;
+    return <EmptyState title="No pull request yet" description="The diff appears here once the review slicer opens a PR for this task." />;
   }
   if (diff.isLoading) return <PageLoader label="Loading diff…" />;
   if (diff.isError) {

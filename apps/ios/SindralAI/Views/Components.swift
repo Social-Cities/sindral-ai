@@ -6,24 +6,19 @@ struct TaskCard: View {
     var step: WorkflowStep?
     var projectName: String?
     var selected = false
-    var compact = false
-    var subtaskCount = 0
-    var subtaskDone = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                if compact, let sequence = task.sequence { Text("↳ \(sequence)").font(Theme.mono(11)).foregroundStyle(Theme.mutedForeground) }
                 Text(task.key).font(Theme.mono(12)).foregroundStyle(Theme.mutedForeground)
                 if let projectName { MetaChip(text: projectName) }
                 if task.prUrl != nil { MetaChip(text: "PR open", color: Theme.secondaryForeground) }
                 if task.ticketUrl != nil { MetaChip(text: "linked") }
-                if subtaskCount > 0 { MetaChip(text: "↳ \(subtaskDone)/\(subtaskCount)").accessibilityLabel("\(subtaskDone) of \(subtaskCount) subtasks done") }
                 Spacer(minLength: 8)
                 Text(Formatters.shortAgo(task.updatedAt)).font(Theme.mono(11)).foregroundStyle(Theme.mutedForeground)
             }
             Text(task.title)
-                .font(Theme.font(compact ? 14 : 15, .medium))
+                .font(Theme.font(15, .medium))
                 .foregroundStyle(Theme.foreground)
                 .multilineTextAlignment(.leading)
                 .lineLimit(3)

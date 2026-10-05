@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen, within } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '@/test/utils';
 import { makeTask, workflowRecord } from '@/test/fixtures';
@@ -27,19 +27,17 @@ function mockData(tasks = [parent, child, other, completed, declined]) {
 describe('Tasks page', () => {
   beforeEach(() => mockData());
 
-  it('lists active top-level tasks and hides terminal tasks and subtasks by default', () => {
+  it('lists active tasks and hides terminal tasks by default', () => {
     renderWithProviders(<Tasks />, { route: '/tasks' });
     const cards = screen.getAllByTestId('task-card');
     expect(cards).toHaveLength(2);
     expect(screen.getByText('2 tasks')).toBeInTheDocument();
-    expect(screen.queryByLabelText('Subtasks of ENG-1')).not.toBeInTheDocument();
     expect(screen.queryByText('Add token store')).not.toBeInTheDocument();
     expect(screen.queryByText('Shipped feature')).not.toBeInTheDocument();
     expect(screen.queryByText('Old experiment')).not.toBeInTheDocument();
-    expect(screen.getByText('↳ 1/1')).toBeInTheDocument();
     expect(screen.getByText('PR open')).toBeInTheDocument();
     expect(screen.getByText('linked')).toBeInTheDocument();
-    expect(screen.getByText('Add OAuth login').closest('a')).toHaveAttribute('href', '/tasks/p1?tab=subtasks');
+    expect(screen.getByText('Add OAuth login').closest('a')).toHaveAttribute('href', '/tasks/p1');
     expect(screen.getByText('Fix flaky test').closest('a')).toHaveAttribute('href', '/tasks/o1');
   });
 
@@ -51,24 +49,12 @@ describe('Tasks page', () => {
     await user.click(screen.getByRole('option', { name: 'All statuses' }));
     expect(screen.getByText('Shipped feature')).toBeInTheDocument();
     expect(screen.getByText('Old experiment')).toBeInTheDocument();
-    expect(within(screen.getByLabelText('Subtasks of ENG-1')).getByText('Add token store')).toBeInTheDocument();
+    expect(screen.getByText('Add token store')).toBeInTheDocument();
 
     await user.click(screen.getByLabelText('Filter by status'));
     await user.click(screen.getByRole('option', { name: /^Won't do$/ }));
     expect(screen.getByText('Old experiment')).toBeInTheDocument();
     expect(screen.queryByText('Shipped feature')).not.toBeInTheDocument();
-  });
-
-  it('promotes an active child instead of showing its terminal parent in the Active view', () => {
-    const closedParent = makeTask({ id: 'closed-parent', key: 'ENG-5', title: 'Closed parent', state: 'wont-do' });
-    const activeChild = makeTask({ id: 'active-child', key: 'ENG-5.1', title: 'Still active', state: 'planning', parentTaskId: closedParent.id, sequence: 1 });
-    mockData([closedParent, activeChild]);
-
-    renderWithProviders(<Tasks />, { route: '/tasks' });
-
-    expect(screen.queryByText('Closed parent')).not.toBeInTheDocument();
-    expect(screen.getByText('Still active')).toBeInTheDocument();
-    expect(screen.getByText('1 task')).toBeInTheDocument();
   });
 
   it('filters by search text', async () => {

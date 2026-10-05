@@ -135,10 +135,19 @@ export async function reload(ctx: TestContext, userId: string, task: Task): Prom
   return fresh;
 }
 
-export const plan = (text = '# Plan', subtasks?: { title: string; goal: string }[]): AgentResult =>
-  subtasks
-    ? { kind: 'plan', summary: 'planned', plan: text, outcome: 'The requested behavior is delivered.', acceptanceCriteria: '- The requested behavior is verified.', subtasks }
-    : { kind: 'plan', summary: 'planned', plan: text, outcome: 'The requested behavior is delivered.', acceptanceCriteria: '- The requested behavior is verified.' };
+export const plan = (text = '# Plan'): AgentResult => ({
+  kind: 'plan',
+  summary: 'planned',
+  plan: text,
+  outcome: 'The requested behavior is delivered.',
+  acceptanceCriteria: '- The requested behavior is verified.',
+});
+export const implementation = (): AgentResult => ({
+  kind: 'implementation',
+  summary: 'implemented locally',
+  outcome: 'The requested behavior is delivered.',
+  acceptanceCriteria: '- The requested behavior is verified.',
+});
 export const pr = (n = 1, branch = 'sindral/sin-1'): AgentResult => ({
   kind: 'pr',
   summary: `opened PR ${n}`,
@@ -146,6 +155,33 @@ export const pr = (n = 1, branch = 'sindral/sin-1'): AgentResult => ({
   acceptanceCriteria: '- The requested behavior is verified.',
   prUrl: `https://github.com/acme/app/pull/${n}`,
   branch,
+  pullRequests: [
+    {
+      repository: 'acme/app',
+      prUrl: `https://github.com/acme/app/pull/${n}`,
+      number: n,
+      branch,
+      baseBranch: 'main',
+      headSha: 'a'.repeat(40),
+    },
+  ],
+});
+export const reviewSlice = (n = 1, branch = 'sindral/sin-1'): AgentResult => ({
+  kind: 'review-slice',
+  summary: 'prepared review slices',
+  outcome: 'The requested behavior is delivered.',
+  acceptanceCriteria: '- The requested behavior is verified.',
+  prUrl: `https://github.com/acme/app/pull/${n}`,
+  branch,
+  slices: [
+    {
+      repository: 'acme/app',
+      commit: 'a'.repeat(40),
+      title: 'Implement requested behavior',
+      summary: 'Contains the implementation and tests.',
+      files: ['src/example.ts'],
+    },
+  ],
   pullRequests: [
     {
       repository: 'acme/app',
