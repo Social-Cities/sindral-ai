@@ -59,7 +59,12 @@ final class AppStore {
                     var request = URLRequest(url: api.baseURL.appending(path: "api/events"))
                     request.setValue("Bearer \(try await session.validAccessToken())", forHTTPHeaderField: "Authorization")
                     let (bytes, response) = try await api.urlSession.bytes(for: request)
-                    guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { throw APIError.invalidResponse }
+                    guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+                    if http.statusCode == 401 {
+                        _ = try await session.validAccessToken(forceRefresh: true)
+                        continue
+                    }
+                    guard http.statusCode == 200 else { throw APIError.invalidResponse }
                     liveStatus = "Live"
                     for try await line in bytes.lines where line.hasPrefix("data: ") {
                         guard !Task.isCancelled, let data = String(line.dropFirst(6)).data(using: .utf8),

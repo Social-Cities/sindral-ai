@@ -7,7 +7,13 @@ struct AuthSession: Codable, Hashable, Sendable {
     let expiresAt: Date
     let user: AuthUser
 
-    enum CodingKeys: String, CodingKey { case accessToken = "access_token", refreshToken = "refresh_token", expiresIn = "expires_in", user }
+    enum CodingKeys: String, CodingKey {
+        case accessToken = "access_token"
+        case refreshToken = "refresh_token"
+        case expiresAt = "expires_at"
+        case expiresIn = "expires_in"
+        case user
+    }
 
     init(accessToken: String, refreshToken: String, expiresAt: Date, user: AuthUser) {
         self.accessToken = accessToken; self.refreshToken = refreshToken; self.expiresAt = expiresAt; self.user = user
@@ -16,13 +22,19 @@ struct AuthSession: Codable, Hashable, Sendable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         accessToken = try values.decode(String.self, forKey: .accessToken)
         refreshToken = try values.decode(String.self, forKey: .refreshToken)
-        expiresAt = Date().addingTimeInterval(TimeInterval(try values.decode(Int.self, forKey: .expiresIn)))
         user = try values.decode(AuthUser.self, forKey: .user)
+        if let timestamp = try values.decodeIfPresent(Double.self, forKey: .expiresAt) {
+            expiresAt = Date(timeIntervalSince1970: timestamp)
+        } else {
+            expiresAt = Date().addingTimeInterval(TimeInterval(try values.decode(Int.self, forKey: .expiresIn)))
+        }
     }
     func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encode(accessToken, forKey: .accessToken); try values.encode(refreshToken, forKey: .refreshToken)
-        try values.encode(max(0, Int(expiresAt.timeIntervalSinceNow)), forKey: .expiresIn); try values.encode(user, forKey: .user)
+        try values.encode(expiresAt.timeIntervalSince1970, forKey: .expiresAt)
+        try values.encode(max(0, Int(expiresAt.timeIntervalSinceNow)), forKey: .expiresIn)
+        try values.encode(user, forKey: .user)
     }
 }
 
@@ -36,12 +48,13 @@ final class SessionStore {
     private(set) var errorMessage: String?
 
     private let configuration: AppConfiguration
-    private let keychain = KeychainStore(service: "ai.sindral.app.auth")
+    private let keychain: KeychainStore
     private let sessionAccount = "session"
     private let urlSession: URLSession
+    private var refreshTask: Task<AuthSession, Error>?
 
-    init(configuration: AppConfiguration, urlSession: URLSession = .shared) {
-        self.configuration = configuration; self.urlSession = urlSession
+    init(configuration: AppConfiguration, urlSession: URLSession = .shared, keychain: KeychainStore = KeychainStore(service: "ai.sindral.app.auth")) {
+        self.configuration = configuration; self.urlSession = urlSession; self.keychain = keychain
         do {
             if let data = try keychain.load(account: sessionAccount) { session = try JSONDecoder().decode(AuthSession.self, from: data) }
         } catch { errorMessage = "The saved session could not be restored." }
@@ -63,12 +76,10 @@ final class SessionStore {
         return true
     }
 
-    func validAccessToken() async throws -> String {
+    func validAccessToken(forceRefresh: Bool = false) async throws -> String {
         guard let current = session else { throw AuthError.notAuthenticated }
-        if current.expiresAt.timeIntervalSinceNow > 60 { return current.accessToken }
-        try await authenticate(path: "token", queryItems: [.init(name: "grant_type", value: "refresh_token")], body: ["refresh_token": current.refreshToken])
-        guard let token = session?.accessToken else { throw AuthError.notAuthenticated }
-        return token
+        if !forceRefresh, current.expiresAt.timeIntervalSinceNow > 60 { return current.accessToken }
+        return try await refreshSession().accessToken
     }
 
     func signOut() {
@@ -81,12 +92,36 @@ final class SessionStore {
         try setSession(next)
     }
 
+    private func refreshSession() async throws -> AuthSession {
+        if let refreshTask { return try await refreshTask.value }
+        guard let current = session else { throw AuthError.notAuthenticated }
+        let refreshToken = current.refreshToken
+        let task = Task<AuthSession, Error> { [configuration, urlSession] in
+            try await Self.authRequest(
+                configuration: configuration,
+                urlSession: urlSession,
+                path: "token",
+                queryItems: [.init(name: "grant_type", value: "refresh_token")],
+                body: ["refresh_token": refreshToken]
+            )
+        }
+        refreshTask = task
+        defer { refreshTask = nil }
+        let next = try await task.value
+        try setSession(next)
+        return next
+    }
+
     private func setSession(_ next: AuthSession) throws {
         try keychain.save(JSONEncoder().encode(next), account: sessionAccount)
         session = next; errorMessage = nil
     }
 
     private func authRequest<T: Decodable>(path: String, queryItems: [URLQueryItem] = [], body: [String: String]) async throws -> T {
+        try await Self.authRequest(configuration: configuration, urlSession: urlSession, path: path, queryItems: queryItems, body: body)
+    }
+
+    private static func authRequest<T: Decodable>(configuration: AppConfiguration, urlSession: URLSession, path: String, queryItems: [URLQueryItem] = [], body: [String: String]) async throws -> T {
         var components = URLComponents(url: configuration.supabaseURL.appending(path: "auth/v1/\(path)"), resolvingAgainstBaseURL: false)
         if !queryItems.isEmpty { components?.queryItems = queryItems }
         guard let url = components?.url else { throw AuthError.invalidResponse }
@@ -102,7 +137,6 @@ final class SessionStore {
         }
         return try JSONDecoder().decode(T.self, from: data)
     }
-
 }
 
 private struct SignUpResponse: Codable {

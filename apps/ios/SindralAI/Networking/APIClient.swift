@@ -42,7 +42,20 @@ final class APIClient {
         if let body { request.httpBody = try encoder.encode(body); request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         let (data, response) = try await urlSession.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
-        if http.statusCode == 401 { sessionStore.signOut() }
+        if http.statusCode == 401 {
+            do {
+                request.setValue("Bearer \(try await sessionStore.validAccessToken(forceRefresh: true))", forHTTPHeaderField: "Authorization")
+                let (retryData, retryResponse) = try await urlSession.data(for: request)
+                guard let retryHTTP = retryResponse as? HTTPURLResponse else { throw APIError.invalidResponse }
+                if retryHTTP.statusCode == 401 { sessionStore.signOut() }
+                guard (200..<300).contains(retryHTTP.statusCode) else { throw decodeError(data: retryData, status: retryHTTP.statusCode) }
+                if retryData.isEmpty, Response.self == EmptyResponse.self { return EmptyResponse() as! Response }
+                return try decoder.decode(Response.self, from: retryData)
+            } catch {
+                sessionStore.signOut()
+                throw error
+            }
+        }
         guard (200..<300).contains(http.statusCode) else { throw decodeError(data: data, status: http.statusCode) }
         if data.isEmpty, Response.self == EmptyResponse.self { return EmptyResponse() as! Response }
         return try decoder.decode(Response.self, from: data)
