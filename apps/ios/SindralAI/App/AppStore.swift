@@ -46,7 +46,7 @@ final class AppStore {
     func refreshProjects() async { do { projects = try await api.projects() } catch { present(error) } }
     func refreshWorkflows() async { do { workflows = try await api.workflows() } catch { present(error) } }
     func refreshWorkers() async { do { workers = try await api.workers() } catch { present(error) } }
-    func signOut() { eventTask?.cancel(); eventTask = nil; PushNotificationDelegate.store = nil; session.signOut(); tasks = []; projects = []; workflows = []; workers = []; profile = nil }
+    func signOut() { eventTask?.cancel(); eventTask = nil; PushNotificationDelegate.clearSession(); session.signOut(); tasks = []; projects = []; workflows = []; workers = []; profile = nil }
     func present(_ error: Error) { if !(error is CancellationError) { errorMessage = error.localizedDescription } }
 
     private func startEvents() {

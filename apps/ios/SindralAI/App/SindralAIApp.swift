@@ -54,9 +54,10 @@ private struct RootView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.background.ignoresSafeArea())
-        .onAppear { PushNotificationDelegate.store = store }
+        .onAppear { PushNotificationDelegate.configure(store: store, router: router) }
         .task(id: session.session?.accessToken) {
             if session.session != nil {
+                PushNotificationDelegate.configure(store: store, router: router)
                 await store.bootstrap()
                 await store.requestPushNotifications()
             }
