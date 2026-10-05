@@ -5,14 +5,16 @@ create index if not exists jobs_cancel_requested_idx
   on public.jobs(cancel_requested_at)
   where cancel_requested_at is not null and status in ('claimed', 'running');
 
-create or replace function public.begin_job_outcome(
+drop function if exists public.begin_job_outcome(uuid, uuid, integer, uuid, text, jsonb, text);
+
+create function public.begin_job_outcome(
   p_user_id uuid,
   p_job_id uuid,
   p_attempt integer,
   p_lease_token uuid,
   p_outcome_hash text,
-  p_result jsonb,
-  p_error text
+  p_result jsonb default null,
+  p_error text default null
 )
 returns jsonb
 language plpgsql
