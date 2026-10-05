@@ -9,6 +9,7 @@ import {
   extractTaskContract,
   extractMarkdownSection,
   getStep,
+  isAgentActive,
   removeMarkdownSection,
   snapshotWorkflow,
   transition,
@@ -258,6 +259,32 @@ export class Orchestrator {
     this.hub.publish(userId, { type: 'task.deleted', taskId: id });
   }
 
+  async stopRunningAgentStep(userId: string, id: string): Promise<Task> {
+    const task = await this.getTask(userId, id);
+    const workflow = await this.resolveWorkflow(userId, task);
+    const step = workflow ? getStep(workflow, task.currentStepId) : null;
+    if (!workflow || !isAgentActive(task, workflow) || step?.type !== 'agent' || step.output === 'merge') {
+      throw conflict('There is no running agent step to stop');
+    }
+    const cancelled = await this.repo.requestAgentJobCancellation(userId, id);
+    if (cancelled === 0) throw conflict('There is no running agent job to stop');
+    const stopped = (await this.repo.updateTask(userId, id, { lastError: `${step.label} was stopped by the user.` })) ?? task;
+    const current = await this.applyEvent(userId, stopped, UNIVERSAL_EVENTS.FAIL, {
+      actor: 'user',
+      detail: { reason: 'stopped-by-user', cancelledJobs: cancelled },
+      idempotencyKey: `stop-agent:${task.id}:${task.version}`,
+    });
+    await this.repo.createMessage(userId, {
+      taskId: task.id,
+      role: 'system',
+      content: `${step.label} was stopped. Add guidance in chat, then retry the step when you're ready.`,
+      source: 'web',
+      externalId: `stop-agent:${task.id}:${task.version}:message`,
+    });
+    this.hub.publish(userId, { type: 'task.updated', taskId: task.id });
+    return current;
+  }
+
   /** The workflow governing a task: the pinned snapshot once started, otherwise the live workflow. */
   async resolveWorkflow(userId: string, task: Task): Promise<Workflow | null> {
     if (task.pinnedWorkflow) return task.pinnedWorkflow;
@@ -368,10 +395,56 @@ export class Orchestrator {
           this.log.warn({ err: error, userId, taskId }, 'worker acknowledgement could not be saved after feedback dispatch');
         }
       }
+    } else if (message && workflow !== null && isAgentActive(task, workflow)) {
+      task = await this.restartRunningAgentStep(userId, task, workflow, source);
     } else if (message) {
       this.hub.publish(userId, { type: 'task.updated', taskId });
     }
     return { message, task };
+  }
+
+  private async restartRunningAgentStep(userId: string, task: Task, workflow: Workflow, source: MessageSource): Promise<Task> {
+    const step = getStep(workflow, task.currentStepId);
+    if (!step || step.type !== 'agent' || step.output === 'merge') {
+      this.hub.publish(userId, { type: 'task.updated', taskId: task.id });
+      return task;
+    }
+    const hadRunningAgent = (await this.repo.listJobsForTask(userId, task.id)).some((job) => job.kind === 'agent' && (job.status === 'claimed' || job.status === 'running'));
+    const cancelled = await this.repo.requestAgentJobCancellation(userId, task.id);
+    const job = await this.buildAgentJob(userId, task, step);
+    const expectedVersion = task.version;
+    const detail = { actor: 'user', event: 'restart-agent', source, cancelledJobs: cancelled };
+    const applied = await this.repo.applyTaskTransition(userId, {
+      taskId: task.id,
+      expectedVersion,
+      idempotencyKey: `restart-agent:${task.id}:${expectedVersion}:${Date.now()}`,
+      requestHash: transitionRequestHash(userId, task.id, expectedVersion, 'restart-agent', 'user', detail),
+      patch: {
+        state: task.state,
+        currentStepId: task.currentStepId,
+        failedStepId: task.failedStepId,
+      },
+      event: {
+        taskId: task.id,
+        type: 'agent-restarted',
+        fromState: task.state,
+        toState: task.state,
+        stepId: step.id,
+        detail,
+      },
+      job,
+      cancelQueuedJobs: true,
+    });
+    if (hadRunningAgent) {
+      await this.repo.createMessage(userId, {
+        taskId: task.id,
+        role: 'system',
+        content: `Got it — restarting ${step.label} with your feedback.`,
+        source,
+      });
+    }
+    this.hub.publish(userId, { type: 'task.updated', taskId: task.id });
+    return applied.task;
   }
 
   private async applyEvent(userId: string, task: Task, event: string, options: ApplyOptions): Promise<Task> {

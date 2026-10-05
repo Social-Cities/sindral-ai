@@ -101,6 +101,11 @@ struct TaskDetailView: View {
                     .disabled(isActing)
             }
             if agentActive {
+                Button("Stop agent") { Task { await stopAgent() } }
+                    .buttonStyle(.sindral(.warning))
+                    .disabled(isActing)
+            }
+            if agentActive {
                 HStack(spacing: 8) {
                     ProgressView().tint(Theme.violet)
                     Text("Agent working…").font(Theme.font(15)).foregroundStyle(Theme.secondaryForeground)
@@ -121,6 +126,7 @@ struct TaskDetailView: View {
             Button("Edit", systemImage: "pencil") { showingEdit = true }
             Button("Mark done", systemImage: "checkmark.circle") { pendingClose = "mark-done" }.disabled(terminal)
             Button("Won't do", systemImage: "xmark.circle") { pendingClose = "mark-wont-do" }.disabled(terminal)
+            Button("Stop agent", systemImage: "stop.circle") { Task { await stopAgent() } }.disabled(!task.isAgentActive(store.workflows))
             Button("Jobs", systemImage: "terminal") { showingJobs = true }
             Section("Info") {
                 Text("Created \(Formatters.day(task.createdAt))")
@@ -231,6 +237,12 @@ struct TaskDetailView: View {
 
     private func deleteTask() async {
         do { try await api.deleteTask(taskID); router.selectedTaskID = nil; await store.refreshTasks() } catch { store.present(error) }
+    }
+
+    private func stopAgent() async {
+        isActing = true; actionError = nil; defer { isActing = false }
+        do { _ = try await api.stopAgent(taskId: taskID); await load(); await store.refreshTasks() }
+        catch { actionError = error.localizedDescription; store.present(error) }
     }
 }
 

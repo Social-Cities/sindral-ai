@@ -64,6 +64,7 @@ export class MemoryRepository implements Repository {
   private readonly artifacts = new Map<string, Owned<Artifact>>();
   private readonly artifactDedupe = new Map<string, string>();
   private readonly jobs = new Map<string, Job>();
+  private readonly jobCancellationRequestTimes = new Map<string, string>();
   private readonly jobLeaseTokens = new Map<string, string>();
   private readonly jobLogs = new Map<number, Owned<JobLog>>();
   private readonly workers = new Map<string, Worker>();
@@ -409,6 +410,8 @@ export class MemoryRepository implements Repository {
     for (const [k, j] of this.jobs) {
       if (j.taskId !== id) continue;
       this.jobs.delete(k);
+      this.jobCancellationRequestTimes.delete(k);
+      this.jobLeaseTokens.delete(k);
       for (const [lk, l] of this.jobLogs) if (l.jobId === k) this.jobLogs.delete(lk);
     }
     return true;
@@ -667,6 +670,12 @@ export class MemoryRepository implements Repository {
     if (job.attempt !== attempt || this.jobLeaseTokens.get(jobId) !== leaseToken) throw new ConflictError('Job lease has been superseded');
     if (job.outcomeHash && job.outcomeHash !== outcomeHash) throw new ConflictError('Job outcome does not match the accepted outcome');
     if (job.status === 'completed' || job.status === 'failed') return { job: clone(job), state: 'replay', token: null };
+    if (this.jobCancellationRequestTimes.has(jobId)) {
+      Object.assign(job, { status: 'cancelled' as const, finishedAt: this.now(), leaseExpiresAt: null });
+      this.jobLeaseTokens.delete(jobId);
+      this.jobCancellationRequestTimes.delete(jobId);
+      return { job: clone(job), state: 'replay', token: null };
+    }
     if (job.status === 'applying' && job.outcomeStartedAt && Date.parse(job.outcomeStartedAt) > Date.now() - 30_000) {
       return { job: clone(job), state: 'busy', token: null };
     }
@@ -763,6 +772,19 @@ export class MemoryRepository implements Repository {
     return renewed;
   }
 
+  async jobCancellationRequests(userId: string, workerId: string, jobs: { jobId: string; leaseToken: string }[]): Promise<string[]> {
+    const requested: string[] = [];
+    for (const { jobId, leaseToken } of jobs) {
+      const job = this.jobs.get(jobId);
+      if (!job || job.userId !== userId || job.workerId !== workerId || this.jobLeaseTokens.get(jobId) !== leaseToken) {
+        requested.push(jobId);
+      } else if (this.jobCancellationRequestTimes.has(jobId) || !['claimed', 'running', 'applying'].includes(job.status)) {
+        requested.push(jobId);
+      }
+    }
+    return requested;
+  }
+
   async activateJobLease(userId: string, jobId: string, attempt: number, leaseToken: string): Promise<boolean> {
     const job = this.jobs.get(jobId);
     const valid = Boolean(
@@ -771,6 +793,39 @@ export class MemoryRepository implements Repository {
     );
     if (valid) job!.status = 'running';
     return valid;
+  }
+
+  async acknowledgeJobCancellation(userId: string, jobId: string, attempt: number, leaseToken: string): Promise<boolean> {
+    const job = this.jobs.get(jobId);
+    const valid = Boolean(
+      job && job.userId === userId && job.attempt === attempt && this.jobLeaseTokens.get(jobId) === leaseToken &&
+      this.jobCancellationRequestTimes.has(jobId) && (job.status === 'claimed' || job.status === 'running'),
+    );
+    if (!valid || !job) return false;
+    job.status = 'cancelled';
+    job.finishedAt = this.now();
+    job.leaseExpiresAt = null;
+    this.jobLeaseTokens.delete(jobId);
+    this.jobCancellationRequestTimes.delete(jobId);
+    return true;
+  }
+
+  async requestAgentJobCancellation(userId: string, taskId: string): Promise<number> {
+    let n = 0;
+    for (const job of this.jobs.values()) {
+      if (job.userId !== userId || job.taskId !== taskId || job.kind !== 'agent') continue;
+      if (job.status === 'queued') {
+        job.status = 'cancelled';
+        job.finishedAt = this.now();
+        n += 1;
+      } else if (job.status === 'claimed' || job.status === 'running') {
+        if (!this.jobCancellationRequestTimes.has(job.id)) {
+          this.jobCancellationRequestTimes.set(job.id, this.now());
+          n += 1;
+        }
+      }
+    }
+    return n;
   }
 
   async cancelQueuedJobs(userId: string, taskId: string): Promise<number> {

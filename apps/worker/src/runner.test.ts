@@ -10,11 +10,12 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 2));
 
 interface Harness {
   runner: Runner;
-  api: RunnerDeps['api'] & { failed: { jobId: string; error: string }[]; claims: number };
+  api: RunnerDeps['api'] & { failed: { jobId: string; error: string }[]; cancelled: string[]; claims: number };
   release: (jobId: string) => void;
   started: string[];
   finished: string[];
   aborted: string[];
+  cancelled: string[];
   concurrent: () => number;
   maxConcurrent: () => number;
 }
@@ -27,11 +28,13 @@ function harness(batches: JobDispatch[][], overrides: Partial<RunnerDeps> = {}):
   let running = 0;
   let max = 0;
   const failed: { jobId: string; error: string }[] = [];
+  const cancelled: string[] = [];
   const api = {
     claims: 0,
     failed,
+    cancelled,
     register: vi.fn(async () => ({ workerId: randomUUID(), protocolVersion: WORKER_PROTOCOL_VERSION })),
-    heartbeat: vi.fn(async () => ({ ok: true as const })),
+    heartbeat: vi.fn(async () => ({ ok: true as const, cancelledJobIds: [] })),
     disconnect: vi.fn(async () => ({ ok: true as const })),
     claim: vi.fn(async (_body: { workerId: string; max: number }, signal?: AbortSignal) => {
       api.claims++;
@@ -50,6 +53,10 @@ function harness(batches: JobDispatch[][], overrides: Partial<RunnerDeps> = {}):
     }),
     fail: vi.fn(async (jobId: string, error: string) => {
       failed.push({ jobId, error });
+      return { ok: true as const };
+    }),
+    cancel: vi.fn(async (jobId: string) => {
+      cancelled.push(jobId);
       return { ok: true as const };
     }),
   };
@@ -88,6 +95,7 @@ function harness(batches: JobDispatch[][], overrides: Partial<RunnerDeps> = {}):
     started,
     finished,
     aborted,
+    cancelled,
     concurrent: () => running,
     maxConcurrent: () => max,
   };
@@ -110,10 +118,11 @@ describe('Runner', () => {
     const persistence = { loadWorkerId: vi.fn(async () => null), saveWorkerId: vi.fn(async () => {}), saveRunning: vi.fn(async () => {}) };
     const api = {
       register: vi.fn(async () => ({ workerId: randomUUID(), protocolVersion: WORKER_PROTOCOL_VERSION + 1 })),
-      heartbeat: vi.fn(async () => ({ ok: true as const })),
+      heartbeat: vi.fn(async () => ({ ok: true as const, cancelledJobIds: [] })),
       disconnect: vi.fn(async () => ({ ok: true as const })),
       claim: vi.fn(async () => []),
       fail: vi.fn(async () => ({ ok: true as const })),
+      cancel: vi.fn(async () => ({ ok: true as const })),
     };
     const h = harness([], { persistence, api });
     await expect(h.runner.start()).rejects.toBeInstanceOf(WorkerProtocolError);
@@ -195,6 +204,23 @@ describe('Runner', () => {
     await run;
   });
 
+  it('aborts running jobs and acknowledges pending jobs cancelled by heartbeat', async () => {
+    const taskId = randomUUID();
+    const a = dispatch({ taskId });
+    const b = dispatch({ taskId });
+    const h = harness([[a, b]], { heartbeatIntervalMs: 5 });
+    vi.mocked(h.api.heartbeat).mockImplementation(async () => ({ ok: true as const, cancelledJobIds: [a.job.id, b.job.id] }));
+
+    const run = h.runner.start();
+    await new Promise((resolve) => setTimeout(resolve, 12));
+
+    expect(h.aborted).toEqual([a.job.id]);
+    expect(h.cancelled).toEqual([b.job.id]);
+    expect(h.started).toEqual([a.job.id]);
+    await h.runner.stop();
+    await run;
+  });
+
   it('keeps active leases alive and lets running jobs finish while draining', async () => {
     const job = dispatch();
     const h = harness([[job]], {
@@ -243,12 +269,13 @@ describe('Runner', () => {
     const h = harness([], {
       api: {
         register: vi.fn(async () => ({ workerId: randomUUID(), protocolVersion: WORKER_PROTOCOL_VERSION })),
-        heartbeat: vi.fn(async () => ({ ok: true as const })),
-        disconnect: vi.fn(async () => ({ ok: true as const })),
-        claim: vi.fn(async () => {
-          throw new WorkerAuthError('bad key');
-        }),
-        fail: vi.fn(async () => ({ ok: true as const })),
+      heartbeat: vi.fn(async () => ({ ok: true as const, cancelledJobIds: [] })),
+      disconnect: vi.fn(async () => ({ ok: true as const })),
+      claim: vi.fn(async () => {
+        throw new WorkerAuthError('bad key');
+      }),
+      fail: vi.fn(async () => ({ ok: true as const })),
+      cancel: vi.fn(async () => ({ ok: true as const })),
       },
     });
     await expect(h.runner.start()).rejects.toBeInstanceOf(WorkerAuthError);
@@ -257,12 +284,13 @@ describe('Runner', () => {
   it('exits when a running server rejects the worker protocol', async () => {
     const api = {
       register: vi.fn(async () => ({ workerId: randomUUID(), protocolVersion: WORKER_PROTOCOL_VERSION })),
-      heartbeat: vi.fn(async () => ({ ok: true as const })),
+      heartbeat: vi.fn(async () => ({ ok: true as const, cancelledJobIds: [] })),
       disconnect: vi.fn(async () => ({ ok: true as const })),
       claim: vi.fn(async () => {
         throw new WorkerProtocolError('upgrade required');
       }),
       fail: vi.fn(async () => ({ ok: true as const })),
+      cancel: vi.fn(async () => ({ ok: true as const })),
     };
     const h = harness([], { api });
     await expect(h.runner.start()).rejects.toBeInstanceOf(WorkerProtocolError);
@@ -275,7 +303,7 @@ describe('Runner', () => {
     const h = harness([], {
       api: {
         register: vi.fn(async () => ({ workerId: randomUUID(), protocolVersion: WORKER_PROTOCOL_VERSION })),
-        heartbeat: vi.fn(async () => ({ ok: true as const })),
+        heartbeat: vi.fn(async () => ({ ok: true as const, cancelledJobIds: [] })),
         disconnect: vi.fn(async () => ({ ok: true as const })),
         claim: vi.fn(async () => {
           calls++;
@@ -285,6 +313,7 @@ describe('Runner', () => {
           return [];
         }),
         fail: vi.fn(async () => ({ ok: true as const })),
+        cancel: vi.fn(async () => ({ ok: true as const })),
       },
     });
     const run = h.runner.start();

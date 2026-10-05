@@ -748,6 +748,37 @@ describe('failure handling', () => {
     expect(await ctx.repo.getJob(userId, job!.id)).toBeNull();
     expect(await claimNext(ctx, userId)).toBeNull();
   });
+
+  it('stops a running agent step by requesting cancellation and moving to failure', async () => {
+    const task = await newTask();
+    await orch().applyUserEvent(userId, task.id, 'start');
+    const [job] = await ctx.repo.claimJobs(userId, 'worker-1', 1);
+
+    const stopped = await orch().stopRunningAgentStep(userId, task.id);
+
+    expect(stopped).toMatchObject({ state: 'failure', failedStepId: 'planning', lastError: 'Planning Agent was stopped by the user.' });
+    expect(await ctx.repo.jobCancellationRequests(userId, 'worker-1', [{ jobId: job!.id, leaseToken: job!.leaseToken }])).toEqual([job!.id]);
+    expect((await ctx.repo.listMessages(userId, task.id)).at(-1)?.content).toMatch(/Planning Agent was stopped/);
+  });
+
+  it('restarts the active agent step when chat feedback arrives', async () => {
+    const task = await newTask();
+    await orch().applyUserEvent(userId, task.id, 'start');
+    const [first] = await ctx.repo.claimJobs(userId, 'worker-1', 1);
+
+    const { task: restarted } = await orch().postUserMessage(userId, task.id, 'Use the smaller API surface.', 'web');
+
+    expect(restarted).toMatchObject({ state: 'planning', currentStepId: 'planning' });
+    expect(await ctx.repo.jobCancellationRequests(userId, 'worker-1', [{ jobId: first!.id, leaseToken: first!.leaseToken }])).toEqual([first!.id]);
+    expect(await ctx.repo.claimJobs(userId, 'worker-2', 1)).toEqual([]);
+
+    await ctx.repo.acknowledgeJobCancellation(userId, first!.id, first!.attempt, first!.leaseToken);
+    const [replacement] = await ctx.repo.claimJobs(userId, 'worker-2', 1);
+    expect(replacement).toBeTruthy();
+    expect(replacement!.id).not.toBe(first!.id);
+    expect(agentPayload(replacement!).context.feedback).toBe('Use the smaller API surface.');
+    expect((await ctx.repo.listEvents(userId, task.id)).some((event) => event.type === 'agent-restarted')).toBe(true);
+  });
 });
 
 

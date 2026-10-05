@@ -17,6 +17,7 @@ vi.mock('@/lib/api', async (importOriginal) => {
     runTaskAction: vi.fn(),
     repinTaskWorkflow: vi.fn(),
     sendMessage: vi.fn(),
+    stopAgent: vi.fn(),
     deleteTask: vi.fn(),
     getTaskJobs: vi.fn().mockResolvedValue({ jobs: [] }),
     getJobLogs: vi.fn().mockResolvedValue({ logs: [] }),
@@ -35,6 +36,7 @@ describe('TaskDetail', () => {
     vi.mocked(api.runTaskAction).mockReset();
     vi.mocked(api.repinTaskWorkflow).mockReset();
     vi.mocked(api.sendMessage).mockReset();
+    vi.mocked(api.stopAgent).mockReset();
     vi.mocked(api.deleteTask).mockReset();
   });
 

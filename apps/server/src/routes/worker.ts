@@ -3,6 +3,7 @@ import {
   workerClaimSchema,
   workerHeartbeatSchema,
   workerIdentitySchema,
+  workerJobCancelSchema,
   workerJobCompleteSchema,
   workerJobEventSchema,
   workerJobFailSchema,
@@ -70,8 +71,9 @@ export const workerRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx 
     });
     if (!worker) throw notFound('Worker');
     await repo.renewJobLeases(userId, worker.id, input.runningJobs);
+    const cancelledJobIds = await repo.jobCancellationRequests(userId, worker.id, input.runningJobs);
     hub.publish(userId, { type: 'worker.updated', workerId: worker.id });
-    return { ok: true as const };
+    return { ok: true as const, cancelledJobIds };
   });
 
   app.post('/api/worker/disconnect', async (request) => {
@@ -177,6 +179,14 @@ export const workerRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx 
     const { id } = validate(idParamsSchema, request.params);
     const { attempt, leaseToken, error } = validate(workerJobFailSchema, request.body);
     await orchestrator.failJob(userId, id, error, attempt, leaseToken);
+    return { ok: true as const };
+  });
+
+  app.post('/api/worker/jobs/:id/cancelled', async (request) => {
+    const { userId } = request.worker!;
+    const { id } = validate(idParamsSchema, request.params);
+    const { attempt, leaseToken } = validate(workerJobCancelSchema, request.body);
+    if (!(await repo.acknowledgeJobCancellation(userId, id, attempt, leaseToken))) throw conflict('Job cancellation was not requested or the lease has been superseded');
     return { ok: true as const };
   });
 };

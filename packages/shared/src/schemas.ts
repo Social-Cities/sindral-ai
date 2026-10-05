@@ -313,6 +313,7 @@ export const agentResultSchema = z.discriminatedUnion('kind', [
 
 export const workerJobCompleteSchema = z.object({ attempt: z.number().int().positive(), leaseToken: z.string().uuid(), result: agentResultSchema });
 export const workerJobFailSchema = z.object({ attempt: z.number().int().positive(), leaseToken: z.string().uuid(), error: z.string().trim().min(1).max(20_000) });
+export const workerJobCancelSchema = z.object({ attempt: z.number().int().positive(), leaseToken: z.string().uuid() });
 
 /** Loose schema for what the agent writes to the result file (kind may be missing; the worker fills it). */
 export const rawAgentResultFileSchema = z.object({ kind: z.string().optional() }).passthrough();

@@ -31,10 +31,12 @@ function fakeApi() {
   const events: JobEvent[] = [];
   const completed: AgentResult[] = [];
   const failed: string[] = [];
+  const cancelled: string[] = [];
   return {
     events,
     completed,
     failed,
+    cancelled,
     postEvent: vi.fn(async (_id: string, event: JobEvent) => {
       events.push(event);
       return { ok: true as const };
@@ -45,6 +47,10 @@ function fakeApi() {
     }),
     fail: vi.fn(async (_id: string, error: string) => {
       failed.push(error);
+      return { ok: true as const };
+    }),
+    cancel: vi.fn(async (id: string) => {
+      cancelled.push(id);
       return { ok: true as const };
     }),
   };
@@ -262,6 +268,18 @@ describe('runJob', () => {
     controller.abort('worker shutting down');
     await runJob(d, jobDeps, controller.signal);
     expect(api.failed).toEqual(['worker shutting down']);
+  });
+
+  it('acknowledges user-requested cancellation without failing the job', async () => {
+    const engine = fakeEngine(async () => ({ cancelled: true }));
+    const controller = new AbortController();
+    const d = dispatch({ payload: agentPayload({ repos: [], step: step({ output: 'plan' }) }) });
+    const { deps: jobDeps, api } = deps(engine, docWorkspace());
+    controller.abort('job cancelled');
+    const outcome = await runJob(d, jobDeps, controller.signal);
+    expect(outcome).toEqual({ status: 'cancelled', error: 'job cancelled' });
+    expect(api.cancelled).toEqual([d.job.id]);
+    expect(api.failed).toEqual([]);
   });
 
   it('completes a rebase-stack job through the rebase runner', async () => {

@@ -39,6 +39,7 @@ export interface ApiRoutes {
   'PATCH /api/tasks/:id': { response: { task: Task } };
   'DELETE /api/tasks/:id': { response: { ok: true } };
   'POST /api/tasks/:id/actions': { response: { task: Task } };
+  'POST /api/tasks/:id/agent/stop': { response: { task: Task } };
   'POST /api/tasks/:id/workflow-pin': { response: { task: Task } };
   'GET /api/tasks/:id/messages': { response: { messages: Message[] } };
   'POST /api/tasks/:id/messages': { response: { message: Message; task: Task } };
@@ -70,13 +71,14 @@ export interface ApiRoutes {
   'GET /api/events': { response: never };
   // worker
   'POST /api/worker/register': { response: { workerId: string; protocolVersion: number } };
-  'POST /api/worker/heartbeat': { response: { ok: true } };
+  'POST /api/worker/heartbeat': { response: { ok: true; cancelledJobIds: string[] } };
   'POST /api/worker/disconnect': { response: { ok: true } };
   'POST /api/worker/cleanup-status': { response: { workerOnline: boolean; activeJobs: { jobId: string; taskKey: string }[] } };
   'POST /api/worker/jobs/claim': { response: { jobs: JobDispatch[] } };
   'POST /api/worker/jobs/:id/events': { response: { ok: true } };
   'POST /api/worker/jobs/:id/complete': { response: { ok: true } };
   'POST /api/worker/jobs/:id/fail': { response: { ok: true } };
+  'POST /api/worker/jobs/:id/cancelled': { response: { ok: true } };
 }
 
 /** Server-sent event payloads pushed to the UI on `/api/events`. */

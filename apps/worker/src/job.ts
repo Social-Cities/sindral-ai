@@ -20,12 +20,13 @@ import { describeFailure, extractJsonCandidate, markdownPlanResult, parseRawResu
 import { assertPathContained, type GitFactory, type WorkspaceManager } from './workspace.js';
 
 export const SHUTDOWN_REASON = 'worker shutting down';
+export const JOB_CANCELLED_REASON = 'job cancelled';
 const PROGRESS_INTERVAL_MS = 60_000;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface JobDeps {
   config: WorkerConfig;
-  api: Pick<ApiClient, 'postEvent' | 'complete' | 'fail'>;
+  api: Pick<ApiClient, 'postEvent' | 'complete' | 'fail' | 'cancel'>;
   engines: EngineRegistry;
   workspaces: WorkspaceManager;
   logger: Logger;
@@ -37,7 +38,7 @@ export interface JobDeps {
   progressIntervalMs?: number;
 }
 
-export type JobOutcome = { status: 'completed'; result: AgentResult } | { status: 'failed'; error: string };
+export type JobOutcome = { status: 'completed'; result: AgentResult } | { status: 'failed' | 'cancelled'; error: string };
 
 /**
  * Runs one dispatched job end to end and reports the outcome to the server.
@@ -112,12 +113,20 @@ export async function runJob(dispatch: JobDispatch, deps: JobDeps, signal: Abort
     const message = signal.aborted ? String(signal.reason ?? SHUTDOWN_REASON) : redactor.redactError(err);
     log.error({ err: message }, 'job failed');
     write(`job failed: ${message}`);
-    try {
-      await deps.api.fail(job.id, message.slice(0, 20_000), job.attempt, dispatch.lease.token);
-    } catch (failErr) {
-      log.error({ err: redactor.redactError(failErr) }, 'could not report job failure');
+    if (signal.aborted && signal.reason === JOB_CANCELLED_REASON) {
+      try {
+        await deps.api.cancel(job.id, job.attempt, dispatch.lease.token);
+      } catch (cancelErr) {
+        log.error({ err: redactor.redactError(cancelErr) }, 'could not acknowledge job cancellation');
+      }
+    } else {
+      try {
+        await deps.api.fail(job.id, message.slice(0, 20_000), job.attempt, dispatch.lease.token);
+      } catch (failErr) {
+        log.error({ err: redactor.redactError(failErr) }, 'could not report job failure');
+      }
     }
-    outcome = { status: 'failed', error: message };
+    outcome = signal.aborted && signal.reason === JOB_CANCELLED_REASON ? { status: 'cancelled', error: message } : { status: 'failed', error: message };
   } finally {
     await events.close();
     await local.close();

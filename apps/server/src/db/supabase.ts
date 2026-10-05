@@ -217,6 +217,7 @@ interface JobRow {
   claimed_at: string | null;
   lease_token: string | null;
   lease_expires_at: string | null;
+  cancel_requested_at: string | null;
   finished_at: string | null;
 }
 interface JobLogRow {
@@ -1234,6 +1235,23 @@ export class SupabaseRepository implements Repository {
     return Number(await run<number>(this.client.rpc('renew_job_leases', { p_user_id: userId, p_worker_id: workerId, p_leases: jobs })));
   }
 
+  async jobCancellationRequests(userId: string, workerId: string, jobs: { jobId: string; leaseToken: string }[]): Promise<string[]> {
+    if (jobs.length === 0) return [];
+    const byId = new Map(jobs.map((job) => [job.jobId, job]));
+    const rows = await run<Pick<JobRow, 'id' | 'status' | 'worker_id' | 'lease_token' | 'cancel_requested_at'>[]>(
+      this.client.from('jobs').select('id,status,worker_id,lease_token,cancel_requested_at').eq('user_id', userId).in('id', [...byId.keys()]),
+    );
+    const rowById = new Map(rows.map((row) => [row.id, row]));
+    const cancelled: string[] = [];
+    for (const job of jobs) {
+      const row = rowById.get(job.jobId);
+      if (!row || row.worker_id !== workerId || row.lease_token !== job.leaseToken || row.cancel_requested_at || !['claimed', 'running', 'applying'].includes(row.status)) {
+        cancelled.push(job.jobId);
+      }
+    }
+    return cancelled;
+  }
+
   async activateJobLease(userId: string, jobId: string, attempt: number, leaseToken: string): Promise<boolean> {
     return Boolean(await run<boolean>(this.client.rpc('activate_job_lease', {
       p_user_id: userId,
@@ -1241,6 +1259,41 @@ export class SupabaseRepository implements Repository {
       p_attempt: attempt,
       p_lease_token: leaseToken,
     })));
+  }
+
+  async acknowledgeJobCancellation(userId: string, jobId: string, attempt: number, leaseToken: string): Promise<boolean> {
+    return Boolean(await run<boolean>(this.client.rpc('acknowledge_job_cancellation', {
+      p_user_id: userId,
+      p_job_id: jobId,
+      p_attempt: attempt,
+      p_lease_token: leaseToken,
+    })));
+  }
+
+  async requestAgentJobCancellation(userId: string, taskId: string): Promise<number> {
+    const now = new Date().toISOString();
+    const queued = await run<{ id: string }[]>(
+      this.client
+        .from('jobs')
+        .update({ status: 'cancelled', finished_at: now })
+        .eq('user_id', userId)
+        .eq('task_id', taskId)
+        .eq('kind', 'agent')
+        .eq('status', 'queued')
+        .select('id'),
+    );
+    const active = await run<{ id: string }[]>(
+      this.client
+        .from('jobs')
+        .update({ cancel_requested_at: now })
+        .eq('user_id', userId)
+        .eq('task_id', taskId)
+        .eq('kind', 'agent')
+        .in('status', ['claimed', 'running'])
+        .is('cancel_requested_at', null)
+        .select('id'),
+    );
+    return queued.length + active.length;
   }
 
   async cancelQueuedJobs(userId: string, taskId: string): Promise<number> {

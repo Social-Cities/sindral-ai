@@ -83,8 +83,8 @@ export class ApiClient {
     return this.post<{ workerId: string; protocolVersion: number }>('/api/worker/register', body);
   }
 
-  heartbeat(body: { workerId: string; runningJobs: { jobId: string; leaseToken: string }[] }): Promise<{ ok: true }> {
-    return this.post<{ ok: true }>('/api/worker/heartbeat', body);
+  heartbeat(body: { workerId: string; runningJobs: { jobId: string; leaseToken: string }[] }): Promise<{ ok: true; cancelledJobIds: string[] }> {
+    return this.post<{ ok: true; cancelledJobIds: string[] }>('/api/worker/heartbeat', body);
   }
 
   disconnect(body: { workerId: string }): Promise<{ ok: true }> {
@@ -110,6 +110,10 @@ export class ApiClient {
 
   fail(jobId: string, error: string, attempt: number, leaseToken: string): Promise<{ ok: true }> {
     return this.post<{ ok: true }>(`/api/worker/jobs/${encodeURIComponent(jobId)}/fail`, { attempt, leaseToken, error });
+  }
+
+  cancel(jobId: string, attempt: number, leaseToken: string): Promise<{ ok: true }> {
+    return this.post<{ ok: true }>(`/api/worker/jobs/${encodeURIComponent(jobId)}/cancelled`, { attempt, leaseToken });
   }
 
   private async post<T>(route: string, body: unknown, opts: RequestOptions = {}): Promise<T> {

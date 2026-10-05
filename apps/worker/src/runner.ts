@@ -1,7 +1,7 @@
 import { WORKER_PROTOCOL_VERSION, type JobDispatch } from '@sindral/shared';
 import { WorkerAuthError, WorkerProtocolError, type ApiClient } from './api.js';
 import type { WorkerConfig } from './config.js';
-import { SHUTDOWN_REASON } from './job.js';
+import { JOB_CANCELLED_REASON, SHUTDOWN_REASON } from './job.js';
 import type { Logger } from './logger.js';
 import { errorMessage } from './redact.js';
 
@@ -20,7 +20,7 @@ export interface RunnerPersistence {
 
 export interface RunnerDeps {
   config: Pick<WorkerConfig, 'concurrency' | 'workerName' | 'jobTimeoutMs'>;
-  api: Pick<ApiClient, 'register' | 'heartbeat' | 'disconnect' | 'claim' | 'fail'>;
+  api: Pick<ApiClient, 'register' | 'heartbeat' | 'disconnect' | 'claim' | 'fail' | 'cancel'>;
   logger: Logger;
   runJob: (dispatch: JobDispatch, signal: AbortSignal) => Promise<unknown>;
   version: string;
@@ -221,7 +221,8 @@ export class Runner {
         ...[...this.active].map(([jobId, active]) => ({ jobId, leaseToken: active.leaseToken })),
         ...this.pending.map((dispatch) => ({ jobId: dispatch.job.id, leaseToken: dispatch.lease.token })),
       ];
-      await this.deps.api.heartbeat({ workerId: this.workerId, runningJobs });
+      const response = await this.deps.api.heartbeat({ workerId: this.workerId, runningJobs });
+      await this.cancelRequestedJobs(response.cancelledJobIds ?? []);
     } catch (err) {
       if (err instanceof WorkerAuthError || err instanceof WorkerProtocolError) {
         this.fatal = err;
@@ -230,6 +231,33 @@ export class Runner {
       }
       this.deps.logger.warn({ err: errorMessage(err) }, 'heartbeat failed');
     }
+  }
+
+  private async cancelRequestedJobs(jobIds: string[]): Promise<void> {
+    if (jobIds.length === 0) return;
+    const cancelled = new Set(jobIds);
+    const stillPending: JobDispatch[] = [];
+    for (const dispatch of this.pending) {
+      if (!cancelled.has(dispatch.job.id)) {
+        stillPending.push(dispatch);
+        continue;
+      }
+      try {
+        await this.deps.api.cancel(dispatch.job.id, dispatch.job.attempt, dispatch.lease.token);
+      } catch (err) {
+        this.deps.logger.warn({ jobId: dispatch.job.id, err: errorMessage(err) }, 'could not acknowledge cancelled pending job');
+      }
+    }
+    this.pending = stillPending;
+    for (const [jobId, active] of this.active) {
+      if (cancelled.has(jobId) && !active.controller.signal.aborted) {
+        this.deps.logger.info({ jobId }, 'cancelling running job');
+        active.controller.abort(JOB_CANCELLED_REASON);
+      }
+    }
+    void this.persistRunning();
+    this.schedule();
+    this.wakeSlot?.();
   }
 
   private async drain(): Promise<void> {

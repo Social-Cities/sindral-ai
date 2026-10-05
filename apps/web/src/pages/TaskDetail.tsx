@@ -10,7 +10,7 @@ import { ExternalLink } from '@/components/ExternalLink';
 import { Modal } from '@/components/Modal';
 import { PageLoader, Spinner } from '@/components/Spinner';
 import { StatusBadge } from '@/components/StatusBadge';
-import { useDeleteTask, useRepinTaskWorkflow, useSendMessage, useTask, useTaskAction } from '@/hooks/useTasks';
+import { useDeleteTask, useRepinTaskWorkflow, useSendMessage, useStopAgent, useTask, useTaskAction } from '@/hooks/useTasks';
 import { useWorkflows } from '@/hooks/useWorkflows';
 import { ApiError } from '@/lib/api';
 import { formatDate } from '@/lib/format';
@@ -97,6 +97,7 @@ export function TaskDetail() {
   const action = useTaskAction(id ?? '', workflow);
   const repinWorkflow = useRepinTaskWorkflow(id ?? '');
   const send = useSendMessage(id ?? '', workflow);
+  const stopAgent = useStopAgent(id ?? '');
   const deleteTask = useDeleteTask();
 
   if (taskQuery.isLoading) return <PageLoader label="Loading task…" />;
@@ -133,7 +134,7 @@ export function TaskDetail() {
     setSearchParams(params, { replace: true });
   };
   const userInitial = (displayNameFor(user, 'U').charAt(0) || 'U').toUpperCase();
-  const actionError = action.error ? errorMessage(action.error) : repinWorkflow.error ? errorMessage(repinWorkflow.error) : null;
+  const actionError = action.error ? errorMessage(action.error) : repinWorkflow.error ? errorMessage(repinWorkflow.error) : stopAgent.error ? errorMessage(stopAgent.error) : null;
   const deleteError = deleteTask.error ? errorMessage(deleteTask.error) : null;
   const canApprovePlan = actions.some((item) => item.event === 'approve');
   const approvePlan = () => action.mutate('approve');
@@ -200,6 +201,11 @@ export function TaskDetail() {
               {a.label}
             </Button>
           ))}
+          {agentActive && (
+            <Button variant="warning" onClick={() => stopAgent.mutate()} loading={stopAgent.isPending} disabled={action.isPending || deleteTask.isPending}>
+              Stop agent
+            </Button>
+          )}
           <Button variant="danger" onClick={() => setConfirmingDelete(true)} disabled={action.isPending || deleteTask.isPending}>
             Delete
           </Button>

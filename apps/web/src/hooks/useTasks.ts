@@ -13,6 +13,7 @@ import {
   repinTaskWorkflow,
   runTaskAction,
   sendMessage,
+  stopAgent,
   updateTask,
 } from '@/lib/api';
 import { queryKeys } from './queryKeys';
@@ -133,6 +134,22 @@ export function useRepinTaskWorkflow(taskId: string) {
     },
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: key });
+      void qc.invalidateQueries({ queryKey: queryKeys.tasks });
+    },
+  });
+}
+
+export function useStopAgent(taskId: string) {
+  const qc = useQueryClient();
+  const key = queryKeys.task(taskId);
+  return useMutation({
+    mutationFn: () => stopAgent(taskId),
+    onSuccess: ({ task }) => {
+      qc.setQueryData<TaskWithRelations>(key, (prev) => (prev ? { ...prev, ...task } : prev));
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: key });
+      void qc.invalidateQueries({ queryKey: queryKeys.taskJobs(taskId) });
       void qc.invalidateQueries({ queryKey: queryKeys.tasks });
     },
   });

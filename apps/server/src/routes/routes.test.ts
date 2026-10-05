@@ -259,6 +259,18 @@ describe('tasks API', () => {
     expect(done.json<{ task: Task }>().task).toMatchObject({ state: 'done', currentStepId: 'done' });
   });
 
+  it('stops a running agent step from the task API', async () => {
+    const task = await createTask();
+    await taskAction(task.id, 'start');
+    const [job] = await ctx.repo.claimJobs(ctx.userA, 'worker-1', 1);
+    const stopped = await ctx.app.inject({ method: 'POST', url: `/api/tasks/${task.id}/agent/stop`, headers: asA() });
+
+    expect(stopped.statusCode).toBe(200);
+    expect(stopped.json<{ task: Task }>().task).toMatchObject({ state: 'failure', failedStepId: 'planning' });
+    expect(await ctx.repo.jobCancellationRequests(ctx.userA, 'worker-1', [{ jobId: job!.id, leaseToken: job!.leaseToken }])).toEqual([job!.id]);
+    expect((await ctx.app.inject({ method: 'POST', url: `/api/tasks/${task.id}/agent/stop`, headers: asB() })).statusCode).toBe(404);
+  });
+
   it('makes versioned task actions idempotent and rejects stale concurrent actions', async () => {
     const task = await createTask();
     const url = `/api/tasks/${task.id}/actions`;
@@ -313,7 +325,7 @@ describe('tasks API', () => {
     expect(patchTitle.json<{ task: Task }>().task).toMatchObject({ title: 'Renamed', state: 'planning' });
 
     const jobs = await ctx.app.inject({ method: 'GET', url: `/api/tasks/${task.id}/jobs`, headers: asA() });
-    const [job] = jobs.json<{ jobs: { id: string; status: string }[] }>().jobs;
+    const job = jobs.json<{ jobs: { id: string; status: string }[] }>().jobs.find((item) => item.status === 'queued');
     expect(job?.status).toBe('queued');
     const logs = await ctx.app.inject({ method: 'GET', url: `/api/jobs/${job!.id}/logs`, headers: asA() });
     expect(logs.json()).toEqual({ logs: [] });
@@ -436,7 +448,7 @@ describe('worker API', () => {
 
     const empty = await ctx.app.inject({ method: 'POST', url: '/api/worker/jobs/claim', headers, payload: { workerId, max: 2 } });
     expect(empty.json()).toEqual({ jobs: [] });
-    expect((await ctx.app.inject({ method: 'POST', url: '/api/worker/heartbeat', headers, payload: { workerId, runningJobs: [] } })).json()).toEqual({ ok: true });
+    expect((await ctx.app.inject({ method: 'POST', url: '/api/worker/heartbeat', headers, payload: { workerId, runningJobs: [] } })).json()).toEqual({ ok: true, cancelledJobIds: [] });
     expect((await ctx.app.inject({ method: 'POST', url: '/api/worker/heartbeat', headers, payload: { workerId: '00000000-0000-4000-8000-000000000000', runningJobs: [] } })).statusCode).toBe(404);
 
     await ctx.app.ctx.secrets.set(ctx.userA, 'github', 'ghp_workertoken');
@@ -487,6 +499,26 @@ describe('worker API', () => {
     const jobId = claim.json<{ jobs: { job: { id: string } }[] }>().jobs[0]!.job.id;
     const guarded = await ctx.app.inject({ method: 'POST', url: '/api/worker/cleanup-status', headers, payload: { workerId } });
     expect(guarded.json()).toEqual({ workerOnline: true, activeJobs: [{ jobId, taskKey: task.key }] });
+  });
+
+  it('returns job cancellation requests on worker heartbeat', async () => {
+    const { headers, workerId } = await registeredWorker();
+    const task = await createTask();
+    await taskAction(task.id, 'start');
+    const claim = await ctx.app.inject({ method: 'POST', url: '/api/worker/jobs/claim', headers, payload: { workerId } });
+    const claimed = claim.json<{ jobs: { job: { id: string }; lease: { token: string } }[] }>().jobs[0]!;
+
+    await ctx.app.inject({ method: 'POST', url: `/api/tasks/${task.id}/agent/stop`, headers: asA() });
+    const heartbeat = await ctx.app.inject({
+      method: 'POST',
+      url: '/api/worker/heartbeat',
+      headers,
+      payload: { workerId, runningJobs: [{ jobId: claimed.job.id, leaseToken: claimed.lease.token }] },
+    });
+
+    expect(heartbeat.json()).toEqual({ ok: true, cancelledJobIds: [claimed.job.id] });
+    expect((await ctx.app.inject({ method: 'POST', url: `/api/worker/jobs/${claimed.job.id}/cancelled`, headers, payload: { attempt: 1, leaseToken: claimed.lease.token } })).statusCode).toBe(200);
+    expect((await ctx.repo.getJob(ctx.userA, claimed.job.id))?.status).toBe('cancelled');
   });
 
   it('long-polls until a job appears', async () => {

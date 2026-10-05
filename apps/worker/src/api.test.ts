@@ -50,9 +50,9 @@ describe('ApiClient', () => {
 
   it('retries 5xx and 429 with backoff', async () => {
     const statuses = [500, 429, 200];
-    const fetchImpl = vi.fn(async () => response(statuses.shift() ?? 200, { ok: true }));
+    const fetchImpl = vi.fn(async () => response(statuses.shift() ?? 200, { ok: true, cancelledJobIds: [] }));
     const { api, sleeps } = client(fetchImpl);
-    await expect(api.heartbeat({ workerId: 'w', runningJobs: [] })).resolves.toEqual({ ok: true });
+    await expect(api.heartbeat({ workerId: 'w', runningJobs: [] })).resolves.toEqual({ ok: true, cancelledJobIds: [] });
     expect(fetchImpl).toHaveBeenCalledTimes(3);
     expect(sleeps).toEqual([backoffDelay(0, () => 0.5), backoffDelay(1, () => 0.5)]);
   });

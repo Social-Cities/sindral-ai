@@ -82,6 +82,7 @@ else process.exitCode = 1;
       postEvent: vi.fn(async () => ({ ok: true as const })),
       complete: vi.fn(async () => ({ ok: true as const })),
       fail: vi.fn(async () => ({ ok: true as const })),
+      cancel: vi.fn(async () => ({ ok: true as const })),
     };
     const basePayload = agentPayload();
     const jobDispatch = dispatch({ payload: { ...basePayload, context: { ...basePayload.context, task_key: 'E2E-1' } } });

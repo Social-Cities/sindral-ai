@@ -370,8 +370,11 @@ export interface Repository {
   /** Atomically claim queued jobs, serialised per task (see `claim_jobs` in the migration). */
   claimJobs(userId: string, workerId: string, max: number, allowedKinds?: JobKind[]): Promise<ClaimedJob[]>;
   renewJobLeases(userId: string, workerId: string, jobs: { jobId: string; leaseToken: string }[]): Promise<number>;
+  jobCancellationRequests(userId: string, workerId: string, jobs: { jobId: string; leaseToken: string }[]): Promise<string[]>;
   /** Atomically validates an active capability and marks its job running. */
   activateJobLease(userId: string, jobId: string, attempt: number, leaseToken: string): Promise<boolean>;
+  acknowledgeJobCancellation(userId: string, jobId: string, attempt: number, leaseToken: string): Promise<boolean>;
+  requestAgentJobCancellation(userId: string, taskId: string): Promise<number>;
   cancelQueuedJobs(userId: string, taskId: string): Promise<number>;
   /** Cross-user: claimed/running/applying jobs, used by the stale-job sweeper. */
   listActiveJobs(): Promise<ActiveJob[]>;

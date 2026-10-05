@@ -81,6 +81,10 @@ final class APIClient {
         struct Body: Encodable { let event: String; let expectedVersion: Int }
         let response: TaskResponse<SindralTask> = try await request("api/tasks/\(task.id)/actions", method: "POST", body: Body(event: event, expectedVersion: task.version), headers: ["Idempotency-Key": UUID().uuidString]); return response.task
     }
+    func stopAgent(taskId: String) async throws -> SindralTask {
+        let response: TaskResponse<SindralTask> = try await request("api/tasks/\(taskId)/agent/stop", method: "POST")
+        return response.task
+    }
     func sendMessage(taskId: String, content: String) async throws -> MessageResponse {
         struct Body: Encodable { let content: String }
         return try await request("api/tasks/\(taskId)/messages", method: "POST", body: Body(content: content))

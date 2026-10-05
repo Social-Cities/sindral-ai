@@ -69,6 +69,12 @@ export const taskRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx })
     return { task };
   });
 
+  app.post('/api/tasks/:id/agent/stop', async (request) => {
+    const { id } = validate(idParamsSchema, request.params);
+    const task = await orchestrator.stopRunningAgentStep(request.user!.id, id);
+    return { task };
+  });
+
   app.post('/api/tasks/:id/workflow-pin', async (request) => {
     const { id } = validate(idParamsSchema, request.params);
     const { expectedVersion } = validate(repinWorkflowSchema, request.body);
