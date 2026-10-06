@@ -252,7 +252,7 @@ export function TaskRow({ task, workflows, project, compact = false }: TaskRowPr
             {wf && (
               <span
                 className="text-[10px] font-mono px-1.5 py-0.5 rounded flex items-center gap-1 bg-secondary border border-border"
-                style={{ color: isPinned ? '#34d399' : '#52596b' }}
+                style={{ color: isPinned ? 'var(--color-success)' : 'var(--color-muted-foreground)' }}
                 title={isPinned ? "Pinned to workflow snapshot — updates to the workflow won't affect this task" : 'Using live workflow'}
               >
                 {isPinned ? '📌' : '⬡'} {wf.name}

@@ -25,6 +25,117 @@
   --color-ring: #7c3aed;
 }
 
+:root {
+  color-scheme: dark;
+
+  --color-success: #34d399;
+  --color-success-strong: #047857;
+  --color-warning: #fbbf24;
+  --color-danger: #f87171;
+  --color-danger-strong: #ef4444;
+
+  --color-diff-surface: #080814;
+  --color-diff-add-bg: #0f2f271f;
+  --color-diff-add-text: #b5f3d7;
+  --color-diff-del-bg: #37161924;
+  --color-diff-del-text: #ffc4c4;
+  --color-diff-context-text: #c2cada;
+  --color-diff-hunk-bg: #141832;
+  --color-diff-hover-bg: color-mix(in srgb, var(--color-foreground) 3.5%, transparent);
+  --color-syntax-comment: #6f7890;
+  --color-syntax-keyword: #c4b5fd;
+  --color-syntax-string: #86efac;
+  --color-syntax-number: #fbbf24;
+  --color-syntax-punctuation: #8b92a8;
+  --color-syntax-type: #67e8f9;
+  --color-syntax-builtin: #93c5fd;
+
+  --color-canvas-dot: #1c1c30;
+  --color-canvas-edge: #2a2a44;
+  --color-canvas-label: #52596b;
+  --color-node-agent-fill: #7c3aed0a;
+  --color-node-agent-fill-selected: #7c3aed18;
+  --color-node-agent-stroke: #7c3aed30;
+  --color-node-agent-stroke-selected: #7c3aed60;
+  --color-node-agent-text: #a78bfa;
+  --color-node-human-fill: #0d0d1c;
+  --color-node-human-fill-selected: #1c1c30;
+  --color-node-human-stroke: #1c1c30;
+  --color-node-human-stroke-selected: #818cf850;
+  --color-node-human-text: #8b92a8;
+  --color-node-end-fill: #34d3990a;
+  --color-node-end-fill-selected: #34d39918;
+  --color-node-end-stroke: #34d39930;
+  --color-node-end-stroke-selected: #34d39960;
+  --color-node-end-text: #34d399;
+  --color-toggle-bg: #111126;
+  --color-toggle-muted: #52596b;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --color-background: #f7f8fb;
+  --color-foreground: #111827;
+  --color-card: #ffffff;
+  --color-card-foreground: #111827;
+  --color-primary: #6d28d9;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #eef1f7;
+  --color-secondary-foreground: #4b5565;
+  --color-muted: #f1f4f9;
+  --color-muted-foreground: #667085;
+  --color-accent: #5b5bd6;
+  --color-accent-foreground: #ffffff;
+  --color-border: #d8deea;
+  --color-border-strong: #b9c2d2;
+  --color-input: #ffffff;
+  --color-ring: #6d28d9;
+
+  --color-success: #047857;
+  --color-success-strong: #047857;
+  --color-warning: #b45309;
+  --color-danger: #dc2626;
+  --color-danger-strong: #b91c1c;
+
+  --color-diff-surface: #f8fafc;
+  --color-diff-add-bg: #dcfce780;
+  --color-diff-add-text: #166534;
+  --color-diff-del-bg: #fee2e280;
+  --color-diff-del-text: #991b1b;
+  --color-diff-context-text: #243042;
+  --color-diff-hunk-bg: #eef2ff;
+  --color-diff-hover-bg: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  --color-syntax-comment: #697586;
+  --color-syntax-keyword: #6d28d9;
+  --color-syntax-string: #047857;
+  --color-syntax-number: #b45309;
+  --color-syntax-punctuation: #667085;
+  --color-syntax-type: #0369a1;
+  --color-syntax-builtin: #1d4ed8;
+
+  --color-canvas-dot: #d8deea;
+  --color-canvas-edge: #b9c2d2;
+  --color-canvas-label: #667085;
+  --color-node-agent-fill: #f3e8ff;
+  --color-node-agent-fill-selected: #ede9fe;
+  --color-node-agent-stroke: #c4b5fd;
+  --color-node-agent-stroke-selected: #8b5cf6;
+  --color-node-agent-text: #6d28d9;
+  --color-node-human-fill: #ffffff;
+  --color-node-human-fill-selected: #f1f4f9;
+  --color-node-human-stroke: #d8deea;
+  --color-node-human-stroke-selected: #a5b4fc;
+  --color-node-human-text: #4b5565;
+  --color-node-end-fill: #ecfdf5;
+  --color-node-end-fill-selected: #d1fae5;
+  --color-node-end-stroke: #86efac;
+  --color-node-end-stroke-selected: #10b981;
+  --color-node-end-text: #047857;
+  --color-toggle-bg: #ffffff;
+  --color-toggle-muted: #667085;
+}
+
 body {
   font-family: var(--font-sans);
   background-color: var(--color-background);
@@ -51,7 +162,7 @@ body {
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: #1c1c30 transparent;
+  scrollbar-color: var(--color-border) transparent;
 }
 
 ::-webkit-scrollbar {
@@ -64,12 +175,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background-color: #1c1c30;
+  background-color: var(--color-border);
   border-radius: 2px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background-color: #2a2a44;
+  background-color: var(--color-border-strong);
 }
 
 /* Small utilities used across pages */

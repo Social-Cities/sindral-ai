@@ -61,10 +61,10 @@ function Arrow({ from, to, label, dashed, curveSign }: { from: Point; to: Point;
   const ly = 0.25 * start.y + 0.5 * cy + 0.25 * end.y;
   return (
     <g className="pointer-events-none">
-      <path d={`M ${start.x} ${start.y} Q ${cx} ${cy} ${end.x} ${end.y}`} fill="none" stroke="#2a2a44" strokeWidth="1.5" strokeDasharray={dashed ? '4 3' : undefined} />
-      <path d={`M ${ax1} ${ay1} L ${end.x} ${end.y} L ${ax2} ${ay2}`} fill="none" stroke="#2a2a44" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d={`M ${start.x} ${start.y} Q ${cx} ${cy} ${end.x} ${end.y}`} fill="none" stroke="var(--color-canvas-edge)" strokeWidth="1.5" strokeDasharray={dashed ? '4 3' : undefined} />
+      <path d={`M ${ax1} ${ay1} L ${end.x} ${end.y} L ${ax2} ${ay2}`} fill="none" stroke="var(--color-canvas-edge)" strokeWidth="1.5" strokeLinejoin="round" />
       {label && (
-        <text x={lx} y={ly - 6} textAnchor="middle" fontSize="9" fill="#52596b" fontFamily="JetBrains Mono, monospace">
+        <text x={lx} y={ly - 6} textAnchor="middle" fontSize="9" fill="var(--color-canvas-label)" fontFamily="JetBrains Mono, monospace">
           {label}
         </text>
       )}
@@ -77,10 +77,10 @@ function SelfLoop({ at, label, dashed }: { at: Point; label?: string; dashed: bo
   const y = at.y;
   return (
     <g className="pointer-events-none">
-      <path d={`M ${x - 20} ${y} C ${x - 20} ${y - 30}, ${x + 20} ${y - 30}, ${x + 20} ${y}`} fill="none" stroke="#2a2a44" strokeWidth="1.5" strokeDasharray={dashed ? '4 3' : undefined} />
-      <path d={`M ${x + 16} ${y - 6} L ${x + 20} ${y} L ${x + 24} ${y - 6}`} fill="none" stroke="#2a2a44" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d={`M ${x - 20} ${y} C ${x - 20} ${y - 30}, ${x + 20} ${y - 30}, ${x + 20} ${y}`} fill="none" stroke="var(--color-canvas-edge)" strokeWidth="1.5" strokeDasharray={dashed ? '4 3' : undefined} />
+      <path d={`M ${x + 16} ${y - 6} L ${x + 20} ${y} L ${x + 24} ${y - 6}`} fill="none" stroke="var(--color-canvas-edge)" strokeWidth="1.5" strokeLinejoin="round" />
       {label && (
-        <text x={x} y={y - 26} textAnchor="middle" fontSize="9" fill="#52596b" fontFamily="JetBrains Mono, monospace">
+        <text x={x} y={y - 26} textAnchor="middle" fontSize="9" fill="var(--color-canvas-label)" fontFamily="JetBrains Mono, monospace">
           {label}
         </text>
       )}
@@ -89,9 +89,9 @@ function SelfLoop({ at, label, dashed }: { at: Point; label?: string; dashed: bo
 }
 
 const NODE_STYLE: Record<WorkflowStep['type'], { fill: string; fillSelected: string; stroke: string; strokeSelected: string; text: string; dash?: string; glyph: string }> = {
-  agent: { fill: '#7c3aed0a', fillSelected: '#7c3aed18', stroke: '#7c3aed30', strokeSelected: '#7c3aed60', text: '#a78bfa', glyph: '◆ agent' },
-  human: { fill: '#0d0d1c', fillSelected: '#1c1c30', stroke: '#1c1c30', strokeSelected: '#818cf850', text: '#8b92a8', dash: '4 3', glyph: '◇ human' },
-  end: { fill: '#34d3990a', fillSelected: '#34d39918', stroke: '#34d39930', strokeSelected: '#34d39960', text: '#34d399', glyph: '● end' },
+  agent: { fill: 'var(--color-node-agent-fill)', fillSelected: 'var(--color-node-agent-fill-selected)', stroke: 'var(--color-node-agent-stroke)', strokeSelected: 'var(--color-node-agent-stroke-selected)', text: 'var(--color-node-agent-text)', glyph: '◆ agent' },
+  human: { fill: 'var(--color-node-human-fill)', fillSelected: 'var(--color-node-human-fill-selected)', stroke: 'var(--color-node-human-stroke)', strokeSelected: 'var(--color-node-human-stroke-selected)', text: 'var(--color-node-human-text)', dash: '4 3', glyph: '◇ human' },
+  end: { fill: 'var(--color-node-end-fill)', fillSelected: 'var(--color-node-end-fill-selected)', stroke: 'var(--color-node-end-stroke)', strokeSelected: 'var(--color-node-end-stroke-selected)', text: 'var(--color-node-end-text)', glyph: '● end' },
 };
 
 interface NodeProps {
@@ -129,11 +129,11 @@ function WorkflowNode({ step, pos, selected, isEntry, onPointerDown, onKeyDown, 
         strokeWidth={1.5}
         strokeDasharray={style.dash}
       />
-      {isEntry && <circle cx={0} cy={NODE_H / 2} r={3} fill="#818cf8" />}
+      {isEntry && <circle cx={0} cy={NODE_H / 2} r={3} fill="var(--color-accent)" />}
       <text x={NODE_W / 2} y={16} textAnchor="middle" fontSize="9" fill={style.text} fontFamily="JetBrains Mono, monospace" fontWeight="500">
         {style.glyph}
       </text>
-      <text x={NODE_W / 2} y={30} textAnchor="middle" fontSize="11" fill={selected ? '#dde1ee' : '#8b92a8'} fontFamily="Inter, sans-serif" fontWeight="500">
+      <text x={NODE_W / 2} y={30} textAnchor="middle" fontSize="11" fill={selected ? 'var(--color-foreground)' : 'var(--color-secondary-foreground)'} fontFamily="Inter, sans-serif" fontWeight="500">
         {step.label.length > 20 ? `${step.label.slice(0, 19)}…` : step.label}
       </text>
       {selected && onDelete && (
@@ -156,8 +156,8 @@ function WorkflowNode({ step, pos, selected, isEntry, onPointerDown, onKeyDown, 
             }
           }}
         >
-          <circle r={7} fill="#0d0d1c" stroke="#f8717160" strokeWidth={1} />
-          <path d="M-2.5 -2.5L2.5 2.5M2.5 -2.5L-2.5 2.5" stroke="#f87171" strokeWidth="1.2" strokeLinecap="round" />
+          <circle r={7} fill="var(--color-card)" stroke="color-mix(in srgb, var(--color-danger) 45%, transparent)" strokeWidth={1} />
+          <path d="M-2.5 -2.5L2.5 2.5M2.5 -2.5L-2.5 2.5" stroke="var(--color-danger)" strokeWidth="1.2" strokeLinecap="round" />
         </g>
       )}
     </g>
@@ -293,7 +293,7 @@ export function WorkflowCanvas({ workflow, selectedStepId, onSelectStep, onMoveS
     >
       <defs>
         <pattern id="wf-dots" width="20" height="20" patternUnits="userSpaceOnUse">
-          <circle cx="1" cy="1" r="0.8" fill="#1c1c30" />
+          <circle cx="1" cy="1" r="0.8" fill="var(--color-canvas-dot)" />
         </pattern>
       </defs>
       <rect width={size.w} height={size.h} fill="url(#wf-dots)" rx={8} data-canvas-bg="true" />

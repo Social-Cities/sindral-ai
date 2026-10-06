@@ -27,7 +27,7 @@ export function Pipeline({ task, workflow }: PipelineProps) {
     const offPathLabel = task.state === 'failure' ? '⚠ Failed' : task.state === 'conflict-resolution' ? '◐ Resolving Conflict' : '◐ Troubleshoot';
     return (
       <div className="flex items-center gap-2 mt-4" data-testid="pipeline-offpath">
-        <span className="text-xs px-2 py-1 rounded font-mono font-medium" style={{ background: '#f8711815', color: style.color, border: '1px solid #fb923c20' }}>
+        <span className="text-xs px-2 py-1 rounded font-mono font-medium" style={{ background: 'color-mix(in srgb, var(--color-danger) 10%, transparent)', color: style.color, border: '1px solid color-mix(in srgb, var(--color-warning) 18%, transparent)' }}>
           {offPathLabel}
         </span>
         <span className="text-xs text-muted-foreground">
@@ -51,9 +51,9 @@ export function Pipeline({ task, workflow }: PipelineProps) {
             <div
               className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium"
               style={{
-                background: isCurrent ? '#7c3aed15' : isPast ? '#0d0d1c' : 'transparent',
-                border: isCurrent ? '1px solid #7c3aed40' : isPast ? '1px solid #1c1c30' : '1px solid transparent',
-                color: isCurrent ? '#a78bfa' : isPast ? '#8b92a8' : '#7b849a',
+                background: isCurrent ? 'color-mix(in srgb, var(--color-primary) 9%, transparent)' : isPast ? 'var(--color-card)' : 'transparent',
+                border: isCurrent ? '1px solid color-mix(in srgb, var(--color-primary) 28%, transparent)' : isPast ? '1px solid var(--color-border)' : '1px solid transparent',
+                color: isCurrent ? 'var(--color-node-agent-text)' : isPast ? 'var(--color-secondary-foreground)' : 'var(--color-muted-foreground)',
               }}
             >
               {isPast && (
@@ -63,7 +63,7 @@ export function Pipeline({ task, workflow }: PipelineProps) {
               )}
               {step.label}
             </div>
-            {i < path.length - 1 && <div className="w-4 h-px mx-0.5" style={{ background: isPast ? '#2a2a44' : '#1c1c30' }} aria-hidden="true" />}
+            {i < path.length - 1 && <div className="w-4 h-px mx-0.5" style={{ background: isPast ? 'var(--color-border-strong)' : 'var(--color-border)' }} aria-hidden="true" />}
           </li>
         );
       })}

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router';
 import { displayNameFor, useAuth } from '@/auth/AuthProvider';
 import type { LiveStatus } from '@/hooks/useServerEvents';
+import { useTheme } from './ThemeProvider';
 
 const NAV: { to: string; label: string; end?: boolean }[] = [
   { to: '/', label: 'Home', end: true },
@@ -33,6 +34,7 @@ export function Logo({ size = 24 }: { size?: number }) {
 
 export function Layout({ children, liveStatus }: LayoutProps) {
   const { user, signOut } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -87,6 +89,15 @@ export function Layout({ children, liveStatus }: LayoutProps) {
         </nav>
 
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className="w-7 h-7 rounded-md border border-border bg-secondary/70 text-muted-foreground hover:text-foreground hover:border-border-strong transition-colors flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+            aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+            title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+          >
+            {theme === 'light' ? <MoonIcon /> : <SunIcon />}
+          </button>
           {liveStatus && (
             <span
               className="flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground"
@@ -148,5 +159,22 @@ export function Layout({ children, liveStatus }: LayoutProps) {
         <div className="h-[calc(100vh-52px)]">{children}</div>
       </main>
     </div>
+  );
+}
+
+function SunIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+      <circle cx="7" cy="7" r="2.5" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M7 1V2.3M7 11.7V13M1 7H2.3M11.7 7H13M2.76 2.76L3.68 3.68M10.32 10.32L11.24 11.24M11.24 2.76L10.32 3.68M3.68 10.32L2.76 11.24" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function MoonIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+      <path d="M11.7 8.25A4.85 4.85 0 0 1 5.75 2.3A5.15 5.15 0 1 0 11.7 8.25Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+    </svg>
   );
 }

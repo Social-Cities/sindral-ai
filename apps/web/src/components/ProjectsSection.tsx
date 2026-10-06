@@ -213,7 +213,7 @@ export function ProjectsSection() {
         )}
         {githubCatalog.isLoading && <p className="text-xs text-muted-foreground">Loading GitHub {repositoryMode === 'existing' ? 'repositories' : 'owners'}…</p>}
         {githubCatalog.data && !connected && <p className="text-xs text-muted-foreground">Connect GitHub above to choose project repositories.</p>}
-        {created && <p className="text-xs text-[#34d399]" role="status">{created}</p>}
+        {created && <p className="text-xs text-[var(--color-success)]" role="status">{created}</p>}
         {error && <p className="text-xs text-[#f87171]" role="alert">{error}</p>}
         <Button type="submit" loading={createProject.isPending} disabled={!canSubmit}>
           Create project

@@ -227,7 +227,7 @@ export function Workflows() {
               }}
               placeholder="Workflow name..."
               className="w-full text-xs text-foreground px-2 py-1.5 rounded outline-none bg-input"
-              style={{ border: '1px solid #818cf840' }}
+              style={{ border: '1px solid color-mix(in srgb, var(--color-accent) 25%, transparent)' }}
             />
             <p className="text-[9px] text-muted-foreground mt-1">Clones “{selectedRecord?.name ?? 'Full SDLC'}”.</p>
             <div className="flex gap-1.5 mt-1.5">
@@ -262,7 +262,7 @@ export function Workflows() {
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-[10px] font-mono text-muted-foreground">{wf.steps.length} steps</span>
                       {count > 0 && (
-                        <span className="text-[10px] font-mono px-1 rounded" style={{ background: '#7c3aed15', color: '#a78bfa' }}>
+                        <span className="text-[10px] font-mono px-1 rounded" style={{ background: 'color-mix(in srgb, var(--color-primary) 9%, transparent)', color: 'var(--color-node-agent-text)' }}>
                           {count} active
                         </span>
                       )}
@@ -299,13 +299,13 @@ export function Workflows() {
         <div className="px-4 py-3 border-t border-border">
           <div className="space-y-1.5 text-[10px] font-mono text-muted-foreground">
             <div className="flex items-center gap-1.5">
-              <span style={{ color: '#a78bfa' }}>◆</span> agent step
+              <span style={{ color: 'var(--color-node-agent-text)' }}>◆</span> agent step
             </div>
             <div className="flex items-center gap-1.5">
-              <span style={{ color: '#8b92a8' }}>◇</span> human checkpoint
+              <span style={{ color: 'var(--color-node-human-text)' }}>◇</span> human checkpoint
             </div>
             <div className="flex items-center gap-1.5">
-              <span style={{ color: '#34d399' }}>●</span> end
+              <span style={{ color: 'var(--color-node-end-text)' }}>●</span> end
             </div>
           </div>
         </div>
@@ -327,7 +327,7 @@ export function Workflows() {
               </div>
               <div className="flex items-center gap-3 shrink-0">
                 {pinnedCount(draft.id) > 0 && (
-                  <span className="text-[10px] font-mono px-2 py-1 rounded flex items-center gap-1.5" style={{ background: '#34d39908', border: '1px solid #34d39920', color: '#34d399' }}>
+                  <span className="text-[10px] font-mono px-2 py-1 rounded flex items-center gap-1.5" style={{ background: 'color-mix(in srgb, var(--color-success) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--color-success) 14%, transparent)', color: 'var(--color-success)' }}>
                     📌 {pinnedCount(draft.id)} task{pinnedCount(draft.id) !== 1 ? 's' : ''} pinned to this version
                   </span>
                 )}
@@ -344,7 +344,7 @@ export function Workflows() {
             </div>
 
             {(globalIssues.length > 0 || saveError) && (
-              <div className="shrink-0 px-5 py-2 border-b border-border bg-[#f8717108]" role="alert" data-testid="workflow-issues">
+              <div className="shrink-0 px-5 py-2 border-b border-border bg-[color-mix(in_srgb,var(--color-danger)_6%,transparent)]" role="alert" data-testid="workflow-issues">
                 {saveError && <p className="text-xs text-[#f87171]">{saveError}</p>}
                 {globalIssues.map((i) => (
                   <p key={`${i.path}:${i.message}`} className="text-xs text-[#f87171]">
@@ -354,7 +354,7 @@ export function Workflows() {
               </div>
             )}
             {issues.length > 0 && globalIssues.length === 0 && (
-              <div className="shrink-0 px-5 py-2 border-b border-border bg-[#f8717108]" role="alert" data-testid="workflow-issues">
+              <div className="shrink-0 px-5 py-2 border-b border-border bg-[color-mix(in_srgb,var(--color-danger)_6%,transparent)]" role="alert" data-testid="workflow-issues">
                 <p className="text-xs text-[#f87171]">
                   {issues.length} issue{issues.length === 1 ? '' : 's'} in step configuration — select the affected step to fix.
                 </p>
@@ -386,8 +386,13 @@ export function Workflows() {
               <span
                 className="text-[10px] font-mono px-1.5 py-0.5 rounded"
                 style={{
-                  background: selectedStep.type === 'agent' ? '#7c3aed15' : selectedStep.type === 'end' ? '#34d39915' : '#1c1c30',
-                  color: selectedStep.type === 'agent' ? '#a78bfa' : selectedStep.type === 'end' ? '#34d399' : '#8b92a8',
+                  background:
+                    selectedStep.type === 'agent'
+                      ? 'color-mix(in srgb, var(--color-primary) 9%, transparent)'
+                      : selectedStep.type === 'end'
+                        ? 'color-mix(in srgb, var(--color-success) 9%, transparent)'
+                        : 'var(--color-secondary)',
+                  color: selectedStep.type === 'agent' ? 'var(--color-node-agent-text)' : selectedStep.type === 'end' ? 'var(--color-success)' : 'var(--color-secondary-foreground)',
                 }}
               >
                 {selectedStep.type}

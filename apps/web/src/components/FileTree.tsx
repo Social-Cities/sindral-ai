@@ -81,8 +81,8 @@ function TreeItem({ node, depth, selected, onSelect }: { node: FileTreeNode; dep
         {node.meta && (
           <span className="ml-auto flex items-center gap-1.5 text-[9px] shrink-0">
             {status && <span className={`${status.className} rounded border px-1 py-px leading-none`}>{status.label}</span>}
-            {node.meta.additions > 0 && <span className="text-[#34d399]">+{node.meta.additions}</span>}
-            {node.meta.deletions > 0 && <span className="text-[#f87171]">-{node.meta.deletions}</span>}
+            {node.meta.additions > 0 && <span className="text-[var(--color-success)]">+{node.meta.additions}</span>}
+            {node.meta.deletions > 0 && <span className="text-[var(--color-danger)]">-{node.meta.deletions}</span>}
           </span>
         )}
       </button>
@@ -100,10 +100,10 @@ function TreeItem({ node, depth, selected, onSelect }: { node: FileTreeNode; dep
 function statusMeta(status: string): { label: string; className: string } {
   switch (status) {
     case 'added':
-      return { label: 'A', className: 'border-[#34d39955] text-[#34d399]' };
+      return { label: 'A', className: 'border-[color-mix(in_srgb,var(--color-success)_34%,transparent)] text-[var(--color-success)]' };
     case 'removed':
     case 'deleted':
-      return { label: 'D', className: 'border-[#f8717155] text-[#f87171]' };
+      return { label: 'D', className: 'border-[color-mix(in_srgb,var(--color-danger)_34%,transparent)] text-[var(--color-danger)]' };
     case 'renamed':
       return { label: 'R', className: 'border-[#fbbf2455] text-[#fbbf24]' };
     case 'changed':

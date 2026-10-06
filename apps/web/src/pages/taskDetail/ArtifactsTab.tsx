@@ -82,7 +82,7 @@ export function ArtifactsTab({ task }: ArtifactsTabProps) {
                 <Markdown>{selected.content}</Markdown>
               </div>
             ) : (
-              <pre className="text-xs font-mono leading-relaxed whitespace-pre-wrap break-words p-4 rounded-lg bg-muted border border-border text-[#a8b4cc]">{selected.content}</pre>
+              <pre className="text-xs font-mono leading-relaxed whitespace-pre-wrap break-words p-4 rounded-lg bg-muted border border-border text-secondary-foreground">{selected.content}</pre>
             )}
           </>
         )}

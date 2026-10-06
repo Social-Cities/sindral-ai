@@ -31,10 +31,10 @@ export function SummaryTab({ task, workflow, canApprove, approving, onApprove, o
     <div className="overflow-y-auto h-full p-6">
       <div className="max-w-4xl space-y-6">
         {agentActive && (
-          <div className="flex items-start gap-3 p-4 rounded-lg" style={{ background: '#fbbf2408', border: '1px solid #fbbf2420' }}>
+          <div className="flex items-start gap-3 p-4 rounded-lg" style={{ background: 'color-mix(in srgb, var(--color-warning) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--color-warning) 14%, transparent)' }}>
             <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse mt-1.5 shrink-0" aria-hidden="true" />
             <div>
-              <p className="text-sm font-medium text-amber-200/80">Agent is working</p>
+              <p className="text-sm font-medium text-[var(--color-warning)]">Agent is working</p>
               <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
                 {task.state === 'troubleshoot'
                   ? 'The troubleshooting agent is diagnosing what went wrong.'
@@ -160,13 +160,13 @@ export function SummaryTab({ task, workflow, canApprove, approving, onApprove, o
         )}
 
         {task.state === 'failure' && (
-          <div className="p-4 rounded-lg" style={{ background: '#f8711808', border: '1px solid #f8711820' }}>
-            <p className="text-sm font-medium text-red-300/80 mb-1">Task failed</p>
+          <div className="p-4 rounded-lg" style={{ background: 'color-mix(in srgb, var(--color-danger) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--color-danger) 14%, transparent)' }}>
+            <p className="text-sm font-medium text-[var(--color-danger)] mb-1">Task failed</p>
             <p className="text-xs text-muted-foreground leading-relaxed">
               The agent ran into an error it couldn't resolve. Use the chat to provide guidance, retry the step, or run the troubleshoot agent.
             </p>
             {task.lastError && (
-              <pre className="mt-3 text-[11px] font-mono leading-relaxed whitespace-pre-wrap break-words text-red-200/70 bg-background/60 rounded p-3 border border-border max-h-64 overflow-auto">
+              <pre className="mt-3 text-[11px] font-mono leading-relaxed whitespace-pre-wrap break-words text-[var(--color-danger)] bg-background/60 rounded p-3 border border-border max-h-64 overflow-auto">
                 {task.lastError}
               </pre>
             )}
@@ -174,8 +174,8 @@ export function SummaryTab({ task, workflow, canApprove, approving, onApprove, o
         )}
 
         {task.state === 'done' && (
-          <div className="p-4 rounded-lg" style={{ background: '#34d39908', border: '1px solid #34d39920' }}>
-            <p className="text-sm font-medium text-emerald-300/80">Task complete</p>
+          <div className="p-4 rounded-lg" style={{ background: 'color-mix(in srgb, var(--color-success) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--color-success) 14%, transparent)' }}>
+            <p className="text-sm font-medium text-[var(--color-success)]">Task complete</p>
             <p className="text-xs text-muted-foreground mt-0.5">All work has been accepted.</p>
           </div>
         )}

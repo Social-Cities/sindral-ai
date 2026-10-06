@@ -48,7 +48,7 @@ describe('DiffViewer', () => {
 
     expect(screen.getByText('TSX')).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Old' })).toBeInTheDocument();
-    expect(screen.getAllByText('const')[0]).toHaveClass('text-[#c4b5fd]');
+    expect(screen.getAllByText('const')[0]).toHaveClass('text-[var(--color-syntax-keyword)]');
 
     await user.click(screen.getByRole('button', { name: 'Wrap off' }));
     expect(screen.getByRole('button', { name: 'Wrap on' })).toBeInTheDocument();

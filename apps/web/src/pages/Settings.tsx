@@ -192,7 +192,7 @@ function WorkerKeysSection() {
       )}
 
       {created && (
-        <div className="rounded-lg p-4 space-y-3" style={{ background: '#34d39908', border: '1px solid #34d39920' }} data-testid="worker-key-secret">
+        <div className="rounded-lg p-4 space-y-3" style={{ background: 'color-mix(in srgb, var(--color-success) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--color-success) 14%, transparent)' }} data-testid="worker-key-secret">
           <p className="text-xs text-emerald-300/90 font-medium">Key “{created.key.name}” created — copy it now, it will not be shown again.</p>
           <div className="relative">
             <pre className="text-[11px] font-mono leading-relaxed whitespace-pre-wrap break-all p-3 pr-20 rounded bg-background/70 border border-border text-foreground">{command}</pre>
@@ -322,7 +322,7 @@ export function Settings() {
                 </Button>
               </div>
             </div>
-            {searchParams.get('github') === 'connected' && <p className="text-xs text-[#34d399]" role="status">GitHub account connected.</p>}
+            {searchParams.get('github') === 'connected' && <p className="text-xs text-[var(--color-success)]" role="status">GitHub account connected.</p>}
             {searchParams.get('github') === 'error' && (
               <p className="text-xs text-[#f87171]" role="alert">
                 {GITHUB_ERROR_MESSAGES[githubCallbackError ?? ''] ?? GITHUB_ERROR_MESSAGES.exchange}
@@ -368,7 +368,7 @@ export function Settings() {
                       v{w.version} · {w.runningJobs} running · last seen <RelativeTime iso={w.lastSeenAt} />
                     </p>
                   </div>
-                  <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${w.status === 'online' ? 'text-emerald-300' : 'text-muted-foreground'}`} style={{ background: w.status === 'online' ? '#34d39914' : '#13132a' }}>
+                  <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${w.status === 'online' ? 'text-[var(--color-success)]' : 'text-muted-foreground'}`} style={{ background: w.status === 'online' ? 'color-mix(in srgb, var(--color-success) 9%, transparent)' : 'var(--color-secondary)' }}>
                     {w.status}
                   </span>
                 </li>

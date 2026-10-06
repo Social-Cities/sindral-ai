@@ -105,9 +105,9 @@ export function CodeTab({ task }: CodeTabProps) {
               {files.length} file{files.length === 1 ? '' : 's'}
             </p>
             <p className="text-[10px] font-mono">
-              <span className="text-[#34d399]">+{totals.additions}</span>
+              <span className="text-[var(--color-success)]">+{totals.additions}</span>
               <span className="text-muted-foreground mx-1">/</span>
-              <span className="text-[#f87171]">-{totals.deletions}</span>
+              <span className="text-[var(--color-danger)]">-{totals.deletions}</span>
             </p>
           </div>
           <label className="label-caps block mt-3 mb-1" htmlFor="diff-file-search">

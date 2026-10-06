@@ -260,15 +260,15 @@ export function TaskDetail() {
                   <div
                     className="flex items-start gap-1.5 px-2 py-1.5 rounded"
                     style={{
-                      background: task.pinnedWorkflow ? '#34d39908' : '#13132a',
-                      border: `1px solid ${task.pinnedWorkflow ? '#34d39920' : '#1c1c30'}`,
+                      background: task.pinnedWorkflow ? 'color-mix(in srgb, var(--color-success) 6%, transparent)' : 'var(--color-secondary)',
+                      border: `1px solid ${task.pinnedWorkflow ? 'color-mix(in srgb, var(--color-success) 14%, transparent)' : 'var(--color-border)'}`,
                     }}
                   >
                     <span className="text-[10px] mt-px shrink-0" aria-hidden="true">
                       {task.pinnedWorkflow ? '📌' : '⬡'}
                     </span>
                     <div>
-                      <p className="text-[10px] font-medium" style={{ color: task.pinnedWorkflow ? '#34d399' : '#8b92a8' }}>
+                      <p className="text-[10px] font-medium" style={{ color: task.pinnedWorkflow ? 'var(--color-success)' : 'var(--color-secondary-foreground)' }}>
                         {workflow.name}
                       </p>
                       <p className="text-[9px] text-muted-foreground mt-0.5 leading-relaxed">

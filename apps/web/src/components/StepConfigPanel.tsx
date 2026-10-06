@@ -20,8 +20,16 @@ interface StepConfigPanelProps {
 function Toggle({ active, onClick, children, tone }: { active: boolean; onClick: () => void; children: string; tone: 'violet' | 'green' }) {
   const palette =
     tone === 'violet'
-      ? { bg: active ? '#7c3aed20' : '#111126', border: active ? '#7c3aed50' : '#1c1c30', color: active ? '#a78bfa' : '#52596b' }
-      : { bg: active ? '#05966915' : '#111126', border: active ? '#05966940' : '#1c1c30', color: active ? '#34d399' : '#52596b' };
+      ? {
+          bg: active ? 'color-mix(in srgb, var(--color-primary) 16%, transparent)' : 'var(--color-toggle-bg)',
+          border: active ? 'color-mix(in srgb, var(--color-primary) 42%, transparent)' : 'var(--color-border)',
+          color: active ? 'var(--color-node-agent-text)' : 'var(--color-toggle-muted)',
+        }
+      : {
+          bg: active ? 'color-mix(in srgb, var(--color-success) 14%, transparent)' : 'var(--color-toggle-bg)',
+          border: active ? 'color-mix(in srgb, var(--color-success) 36%, transparent)' : 'var(--color-border)',
+          color: active ? 'var(--color-success)' : 'var(--color-toggle-muted)',
+        };
   return (
     <button
       type="button"

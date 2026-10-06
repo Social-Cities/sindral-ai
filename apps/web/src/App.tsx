@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from 'rea
 import { AuthProvider, useAuth } from '@/auth/AuthProvider';
 import { Layout } from '@/components/Layout';
 import { PageLoader } from '@/components/Spinner';
+import { ThemeProvider } from '@/components/ThemeProvider';
 import { useServerEvents } from '@/hooks/useServerEvents';
 import { ApiError } from '@/lib/api';
 
@@ -72,11 +73,13 @@ export default function App() {
   const [client] = useState(createAppQueryClient);
   return (
     <QueryClientProvider client={client}>
-      <AuthProvider>
-        <BrowserRouter>
-          <AppRoutes />
-        </BrowserRouter>
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <BrowserRouter>
+            <AppRoutes />
+          </BrowserRouter>
+        </AuthProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }

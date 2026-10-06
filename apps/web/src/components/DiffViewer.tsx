@@ -114,23 +114,23 @@ export function parsePatch(patch: string): DiffLine[] {
 }
 
 const KIND_CLASSES: Record<LineKind, string> = {
-  add: 'bg-[#0f2f271f] text-[#b5f3d7]',
-  del: 'bg-[#37161924] text-[#ffc4c4]',
-  context: 'text-[#c2cada]',
-  hunk: 'bg-[#141832] text-accent',
+  add: 'bg-[var(--color-diff-add-bg)] text-[var(--color-diff-add-text)]',
+  del: 'bg-[var(--color-diff-del-bg)] text-[var(--color-diff-del-text)]',
+  context: 'text-[var(--color-diff-context-text)]',
+  hunk: 'bg-[var(--color-diff-hunk-bg)] text-accent',
   meta: 'text-muted-foreground',
 };
 
 const KIND_MARK: Record<LineKind, string> = { add: '+', del: '-', context: ' ', hunk: '', meta: '' };
 const TOKEN_CLASSES: Record<TokenKind, string> = {
   plain: '',
-  comment: 'text-[#6f7890] italic',
-  keyword: 'text-[#c4b5fd] font-semibold',
-  string: 'text-[#86efac]',
-  number: 'text-[#fbbf24]',
-  punctuation: 'text-[#8b92a8]',
-  type: 'text-[#67e8f9]',
-  builtin: 'text-[#93c5fd]',
+  comment: 'text-[var(--color-syntax-comment)] italic',
+  keyword: 'text-[var(--color-syntax-keyword)] font-semibold',
+  string: 'text-[var(--color-syntax-string)]',
+  number: 'text-[var(--color-syntax-number)]',
+  punctuation: 'text-[var(--color-syntax-punctuation)]',
+  type: 'text-[var(--color-syntax-type)]',
+  builtin: 'text-[var(--color-syntax-builtin)]',
 };
 
 interface DiffViewerProps {
@@ -155,7 +155,7 @@ export function DiffViewer({ file }: DiffViewerProps) {
   }
 
   return (
-    <div className="flex flex-col h-full min-h-0 bg-[#080814]">
+    <div className="flex flex-col h-full min-h-0 bg-[var(--color-diff-surface)]">
       <div className="shrink-0 flex flex-wrap items-center gap-2 px-4 py-3 border-b border-border bg-card/70">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 min-w-0">
@@ -169,8 +169,8 @@ export function DiffViewer({ file }: DiffViewerProps) {
             <span>
               {hunkCount} hunk{hunkCount === 1 ? '' : 's'}
             </span>
-            <span className="text-[#34d399]">+{file.additions}</span>
-            <span className="text-[#f87171]">-{file.deletions}</span>
+            <span className="text-[var(--color-success)]">+{file.additions}</span>
+            <span className="text-[var(--color-danger)]">-{file.deletions}</span>
           </div>
         </div>
         <button
@@ -211,7 +211,7 @@ export function DiffViewer({ file }: DiffViewerProps) {
             </thead>
             <tbody>
               {lines.map((line, i) => (
-                <tr key={i} className={`${KIND_CLASSES[line.kind]} hover:bg-white/[0.035]`} data-kind={line.kind}>
+                <tr key={i} className={`${KIND_CLASSES[line.kind]} hover:bg-[var(--color-diff-hover-bg)]`} data-kind={line.kind}>
                   <td className="w-12 pl-3 pr-1 text-right select-none text-muted-foreground/55 align-top border-r border-border/50">{line.oldNo ?? ''}</td>
                   <td className="w-12 pr-2 text-right select-none text-muted-foreground/55 align-top border-r border-border/50">{line.newNo ?? ''}</td>
                   <td className="w-4 select-none align-top text-muted-foreground/80">{KIND_MARK[line.kind]}</td>

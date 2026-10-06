@@ -70,8 +70,8 @@ export function StepsTab({ task, workflow, agentActive }: StepsTabProps) {
                 return (
                   <li key={ev.id} className="flex gap-3">
                     <div className="flex flex-col items-center">
-                      <div className="w-2 h-2 rounded-full mt-1 shrink-0" style={{ background: last ? '#818cf8' : '#1c1c30', border: '1px solid #2a2a44' }} aria-hidden="true" />
-                      {!last && <div className="w-px flex-1 mt-1" style={{ background: '#1c1c30', minHeight: '24px' }} aria-hidden="true" />}
+                      <div className="w-2 h-2 rounded-full mt-1 shrink-0" style={{ background: last ? 'var(--color-accent)' : 'var(--color-border)', border: '1px solid var(--color-border-strong)' }} aria-hidden="true" />
+                      {!last && <div className="w-px flex-1 mt-1" style={{ background: 'var(--color-border)', minHeight: '24px' }} aria-hidden="true" />}
                     </div>
                     <div className="pb-5 min-w-0">
                       <p className="text-sm text-foreground font-medium">{eventTitle(ev, workflow)}</p>
@@ -151,7 +151,7 @@ function JobCard({ job, workflow }: { job: Job; workflow: Workflow | null }) {
       {open && (
         <div className="border-t border-border">
           {job.error && (
-            <pre className="m-3 text-[11px] font-mono whitespace-pre-wrap break-words text-red-200/70 bg-background/60 rounded p-3 border border-border">{job.error}</pre>
+            <pre className="m-3 text-[11px] font-mono whitespace-pre-wrap break-words text-[var(--color-danger)] bg-background/60 rounded p-3 border border-border">{job.error}</pre>
           )}
           {job.result && (
             <p className="mx-4 mt-3 text-xs text-secondary-foreground leading-relaxed">
@@ -173,7 +173,7 @@ function JobCard({ job, workflow }: { job: Job; workflow: Workflow | null }) {
                     <span className={`shrink-0 w-14 ${line.type === 'message' ? 'text-accent' : line.type === 'progress' ? 'text-amber-300/80' : 'text-muted-foreground'}`}>
                       {line.type}
                     </span>
-                    <span className="whitespace-pre-wrap break-words text-[#a8b4cc]">{line.message}</span>
+                    <span className="whitespace-pre-wrap break-words text-secondary-foreground">{line.message}</span>
                   </li>
                 ))}
               </ol>

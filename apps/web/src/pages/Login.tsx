@@ -97,7 +97,7 @@ export function Login() {
               </p>
             )}
             {notice && (
-              <p className="text-xs text-[#34d399]" role="status">
+              <p className="text-xs text-[var(--color-success)]" role="status">
                 {notice}
               </p>
             )}
