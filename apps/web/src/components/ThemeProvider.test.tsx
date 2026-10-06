@@ -15,6 +15,7 @@ function ThemeProbe() {
 describe('ThemeProvider', () => {
   afterEach(() => {
     window.localStorage.clear();
+    document.cookie = 'sindral_theme=; path=/; max-age=0';
     document.documentElement.dataset.theme = 'dark';
   });
 
@@ -35,5 +36,21 @@ describe('ThemeProvider', () => {
     expect(screen.getByRole('button', { name: 'light' })).toBeInTheDocument();
     expect(document.documentElement.dataset.theme).toBe('light');
     expect(window.localStorage.getItem('sindral-theme')).toBe('light');
+    expect(document.cookie).toContain('sindral_theme=light');
+  });
+
+  it('falls back to the persisted cookie when local storage is empty', () => {
+    window.localStorage.clear();
+    document.documentElement.removeAttribute('data-theme');
+    document.cookie = 'sindral_theme=light; path=/';
+
+    render(
+      <ThemeProvider>
+        <ThemeProbe />
+      </ThemeProvider>,
+    );
+
+    expect(screen.getByRole('button', { name: 'light' })).toBeInTheDocument();
+    expect(document.documentElement.dataset.theme).toBe('light');
   });
 });

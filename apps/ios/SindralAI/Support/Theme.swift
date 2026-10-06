@@ -1,29 +1,57 @@
 import SwiftUI
 import UIKit
 
-/// Design tokens mirrored from `apps/web/src/index.css`. The app is dark-only.
+/// User-selectable appearance for the whole app.
+enum AppAppearance: String, CaseIterable, Identifiable {
+    case system, light, dark
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .system: "System"
+        case .light: "Light"
+        case .dark: "Dark"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .system: "circle.lefthalf.filled"
+        case .light: "sun.max"
+        case .dark: "moon"
+        }
+    }
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: nil
+        case .light: .light
+        case .dark: .dark
+        }
+    }
+}
+
+/// Design tokens mirrored from `apps/web/src/index.css`.
 enum Theme {
-    static let background = Color(hex: 0x07070F)
-    static let card = Color(hex: 0x0D0D1C)
-    static let muted = Color(hex: 0x0A0A18)
-    static let secondary = Color(hex: 0x13132A)
-    static let input = Color(hex: 0x111126)
-    static let border = Color(hex: 0x1C1C30)
-    static let borderStrong = Color(hex: 0x2A2A44)
-    static let foreground = Color(hex: 0xDDE1EE)
-    static let secondaryForeground = Color(hex: 0x8B92A8)
-    static let mutedForeground = Color(hex: 0x7B849A)
-    static let primary = Color(hex: 0x7C3AED)
-    static let accent = Color(hex: 0x818CF8)
-    static let success = Color(hex: 0x047857)
-    static let warning = Color(hex: 0xF97316)
-    static let dangerText = Color(hex: 0xF87171)
-    static let dangerFill = Color(hex: 0xEF4444)
-    static let emerald = Color(hex: 0x34D399)
-    static let amber = Color(hex: 0xFBBF24)
-    static let violet = Color(hex: 0xA78BFA)
-    static let lavender = Color(hex: 0xC4B5FD)
-    static let edge = Color(hex: 0x3A3A5C)
+    static let background = color(dark: 0x07070F, light: 0xF7F8FB)
+    static let card = color(dark: 0x0D0D1C, light: 0xFFFFFF)
+    static let muted = color(dark: 0x0A0A18, light: 0xF1F4F9)
+    static let secondary = color(dark: 0x13132A, light: 0xEEF1F7)
+    static let input = color(dark: 0x111126, light: 0xFFFFFF)
+    static let border = color(dark: 0x1C1C30, light: 0xD8DEEA)
+    static let borderStrong = color(dark: 0x2A2A44, light: 0xB9C2D2)
+    static let foreground = color(dark: 0xDDE1EE, light: 0x111827)
+    static let secondaryForeground = color(dark: 0x8B92A8, light: 0x4B5565)
+    static let mutedForeground = color(dark: 0x7B849A, light: 0x667085)
+    static let primary = color(dark: 0x7C3AED, light: 0x6D28D9)
+    static let accent = color(dark: 0x818CF8, light: 0x5B5BD6)
+    static let success = color(dark: 0x047857, light: 0x047857)
+    static let warning = color(dark: 0xF97316, light: 0xB45309)
+    static let dangerText = color(dark: 0xF87171, light: 0xDC2626)
+    static let dangerFill = color(dark: 0xEF4444, light: 0xB91C1C)
+    static let emerald = color(dark: 0x34D399, light: 0x047857)
+    static let amber = color(dark: 0xFBBF24, light: 0xB45309)
+    static let violet = color(dark: 0xA78BFA, light: 0x6D28D9)
+    static let lavender = color(dark: 0xC4B5FD, light: 0x7C3AED)
+    static let edge = color(dark: 0x3A3A5C, light: 0xB9C2D2)
 
     enum Radius {
         static let control: CGFloat = 10
@@ -49,11 +77,28 @@ enum Theme {
     static let bodyMedium = font(15, .medium, relativeTo: .body)
     static let secondaryBody = font(13, relativeTo: .subheadline)
     static let sectionLabel = font(12, .semibold, relativeTo: .caption1)
+
+    private static func color(dark: UInt32, light: UInt32) -> Color {
+        Color(UIColor { traits in
+            UIColor(hex: traits.userInterfaceStyle == .dark ? dark : light)
+        })
+    }
 }
 
 extension Color {
     init(hex: UInt32, opacity: Double = 1) {
         self.init(.sRGB, red: Double((hex >> 16) & 0xFF) / 255, green: Double((hex >> 8) & 0xFF) / 255, blue: Double(hex & 0xFF) / 255, opacity: opacity)
+    }
+}
+
+private extension UIColor {
+    convenience init(hex: UInt32, opacity: CGFloat = 1) {
+        self.init(
+            red: CGFloat((hex >> 16) & 0xFF) / 255,
+            green: CGFloat((hex >> 8) & 0xFF) / 255,
+            blue: CGFloat(hex & 0xFF) / 255,
+            alpha: opacity
+        )
     }
 }
 

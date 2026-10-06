@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct SindralAIApp: App {
     @UIApplicationDelegateAdaptor(PushNotificationDelegate.self) private var pushDelegate
+    @AppStorage("appearance") private var appearanceRawValue = AppAppearance.system.rawValue
     @State private var store: AppStore?
     @State private var router = AppRouter()
     @State private var configurationError: String?
@@ -34,7 +35,7 @@ struct SindralAIApp: App {
             #if DEBUG
             .modifier(DemoLandscape(enabled: DemoMode.isEnabled && DemoMode.landscape))
             #endif
-            .preferredColorScheme(.dark)
+            .preferredColorScheme((AppAppearance(rawValue: appearanceRawValue) ?? .system).colorScheme)
             .tint(Theme.accent)
             .background(Theme.background.ignoresSafeArea())
         }

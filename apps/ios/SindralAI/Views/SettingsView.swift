@@ -23,7 +23,7 @@ enum Provider: String, CaseIterable, Identifiable {
 }
 
 private enum SettingsPane: Hashable, Identifiable {
-    case integration(Provider), projects, workerKeys, workers
+    case appearance, integration(Provider), projects, workerKeys, workers
     var id: Self { self }
 }
 
@@ -39,9 +39,10 @@ struct SettingsView: View {
     @Environment(APIClient.self) private var api
     @Environment(SessionStore.self) private var session
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @AppStorage("appearance") private var appearanceRawValue = AppAppearance.system.rawValue
     @State private var secrets: [SecretStatus] = []
     @State private var keys: [WorkerKey] = []
-    @State private var pane: SettingsPane? = .workerKeys
+    @State private var pane: SettingsPane? = .appearance
 
     var body: some View {
         Group {
@@ -77,6 +78,8 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Settings").font(Theme.pageTitle).tracking(-0.6).foregroundStyle(Theme.foreground).padding(.bottom, 20)
+                    groupLabel("General")
+                    row("Appearance", detail: appearance.title, detailColor: Theme.secondaryForeground, pane: .appearance)
                     groupLabel("Integrations")
                     ForEach(Provider.allCases) { provider in
                         let connected = status(provider)?.configured == true
@@ -133,6 +136,10 @@ struct SettingsView: View {
 
     @ViewBuilder private func detail(_ pane: SettingsPane) -> some View {
         switch pane {
+        case .appearance:
+            section("Appearance", "Choose how Sindral AI looks on this device.") {
+                AppearanceCard(selection: $appearanceRawValue)
+            }
         case .integration(let provider):
             section(provider.title, provider.description) {
                 if provider == .github {
@@ -196,6 +203,7 @@ struct SettingsView: View {
     }
 
     private func status(_ provider: Provider) -> SecretStatus? { secrets.first { $0.provider == provider.rawValue } }
+    private var appearance: AppAppearance { AppAppearance(rawValue: appearanceRawValue) ?? .system }
 
     private func load() async {
         do {
@@ -210,6 +218,53 @@ struct SettingsView: View {
     }
 
     private func reload() async { await load(); await store.refreshWorkers() }
+}
+
+private struct AppearanceCard: View {
+    @Binding var selection: String
+
+    private var appearance: AppAppearance {
+        get { AppAppearance(rawValue: selection) ?? .system }
+        nonmutating set { selection = newValue.rawValue }
+    }
+
+    var body: some View {
+        VStack(spacing: 10) {
+            ForEach(AppAppearance.allCases) { item in
+                Button {
+                    appearance = item
+                } label: {
+                    HStack(spacing: 14) {
+                        Image(systemName: item.icon)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(appearance == item ? Theme.accent : Theme.mutedForeground)
+                            .frame(width: 24)
+                        Text(item.title)
+                            .font(Theme.bodyMedium)
+                            .foregroundStyle(Theme.foreground)
+                        Spacer()
+                        if appearance == item {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(Theme.accent)
+                        }
+                    }
+                    .padding(.horizontal, 18)
+                    .frame(minHeight: 56)
+                    .background(appearance == item ? Theme.secondary : Theme.input, in: RoundedRectangle(cornerRadius: Theme.Radius.control))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: Theme.Radius.control)
+                            .strokeBorder(appearance == item ? Theme.accent.opacity(0.35) : Theme.border)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(appearance == item ? .isSelected : [])
+            }
+        }
+        .padding(24)
+        .surface(Theme.card, radius: Theme.Radius.card)
+    }
 }
 
 private struct GitHubConnectionCard: View {
