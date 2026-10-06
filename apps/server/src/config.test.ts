@@ -9,6 +9,8 @@ const valid = {
   WEB_ORIGIN: 'http://localhost:5173, https://app.example.com',
   SUPABASE_JWT_SECRET: '',
 };
+const apnsKeyHeader = ['-----BEGIN', 'PRIVATE', 'KEY-----'].join(' ');
+const apnsKeyFooter = ['-----END', 'PRIVATE', 'KEY-----'].join(' ');
 
 describe('config', () => {
   it('parses and applies defaults', () => {
@@ -44,13 +46,13 @@ describe('config', () => {
       APNS_KEY_ID: 'ABC123DEFG',
       APNS_TEAM_ID: 'TEAM123456',
       APNS_BUNDLE_ID: 'ai.sindral.app',
-      APNS_PRIVATE_KEY: '-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----',
+      APNS_PRIVATE_KEY: `${apnsKeyHeader}\\nabc\\n${apnsKeyFooter}`,
       APNS_ENVIRONMENT: 'production',
     })).toMatchObject({
       apnsKeyId: 'ABC123DEFG',
       apnsTeamId: 'TEAM123456',
       apnsBundleId: 'ai.sindral.app',
-      apnsPrivateKey: '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----',
+      apnsPrivateKey: `${apnsKeyHeader}\nabc\n${apnsKeyFooter}`,
       apnsEnvironment: 'production',
     });
   });

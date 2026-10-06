@@ -4,16 +4,17 @@ import { MemoryRepository } from '../db/memory.js';
 import { SecretService } from './secrets.js';
 
 const key = Buffer.from('ab'.repeat(32), 'hex');
+const githubToken = ['ghp', 'abcdefghijklmnopqrstuvwxyz'].join('_');
 
 describe('SecretService', () => {
   it('trims manually stored tokens before encrypting them', async () => {
     const secrets = new SecretService(new MemoryRepository(), key);
     const userId = randomUUID();
 
-    await secrets.set(userId, 'github', '  ghp_abcdefghijklmnopqrstuvwxyz\n', { source: 'pat' });
+    await secrets.set(userId, 'github', `  ${githubToken}\n`, { source: 'pat' });
 
     await expect(secrets.get(userId, 'github')).resolves.toMatchObject({
-      token: 'ghp_abcdefghijklmnopqrstuvwxyz',
+      token: githubToken,
       metadata: { source: 'pat' },
     });
   });

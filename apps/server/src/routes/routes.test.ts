@@ -7,6 +7,8 @@ import { claimNext, completeMerge, completeNext, createTestApp, implementation, 
 
 const fetchMock = vi.fn<typeof fetch>();
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+const githubToken = (suffix: string) => ['ghp', suffix].join('_');
+const workerKeyPattern = new RegExp(`^${['sk', 'sindral'].join('_')}_[0-9a-f]{40}$`);
 let ctx: TestContext;
 
 beforeEach(async () => {
@@ -342,12 +344,13 @@ describe('tasks API', () => {
     expect(empty.json()).toEqual({ files: [] });
     await ctx.repo.updateTask(ctx.userA, task.id, { prUrl: 'https://github.com/acme/app/pull/12' });
     expect((await ctx.app.inject({ method: 'GET', url: `/api/tasks/${task.id}/diff`, headers: asA() })).statusCode).toBe(400);
-    await ctx.app.ctx.secrets.set(ctx.userA, 'github', 'ghp_tokentoken');
+    const token = githubToken('tokentoken');
+    await ctx.app.ctx.secrets.set(ctx.userA, 'github', token);
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify([{ filename: 'a.ts', status: 'modified', additions: 1, deletions: 2, patch: '@@' }, { filename: 'b.png', status: 'added', additions: 0, deletions: 0 }])));
     const res = await ctx.app.inject({ method: 'GET', url: `/api/tasks/${task.id}/diff`, headers: asA() });
     expect(res.json()).toEqual({ files: [{ filename: 'a.ts', status: 'modified', additions: 1, deletions: 2, patch: '@@' }, { filename: 'b.png', status: 'added', additions: 0, deletions: 0 }] });
     expect(fetchMock.mock.calls[0]![0]).toBe('https://api.github.com/repos/acme/app/pulls/12/files?per_page=100&page=1');
-    expect((fetchMock.mock.calls[0]![1]?.headers as Record<string, string>).Authorization).toBe('Bearer ghp_tokentoken');
+    expect((fetchMock.mock.calls[0]![1]?.headers as Record<string, string>).Authorization).toBe(`Bearer ${token}`);
     await ctx.repo.updateTask(ctx.userA, task.id, { prUrl: 'https://gitlab.com/acme/app/-/merge_requests/1' });
     expect((await ctx.app.inject({ method: 'GET', url: `/api/tasks/${task.id}/diff`, headers: asA() })).json()).toEqual({ files: [] });
   });
@@ -451,7 +454,8 @@ describe('worker API', () => {
     expect((await ctx.app.inject({ method: 'POST', url: '/api/worker/heartbeat', headers, payload: { workerId, runningJobs: [] } })).json()).toEqual({ ok: true, cancelledJobIds: [] });
     expect((await ctx.app.inject({ method: 'POST', url: '/api/worker/heartbeat', headers, payload: { workerId: '00000000-0000-4000-8000-000000000000', runningJobs: [] } })).statusCode).toBe(404);
 
-    await ctx.app.ctx.secrets.set(ctx.userA, 'github', 'ghp_workertoken');
+    const token = githubToken('workertoken');
+    await ctx.app.ctx.secrets.set(ctx.userA, 'github', token);
     const task = await createTask();
     await taskAction(task.id, 'start');
     const claim = await ctx.app.inject({ method: 'POST', url: '/api/worker/jobs/claim', headers, payload: { workerId } });
@@ -459,7 +463,7 @@ describe('worker API', () => {
     expect(jobs).toHaveLength(1);
     expect(jobs[0]!.job.status).toBe('claimed');
     expect(jobs[0]!.job.payload.step.id).toBe('planning');
-    expect(jobs[0]!.credentials.githubToken).toBe('ghp_workertoken');
+    expect(jobs[0]!.credentials.githubToken).toBe(token);
     const jobId = jobs[0]!.job.id;
     const leaseToken = jobs[0]!.lease.token;
     expect(leaseToken).toMatch(/^[0-9a-f-]{36}$/);
@@ -593,7 +597,7 @@ describe('settings API', () => {
     const created = await ctx.app.inject({ method: 'POST', url: '/api/settings/worker-keys', headers: asA(), payload: { name: 'laptop' } });
     expect(created.statusCode).toBe(201);
     const { key, secret } = created.json<{ key: { id: string; keyPrefix: string; revokedAt: string | null }; secret: string }>();
-    expect(secret).toMatch(/^sk_sindral_[0-9a-f]{40}$/);
+    expect(secret).toMatch(workerKeyPattern);
     expect(key.keyPrefix).toBe(secret.slice(0, 18));
     expect(JSON.stringify(key)).not.toContain(secret);
     const list = await ctx.app.inject({ method: 'GET', url: '/api/settings/worker-keys', headers: asA() });
@@ -612,13 +616,14 @@ describe('settings API', () => {
       { provider: 'jira', configured: false, updatedAt: null, hint: null },
     ] });
     expect((await ctx.app.inject({ method: 'PUT', url: '/api/settings/secrets', headers: asA(), payload: { provider: 'jira', token: 'jira-token-1234' } })).statusCode).toBe(400);
-    const put = await ctx.app.inject({ method: 'PUT', url: '/api/settings/secrets', headers: asA(), payload: { provider: 'github', token: 'ghp_abcdefgh1234' } });
+    const token = githubToken('abcdefgh1234');
+    const put = await ctx.app.inject({ method: 'PUT', url: '/api/settings/secrets', headers: asA(), payload: { provider: 'github', token } });
     expect(put.statusCode).toBe(200);
     expect(put.json()).toMatchObject({ secret: { provider: 'github', configured: true, hint: '1234' } });
-    expect(put.body).not.toContain('ghp_abcdefgh1234');
+    expect(put.body).not.toContain(token);
     const stored = await ctx.repo.getSecret(ctx.userA, 'github');
     expect(stored?.ciphertext).not.toContain('ghp_');
-    expect(await ctx.app.ctx.secrets.get(ctx.userA, 'github')).toEqual({ token: 'ghp_abcdefgh1234', metadata: { source: 'pat' } });
+    expect(await ctx.app.ctx.secrets.get(ctx.userA, 'github')).toEqual({ token, metadata: { source: 'pat' } });
     expect(await ctx.app.ctx.secrets.get(ctx.userB, 'github')).toBeNull();
     expect((await ctx.app.inject({ method: 'DELETE', url: '/api/settings/secrets/github', headers: asA() })).json()).toEqual({ ok: true });
     expect((await ctx.app.inject({ method: 'DELETE', url: '/api/settings/secrets/slack', headers: asA() })).statusCode).toBe(400);

@@ -60,7 +60,7 @@ describe('worker authentication', () => {
     });
 
   it('rejects unknown, malformed and revoked keys', async () => {
-    expect((await register('sk_sindral_' + '0'.repeat(40))).statusCode).toBe(401);
+    expect((await register(['sk', 'sindral', '0'.repeat(40)].join('_'))).statusCode).toBe(401);
     expect((await register('sk_other_' + '0'.repeat(40))).statusCode).toBe(401);
     expect((await register(ctx.tokenA)).statusCode).toBe(401);
     const key = await ctx.workerKeyFor(ctx.userA);

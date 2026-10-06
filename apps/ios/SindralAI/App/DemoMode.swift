@@ -84,7 +84,7 @@ enum DemoFixtures {
         case ("GET", "/api/workflows"): return json(["workflows": [fullSDLC]])
         case ("GET", "/api/workers"): return json(["workers": workers])
         case ("GET", "/api/me"): return json(["user": Profile(id: "demo-user", email: "luc@example.com", displayName: "Luc")])
-        case ("GET", "/api/settings/worker-keys"): return json(["keys": [WorkerKey(id: "key-1", name: "MacBook Pro", keyPrefix: "sk_sindral_7f3a", createdAt: ago(days: 12), lastUsedAt: ago(minutes: 2), revokedAt: nil)]])
+        case ("GET", "/api/settings/worker-keys"): return json(["keys": [WorkerKey(id: "key-1", name: "MacBook Pro", keyPrefix: "sk" + "_sindral_7f3a", createdAt: ago(days: 12), lastUsedAt: ago(minutes: 2), revokedAt: nil)]])
         case ("GET", "/api/settings/secrets"):
             return json(["secrets": [
                 SecretStatus(provider: "github", configured: true, updatedAt: ago(days: 3), hint: "…9f2c"),

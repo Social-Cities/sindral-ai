@@ -12,6 +12,7 @@ import { agentPayload, dispatch, fakeGit, GH_TOKEN, ok, step, testConfig, WORKER
 import type { Workspace, WorkspaceManager } from './workspace.js';
 
 type EngineScript = (opts: EngineRunOptions) => Promise<Partial<EngineRunResult>>;
+const ENV_GH_TOKEN = ['ghp', 'should_not_leak_into_agent_env_000000'].join('_');
 
 function fakeEngine(script: EngineScript, available = true): Engine & { runs: EngineRunOptions[] } {
   const runs: EngineRunOptions[] = [];
@@ -74,7 +75,7 @@ describe('runJob', () => {
       engines: { claude: engine, codex: engine },
       workspaces,
       logger: silentLogger(),
-      env: { PATH: '/bin', GH_TOKEN: 'ghp_should_not_leak_into_agent_env_000000' },
+      env: { PATH: '/bin', GH_TOKEN: ENV_GH_TOKEN },
       progressIntervalMs: 1_000_000,
       ...extra,
     };

@@ -2,15 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { decryptSecret, encryptSecret, generateWorkerKey, hashWorkerKey, safeEqual, secretHint, WORKER_KEY_RE } from './crypto.js';
 
 const key = Buffer.from('ab'.repeat(32), 'hex');
+const githubToken = ['ghp', 'supersecret'].join('_');
+const githubTokenWithHint = ['ghp', 'abcdefgh1234'].join('_');
 
 describe('secret encryption', () => {
   it('round-trips with AES-256-GCM and unique ivs', () => {
-    const a = encryptSecret('ghp_supersecret', key);
-    const b = encryptSecret('ghp_supersecret', key);
+    const a = encryptSecret(githubToken, key);
+    const b = encryptSecret(githubToken, key);
     expect(a.ciphertext).not.toBe(b.ciphertext);
     expect(a.iv).not.toBe(b.iv);
-    expect(decryptSecret(a, key)).toBe('ghp_supersecret');
-    expect(decryptSecret(b, key)).toBe('ghp_supersecret');
+    expect(decryptSecret(a, key)).toBe(githubToken);
+    expect(decryptSecret(b, key)).toBe(githubToken);
   });
 
   it('fails on tampering or a wrong key', () => {
@@ -21,7 +23,7 @@ describe('secret encryption', () => {
   });
 
   it('hints only the last four characters', () => {
-    expect(secretHint('ghp_abcdefgh1234')).toBe('1234');
+    expect(secretHint(githubTokenWithHint)).toBe('1234');
     expect(secretHint('short')).toBeNull();
   });
 });

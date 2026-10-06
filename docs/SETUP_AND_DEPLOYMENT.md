@@ -157,7 +157,7 @@ Put the one-time worker key into `.env`, or export it only in the worker termina
 
 ```bash
 SINDRAL_SERVER_URL=http://localhost:8787 \
-SINDRAL_WORKER_KEY=sk_sindral_replace_me \
+SINDRAL_WORKER_KEY=<generated-worker-key> \
 pnpm dev:worker
 ```
 

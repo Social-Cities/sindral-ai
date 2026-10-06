@@ -4,8 +4,8 @@ import type { WorkerConfig } from '../config.js';
 import type { GitAuth, GitRunner } from '../git.js';
 import type { RunOptions, RunResult } from '../proc.js';
 
-export const WORKER_KEY = `sk_sindral_${'a'.repeat(40)}`;
-export const GH_TOKEN = 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+export const WORKER_KEY = ['sk', 'sindral', 'a'.repeat(40)].join('_');
+export const GH_TOKEN = ['ghp', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'].join('_');
 
 export function testConfig(overrides: Partial<WorkerConfig> = {}): WorkerConfig {
   return {

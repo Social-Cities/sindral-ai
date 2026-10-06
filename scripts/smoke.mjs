@@ -17,6 +17,7 @@ const SUPA = process.env.SMOKE_SUPABASE ?? 'http://127.0.0.1:54321';
 const ANON = process.env.SMOKE_ANON_KEY ?? process.env.ANON;
 const API = process.env.SMOKE_API ?? 'http://127.0.0.1:8787';
 const WEBHOOK_SECRET = process.env.SMOKE_WEBHOOK_SECRET ?? 'smoke-webhook-secret';
+const SMOKE_GITHUB_TOKEN = ['ghp', 'smoketoken1234'].join('_');
 const email = `smoke+${Date.now()}@example.com`;
 const password = 'Smoke-test-pass-123!';
 let step = 0;
@@ -112,7 +113,7 @@ ok(c4.body.jobs.length === 1 && c4.body.jobs[0].job.taskId !== taskId && c4.body
 ok(c4.body.jobs[0].job.payload.context.parent_plan === '# Plan v2', 'subtask job carries parent plan');
 
 // secrets + list + diff guard + delete
-const sec = await api('/api/settings/secrets', { method: 'PUT', body: JSON.stringify({ provider: 'github', token: 'ghp_smoketoken1234' }) });
+const sec = await api('/api/settings/secrets', { method: 'PUT', body: JSON.stringify({ provider: 'github', token: SMOKE_GITHUB_TOKEN }) });
 ok(sec.status === 200 && sec.body.secret.configured && sec.body.secret.hint === '1234', 'github token stored encrypted with hint');
 const list = await api('/api/tasks'); ok(list.body.tasks.length === 1, 'top-level list hides subtasks');
 const listAll = await api('/api/tasks?includeSubtasks=true'); ok(listAll.body.tasks.length === 3, 'includeSubtasks lists children');

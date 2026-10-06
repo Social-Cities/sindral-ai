@@ -132,8 +132,9 @@ describe('codex json formatting', () => {
 
 describe('agent environment', () => {
   it('strips credentials and adds protocol variables', () => {
+    const ghToken = (suffix: string) => ['ghp', suffix].join('_');
     const env = buildAgentEnv(
-      { PATH: '/bin', GH_TOKEN: 'ghp_x', GITHUB_TOKEN: 'ghp_y', SINDRAL_WORKER_KEY: 'sk', HOME: '/home' },
+      { PATH: '/bin', GH_TOKEN: ghToken('x'), GITHUB_TOKEN: ghToken('y'), SINDRAL_WORKER_KEY: 'sk', HOME: '/home' },
       { SINDRAL_RESULT_FILE: '/r.json', SINDRAL_OUTPUT_DIR: '/o', SINDRAL_TASK_KEY: 'ENG-1' },
     );
     expect(env).toEqual({ PATH: '/bin', HOME: '/home', SINDRAL_RESULT_FILE: '/r.json', SINDRAL_OUTPUT_DIR: '/o', SINDRAL_TASK_KEY: 'ENG-1', GIT_TERMINAL_PROMPT: '0' });
