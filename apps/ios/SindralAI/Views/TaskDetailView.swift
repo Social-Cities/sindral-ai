@@ -59,19 +59,35 @@ struct TaskDetailView: View {
     private func content(_ task: TaskDetail) -> some View {
         VStack(spacing: 0) {
             toolbar(task)
-            VStack(alignment: .leading, spacing: 14) {
-                Text(task.title).font(Theme.font(portrait ? 24 : 22, .semibold, relativeTo: .title2)).tracking(-0.3)
-                    .foregroundStyle(Theme.foreground).fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.isHeader)
-                PipelineView(task: task, workflow: task.resolvedWorkflow(store.workflows), wraps: portrait || isCompact)
-                tabBar(task)
-            }
-            .padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .hairline(.bottom)
+            header(task)
             tabContent(task)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    @ViewBuilder private func header(_ task: TaskDetail) -> some View {
+        if isCompact {
+            ScrollView {
+                headerContent(task)
+            }
+            .frame(maxHeight: 260)
+            .hairline(.bottom)
+        } else {
+            headerContent(task)
+                .hairline(.bottom)
+        }
+    }
+
+    private func headerContent(_ task: TaskDetail) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(task.title).font(Theme.font(portrait ? 24 : 22, .semibold, relativeTo: .title2)).tracking(-0.3)
+                .foregroundStyle(Theme.foreground).fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+            PipelineView(task: task, workflow: task.resolvedWorkflow(store.workflows), wraps: portrait || isCompact)
+            tabBar(task)
+        }
+        .padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: Toolbar
