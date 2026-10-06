@@ -39,6 +39,14 @@ describe('bundled workflows', () => {
       effects: [{ type: 'dispatch', stepId: 'review-slice' }],
     });
   });
+
+  it('code workflow verification prompts distinguish readiness verdicts from review verdicts', () => {
+    for (const workflow of [FULL_SDLC_WORKFLOW, FAST_TRACK_WORKFLOW]) {
+      const verifyPrompt = workflow.steps.find((step) => step.id === 'verify')?.prompt;
+      expect(verifyPrompt).toContain('final JSON verdict must be exactly GO or NO_GO');
+      expect(verifyPrompt).toContain('NO_MATERIAL_FINDINGS');
+    }
+  });
 });
 
 describe('transition', () => {

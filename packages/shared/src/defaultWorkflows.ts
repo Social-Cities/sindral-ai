@@ -117,6 +117,7 @@ Follow the \`verify-change\` and \`production-readiness\` skills if available; o
 2. Check that the change achieves the required outcome and evaluate every acceptance criterion with concrete evidence. Also check that it follows best practice and stays within scope.
 3. Evaluate every production-readiness gate and produce the readiness matrix, residual risks, rollout recommendation and human attention points.
 4. Return GO only when verification is VERIFIED and there are no unresolved material findings from the adversarial review below. Otherwise return NO_GO with precise, actionable feedback for the implementer.
+5. The adversarial review has its own verdict vocabulary (MATERIAL_FINDINGS, NO_MATERIAL_FINDINGS, REVIEW_BLOCKED). Use it only as evidence in your report. Your final JSON verdict must be exactly GO or NO_GO.
 
 Pull request: {{pr_url}}
 

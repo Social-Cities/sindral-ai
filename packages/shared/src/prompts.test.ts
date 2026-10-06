@@ -20,6 +20,12 @@ describe('protocolInstructions', () => {
     expect(out).toContain('"GO" | "NO_GO"');
   });
 
+  it('warns verdict agents not to use review verdict values', () => {
+    const out = protocolInstructions('verdict', '/tmp/result.json');
+    expect(out).toContain('must be exactly `GO` or `NO_GO`');
+    expect(out).toContain('NO_MATERIAL_FINDINGS');
+  });
+
   it('requires planning agents to return the durable task contract', () => {
     const out = protocolInstructions('plan', '/tmp/result.json');
     expect(out).toContain('"outcome"');

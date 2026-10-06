@@ -113,6 +113,13 @@ const RESULT_SHAPES: Record<StepOutputKind, string> = {
 }`,
 };
 
+const OUTPUT_RULES: Partial<Record<StepOutputKind, string[]>> = {
+  verdict: [
+    '- For a verdict result, `verdict` must be exactly `GO` or `NO_GO`.',
+    '- Do not copy review verdict values such as `MATERIAL_FINDINGS`, `NO_MATERIAL_FINDINGS`, `REVIEW_BLOCKED`, `VERIFIED`, or `BLOCKED` into the final `verdict` field.',
+  ],
+};
+
 /**
  * Protocol instructions appended to every agent prompt so the worker can parse a
  * machine-readable result regardless of which engine ran the step.
@@ -132,5 +139,6 @@ export function protocolInstructions(output: StepOutputKind, resultFile: string)
     '- The file must contain valid JSON and nothing else.',
     '- Never include secrets, tokens or credentials in the result.',
     '- If you cannot complete the task, still return the JSON result with the best summary you can and explain what blocked you.',
+    ...(OUTPUT_RULES[output] ?? []),
   ].join('\n');
 }
