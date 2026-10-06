@@ -42,7 +42,7 @@ interface FileTreeProps {
 
 export function FileTree({ nodes, selected, onSelect }: FileTreeProps) {
   return (
-    <ul role="tree" aria-label="Changed files" className="text-xs font-mono">
+    <ul role="tree" aria-label="Changed files" className="text-xs font-mono space-y-0.5 px-2">
       {nodes.map((node) => (
         <TreeItem key={node.path} node={node} depth={0} selected={selected} onSelect={onSelect} />
       ))}
@@ -54,14 +54,16 @@ function TreeItem({ node, depth, selected, onSelect }: { node: FileTreeNode; dep
   const [open, setOpen] = useState(true);
   const isSelected = selected === node.path;
   const children = useMemo(() => node.children, [node.children]);
+  const status = node.meta ? statusMeta(node.meta.status) : null;
 
   return (
     <li role="treeitem" aria-expanded={node.type === 'dir' ? open : undefined} aria-selected={node.type === 'file' ? isSelected : undefined}>
       <button
         type="button"
         onClick={() => (node.type === 'dir' ? setOpen((o) => !o) : onSelect(node.path))}
-        className={`w-full text-left flex items-center gap-1.5 py-0.5 pr-2 rounded transition-colors ${
-          isSelected ? 'text-foreground bg-secondary' : 'text-muted-foreground hover:text-secondary-foreground'
+        aria-label={node.type === 'dir' ? `${open ? 'Collapse' : 'Expand'} ${node.path}` : node.path}
+        className={`w-full min-w-0 text-left flex items-center gap-1.5 py-1 pr-2 rounded transition-colors ${
+          isSelected ? 'text-foreground bg-secondary shadow-[inset_2px_0_0_var(--color-accent)]' : 'text-muted-foreground hover:text-secondary-foreground hover:bg-secondary/50'
         }`}
         style={{ paddingLeft: `${8 + depth * 12}px` }}
         title={node.path}
@@ -77,7 +79,8 @@ function TreeItem({ node, depth, selected, onSelect }: { node: FileTreeNode; dep
         )}
         <span className="truncate">{node.name}</span>
         {node.meta && (
-          <span className="ml-auto flex items-center gap-1 text-[9px] shrink-0">
+          <span className="ml-auto flex items-center gap-1.5 text-[9px] shrink-0">
+            {status && <span className={`${status.className} rounded border px-1 py-px leading-none`}>{status.label}</span>}
             {node.meta.additions > 0 && <span className="text-[#34d399]">+{node.meta.additions}</span>}
             {node.meta.deletions > 0 && <span className="text-[#f87171]">-{node.meta.deletions}</span>}
           </span>
@@ -92,4 +95,20 @@ function TreeItem({ node, depth, selected, onSelect }: { node: FileTreeNode; dep
       )}
     </li>
   );
+}
+
+function statusMeta(status: string): { label: string; className: string } {
+  switch (status) {
+    case 'added':
+      return { label: 'A', className: 'border-[#34d39955] text-[#34d399]' };
+    case 'removed':
+    case 'deleted':
+      return { label: 'D', className: 'border-[#f8717155] text-[#f87171]' };
+    case 'renamed':
+      return { label: 'R', className: 'border-[#fbbf2455] text-[#fbbf24]' };
+    case 'changed':
+    case 'modified':
+    default:
+      return { label: 'M', className: 'border-accent/40 text-accent' };
+  }
 }
