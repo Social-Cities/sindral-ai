@@ -59,22 +59,28 @@ struct TaskDetailView: View {
     private func content(_ task: TaskDetail) -> some View {
         VStack(spacing: 0) {
             toolbar(task)
-            header(task)
-            tabContent(task)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if isCompact {
+                compactContent(task)
+            } else {
+                header(task)
+                tabContent(task)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
     }
 
     @ViewBuilder private func header(_ task: TaskDetail) -> some View {
-        if isCompact {
-            ScrollView {
-                headerContent(task)
-            }
-            .frame(maxHeight: 260)
+        headerContent(task)
             .hairline(.bottom)
-        } else {
-            headerContent(task)
-                .hairline(.bottom)
+    }
+
+    private func compactContent(_ task: TaskDetail) -> some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                header(task)
+                compactTabContent(task)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
     }
 
@@ -237,6 +243,23 @@ struct TaskDetailView: View {
         }
     }
 
+    @ViewBuilder private func compactTabContent(_ task: TaskDetail) -> some View {
+        let canApprove = task.summary.availableActions(workflows: store.workflows).contains { $0.event == "approve" }
+        switch selectedTab {
+        case .summary:
+            TaskSummaryView(task: task, canApprove: canApprove, approving: isActing, scrolls: false,
+                            onApprove: { Task { await run("approve") } }, onViewPlan: { selectedTab = .plan },
+                            onRequestChanges: { selectedTab = .chat })
+        case .chat:
+            TaskChatView(task: task, userInitial: String(store.displayName(fallbackEmail: session.user?.email).prefix(1)).uppercased(), scrolls: false) { await load() }
+        case .plan: TaskPlanView(task: task, canApprove: canApprove, approving: isActing, scrolls: false) { Task { await run("approve") } }
+        case .code: TaskCodeView(task: task, scrolls: false)
+        case .review: TaskReviewView(task: task, scrolls: false)
+        case .steps: TaskStepsView(task: task, scrolls: false)
+        case .artifacts: TaskArtifactsView(artifacts: task.artifacts, scrolls: false)
+        }
+    }
+
     // MARK: Actions
 
     private func load() async {
@@ -386,145 +409,151 @@ private struct TaskSummaryView: View {
     let task: TaskDetail
     let canApprove: Bool
     let approving: Bool
+    var scrolls = true
     let onApprove: () -> Void
     let onViewPlan: () -> Void
     let onRequestChanges: () -> Void
 
     var body: some View {
+        Group {
+            if scrolls { ScrollView { content } }
+            else { content }
+        }
+    }
+
+    private var content: some View {
         let step = task.currentStep(store.workflows)
         let agentActive = task.isAgentActive(store.workflows)
-        ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                if agentActive {
-                    HStack(alignment: .top, spacing: 12) {
-                        PulsingDot(color: Theme.amber, pulses: true, size: 8).padding(.top, 7)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Agent is working").font(Theme.bodyMedium).foregroundStyle(Color(hex: 0xFDE68A, opacity: 0.85))
-                            Text(task.state == "troubleshoot" ? "The troubleshooting agent is diagnosing what went wrong."
-                                 : step.map { "\($0.label) is running on your worker (\(StateStyle.for(task.state, step: $0).label))." } ?? "An agent is running on your worker.")
-                                .font(Theme.secondaryBody).foregroundStyle(Theme.mutedForeground)
-                        }
-                        Spacer(minLength: 0)
+        return VStack(alignment: .leading, spacing: 22) {
+            if agentActive {
+                HStack(alignment: .top, spacing: 12) {
+                    PulsingDot(color: Theme.amber, pulses: true, size: 8).padding(.top, 7)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Agent is working").font(Theme.bodyMedium).foregroundStyle(Color(hex: 0xFDE68A, opacity: 0.85))
+                        Text(task.state == "troubleshoot" ? "The troubleshooting agent is diagnosing what went wrong."
+                             : step.map { "\($0.label) is running on your worker (\(StateStyle.for(task.state, step: $0).label))." } ?? "An agent is running on your worker.")
+                            .font(Theme.secondaryBody).foregroundStyle(Theme.mutedForeground)
                     }
-                    .padding(16)
-                    .surface(Theme.amber.opacity(0.03), radius: Theme.Radius.row, border: Theme.amber.opacity(0.13))
+                    Spacer(minLength: 0)
                 }
-                if !agentActive, let step, step.type == "human", task.state != "todo" {
-                    HStack(spacing: 16) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Waiting for you").font(Theme.bodyMedium).foregroundStyle(Theme.foreground)
-                            Text("\(step.label): use the action buttons above, or send chat feedback to request changes.")
-                                .font(Theme.secondaryBody).foregroundStyle(Theme.mutedForeground)
-                        }
-                        Spacer(minLength: 0)
-                        if task.chatTriggersFeedback(store.workflows) {
-                            Button("Request changes", action: onRequestChanges).buttonStyle(.sindral(.subtle))
-                        }
+                .padding(16)
+                .surface(Theme.amber.opacity(0.03), radius: Theme.Radius.row, border: Theme.amber.opacity(0.13))
+            }
+            if !agentActive, let step, step.type == "human", task.state != "todo" {
+                HStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Waiting for you").font(Theme.bodyMedium).foregroundStyle(Theme.foreground)
+                        Text("\(step.label): use the action buttons above, or send chat feedback to request changes.")
+                            .font(Theme.secondaryBody).foregroundStyle(Theme.mutedForeground)
                     }
-                    .padding(.horizontal, 16).padding(.vertical, 14)
-                    .surface(Theme.secondary)
-                }
-                if task.state == "todo" {
-                    Text("This task is ready to start. Use the action button above to hand it to the first agent.")
-                        .font(Theme.secondaryBody).foregroundStyle(Theme.secondaryForeground)
-                        .padding(16).frame(maxWidth: .infinity, alignment: .leading).surface(Theme.secondary)
-                }
-
-                section("Description") {
-                    if task.description.isEmpty { Text("No description.").italic().font(Theme.body).foregroundStyle(Theme.mutedForeground) }
-                    else { MarkdownText(source: task.description) }
-                }
-
-                if let project = task.projectId.flatMap({ id in store.projects.first { $0.id == id } }) {
-                    section("Project") {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(project.name).font(Theme.bodyMedium).foregroundStyle(Theme.foreground)
-                            if !project.description.isEmpty {
-                                Text(project.description).font(Theme.secondaryBody).foregroundStyle(Theme.mutedForeground)
-                            }
-                        }
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .surface(Theme.secondary, radius: Theme.Radius.row)
+                    Spacer(minLength: 0)
+                    if task.chatTriggersFeedback(store.workflows) {
+                        Button("Request changes", action: onRequestChanges).buttonStyle(.sindral(.subtle))
                     }
                 }
+                .padding(.horizontal, 16).padding(.vertical, 14)
+                .surface(Theme.secondary)
+            }
+            if task.state == "todo" {
+                Text("This task is ready to start. Use the action button above to hand it to the first agent.")
+                    .font(Theme.secondaryBody).foregroundStyle(Theme.secondaryForeground)
+                    .padding(16).frame(maxWidth: .infinity, alignment: .leading).surface(Theme.secondary)
+            }
 
-                section("Task contract") {
-                    if horizontalSizeClass == .regular {
-                        RatioColumns(ratios: [1, 1], spacing: 12, equalHeights: true) { contractBox("Outcome", task.outcome); contractBox("Acceptance criteria", task.acceptanceCriteria) }
-                    } else {
-                        VStack(spacing: 12) { contractBox("Outcome", task.outcome); contractBox("Acceptance criteria", task.acceptanceCriteria) }
-                    }
-                }
+            section("Description") {
+                if task.description.isEmpty { Text("No description.").italic().font(Theme.body).foregroundStyle(Theme.mutedForeground) }
+                else { MarkdownText(source: task.description) }
+            }
 
-                if !task.repos.isEmpty {
-                    section("Repositories") {
-                        FlowLayout(spacing: 6, lineSpacing: 6) {
-                            ForEach(task.repos, id: \.self) { repo in
-                                Text(repo).font(Theme.mono(13)).foregroundStyle(Theme.secondaryForeground)
-                                    .padding(.horizontal, 10).frame(height: 32)
-                                    .surface(Theme.secondary, radius: 8)
-                            }
+            if let project = task.projectId.flatMap({ id in store.projects.first { $0.id == id } }) {
+                section("Project") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(project.name).font(Theme.bodyMedium).foregroundStyle(Theme.foreground)
+                        if !project.description.isEmpty {
+                            Text(project.description).font(Theme.secondaryBody).foregroundStyle(Theme.mutedForeground)
                         }
                     }
-                }
-
-                if let plan = task.plan, !plan.isEmpty {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            SectionLabel(text: "Plan at a glance")
-                            Spacer()
-                            Button("View full plan →", action: onViewPlan).font(Theme.font(14)).foregroundStyle(Theme.accent).frame(minHeight: 44)
-                        }
-                        let overview = PlanOverview(plan)
-                        contractBox("Summary", overview.summary, empty: "No summary section.")
-                        contractBox("Assumptions", overview.assumptions, empty: "No assumptions section.")
-                        if canApprove {
-                            HStack { Spacer(); Button("Approve Plan", action: onApprove).buttonStyle(.sindral(.success)).disabled(approving) }
-                        }
-                    }
-                }
-
-                if !pullRequests.isEmpty {
-                    section("Pull requests") {
-                        VStack(spacing: 8) {
-                            ForEach(pullRequests, id: \.url) { pr in
-                                HStack(spacing: 12) {
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(pr.repository).font(Theme.mono(13)).foregroundStyle(Theme.secondaryForeground).lineLimit(1)
-                                        if !pr.branch.isEmpty {
-                                            Text(pr.baseBranch.isEmpty ? pr.branch : "\(pr.branch) → \(pr.baseBranch)").font(Theme.mono(12)).foregroundStyle(Theme.mutedForeground).lineLimit(1)
-                                        }
-                                    }
-                                    Spacer(minLength: 8)
-                                    Text(pr.status.uppercased()).font(Theme.mono(11)).foregroundStyle(Theme.mutedForeground)
-                                    if let url = URL(string: pr.url), url.scheme == "https" {
-                                        Link(destination: url) { Text("\(pr.number.map { "#\($0)" } ?? "PR") ↗").font(Theme.mono(13)).foregroundStyle(Theme.accent) }
-                                            .frame(minHeight: 44)
-                                    }
-                                }
-                                .padding(.horizontal, 14).frame(minHeight: 56)
-                                .surface(Theme.input)
-                            }
-                        }
-                    }
-                }
-
-                if task.state == "failure" {
-                    stateCard(title: "Task failed", titleColor: Color(hex: 0xFCA5A5, opacity: 0.85), fill: Color(hex: 0xF87171, opacity: 0.03), border: Color(hex: 0xF87171, opacity: 0.13),
-                              message: "The agent ran into an error it couldn't resolve. Use the chat to provide guidance, retry the step, or run the troubleshoot agent.", detail: task.lastError)
-                }
-                if task.state == "done" {
-                    stateCard(title: "Task complete", titleColor: Color(hex: 0x6EE7B7, opacity: 0.85), fill: Theme.emerald.opacity(0.03), border: Theme.emerald.opacity(0.13), message: "All work has been accepted.")
-                }
-                if task.state == "wont-do" {
-                    stateCard(title: "Task closed", titleColor: Theme.secondaryForeground, fill: Theme.secondary, border: Theme.border, message: "This task was marked as won't do.")
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .surface(Theme.secondary, radius: Theme.Radius.row)
                 }
             }
-            .padding(24)
-            .frame(maxWidth: 980, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
+
+            section("Task contract") {
+                if horizontalSizeClass == .regular {
+                    RatioColumns(ratios: [1, 1], spacing: 12, equalHeights: true) { contractBox("Outcome", task.outcome); contractBox("Acceptance criteria", task.acceptanceCriteria) }
+                } else {
+                    VStack(spacing: 12) { contractBox("Outcome", task.outcome); contractBox("Acceptance criteria", task.acceptanceCriteria) }
+                }
+            }
+
+            if !task.repos.isEmpty {
+                section("Repositories") {
+                    FlowLayout(spacing: 6, lineSpacing: 6) {
+                        ForEach(task.repos, id: \.self) { repo in
+                            Text(repo).font(Theme.mono(13)).foregroundStyle(Theme.secondaryForeground)
+                                .padding(.horizontal, 10).frame(height: 32)
+                                .surface(Theme.secondary, radius: 8)
+                        }
+                    }
+                }
+            }
+
+            if let plan = task.plan, !plan.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        SectionLabel(text: "Plan at a glance")
+                        Spacer()
+                        Button("View full plan →", action: onViewPlan).font(Theme.font(14)).foregroundStyle(Theme.accent).frame(minHeight: 44)
+                    }
+                    let overview = PlanOverview(plan)
+                    contractBox("Summary", overview.summary, empty: "No summary section.")
+                    contractBox("Assumptions", overview.assumptions, empty: "No assumptions section.")
+                    if canApprove {
+                        HStack { Spacer(); Button("Approve Plan", action: onApprove).buttonStyle(.sindral(.success)).disabled(approving) }
+                    }
+                }
+            }
+
+            if !pullRequests.isEmpty {
+                section("Pull requests") {
+                    VStack(spacing: 8) {
+                        ForEach(pullRequests, id: \.url) { pr in
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(pr.repository).font(Theme.mono(13)).foregroundStyle(Theme.secondaryForeground).lineLimit(1)
+                                    if !pr.branch.isEmpty {
+                                        Text(pr.baseBranch.isEmpty ? pr.branch : "\(pr.branch) → \(pr.baseBranch)").font(Theme.mono(12)).foregroundStyle(Theme.mutedForeground).lineLimit(1)
+                                    }
+                                }
+                                Spacer(minLength: 8)
+                                Text(pr.status.uppercased()).font(Theme.mono(11)).foregroundStyle(Theme.mutedForeground)
+                                if let url = URL(string: pr.url), url.scheme == "https" {
+                                    Link(destination: url) { Text("\(pr.number.map { "#\($0)" } ?? "PR") ↗").font(Theme.mono(13)).foregroundStyle(Theme.accent) }
+                                        .frame(minHeight: 44)
+                                }
+                            }
+                            .padding(.horizontal, 14).frame(minHeight: 56)
+                            .surface(Theme.input)
+                        }
+                    }
+                }
+            }
+
+            if task.state == "failure" {
+                stateCard(title: "Task failed", titleColor: Color(hex: 0xFCA5A5, opacity: 0.85), fill: Color(hex: 0xF87171, opacity: 0.03), border: Color(hex: 0xF87171, opacity: 0.13),
+                          message: "The agent ran into an error it couldn't resolve. Use the chat to provide guidance, retry the step, or run the troubleshoot agent.", detail: task.lastError)
+            }
+            if task.state == "done" {
+                stateCard(title: "Task complete", titleColor: Color(hex: 0x6EE7B7, opacity: 0.85), fill: Theme.emerald.opacity(0.03), border: Theme.emerald.opacity(0.13), message: "All work has been accepted.")
+            }
+            if task.state == "wont-do" {
+                stateCard(title: "Task closed", titleColor: Theme.secondaryForeground, fill: Theme.secondary, border: Theme.border, message: "This task was marked as won't do.")
+            }
         }
+        .padding(24)
+        .frame(maxWidth: 980, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private struct PRRow { let repository: String; let url: String; let number: Int?; let branch: String; let baseBranch: String; let status: String }
@@ -600,6 +629,7 @@ private struct TaskChatView: View {
     @Environment(AppStore.self) private var store
     let task: TaskDetail
     let userInitial: String
+    var scrolls = true
     let didSend: () async -> Void
     @State private var draft = ""
     @State private var sending = false
@@ -608,27 +638,34 @@ private struct TaskChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 18) {
-                        if task.messages.isEmpty {
-                            VStack(spacing: 8) {
-                                AgentAvatar()
-                                Text("No messages yet").font(Theme.body).foregroundStyle(Theme.secondaryForeground)
-                                Text("Send a message to guide the agent").font(Theme.secondaryBody).foregroundStyle(Theme.mutedForeground)
-                            }
-                            .padding(.top, 80)
-                        }
-                        ForEach(task.messages) { ChatMessageView(message: $0, userInitial: userInitial).id($0.id) }
-                    }
-                    .padding(.horizontal, 24).padding(.vertical, 20)
+            if scrolls {
+                ScrollViewReader { proxy in
+                    ScrollView { messages }
+                    .defaultScrollAnchor(.bottom)
+                    .onChange(of: task.messages.count) { if let last = task.messages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } } }
+                    .accessibilityLabel("Conversation")
                 }
-                .defaultScrollAnchor(.bottom)
-                .onChange(of: task.messages.count) { if let last = task.messages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } } }
-                .accessibilityLabel("Conversation")
+            } else {
+                messages
+                    .accessibilityLabel("Conversation")
             }
             composer.hairline(.top)
         }
+    }
+
+    private var messages: some View {
+        LazyVStack(spacing: 18) {
+            if task.messages.isEmpty {
+                VStack(spacing: 8) {
+                    AgentAvatar()
+                    Text("No messages yet").font(Theme.body).foregroundStyle(Theme.secondaryForeground)
+                    Text("Send a message to guide the agent").font(Theme.secondaryBody).foregroundStyle(Theme.mutedForeground)
+                }
+                .padding(.top, 80)
+            }
+            ForEach(task.messages) { ChatMessageView(message: $0, userInitial: userInitial).id($0.id) }
+        }
+        .padding(.horizontal, 24).padding(.vertical, 20)
     }
 
     private var composer: some View {
@@ -735,40 +772,76 @@ private struct ChatMessageView: View {
 // MARK: - Other tabs
 
 private struct TaskPlanView: View {
-    let task: TaskDetail; let canApprove: Bool; let approving: Bool; let onApprove: () -> Void
+    let task: TaskDetail; let canApprove: Bool; let approving: Bool; var scrolls = true; let onApprove: () -> Void
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                if canApprove { HStack { Spacer(); Button("Approve Plan", action: onApprove).buttonStyle(.sindral(.success)).disabled(approving) } }
-                if let plan = task.plan, !plan.isEmpty { MarkdownText(source: plan) }
-                else { EmptyPane(title: "No plan yet", systemImage: "doc.text", message: "The planning agent writes the plan here.").padding(.top, 60) }
-            }
-            .padding(24).frame(maxWidth: 980, alignment: .leading)
+        Group {
+            if scrolls { ScrollView { content } }
+            else { content }
         }
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if canApprove { HStack { Spacer(); Button("Approve Plan", action: onApprove).buttonStyle(.sindral(.success)).disabled(approving) } }
+            if let plan = task.plan, !plan.isEmpty { MarkdownText(source: plan) }
+            else { EmptyPane(title: "No plan yet", systemImage: "doc.text", message: "The planning agent writes the plan here.").padding(.top, 60) }
+        }
+        .padding(24).frame(maxWidth: 980, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 private struct TaskCodeView: View {
     @Environment(APIClient.self) private var api
     let task: TaskDetail
+    var scrolls = true
     @State private var files: [DiffFile] = []; @State private var repository: String?; @State private var error: Error?; @State private var loading = false
     var body: some View {
-        List {
-            if task.pullRequests.count > 1 { Picker("Repository", selection: $repository) { Text("First PR").tag(String?.none); ForEach(task.pullRequests) { Text($0.repository).tag(Optional($0.repository)) } } }
-            ForEach(task.pullRequests) { pr in if let url = URL(string: pr.url) { Link(destination: url) { Label("#\(pr.number) · \(pr.repository)", systemImage: "arrow.up.right.square").foregroundStyle(Theme.accent) } } }
-            if loading { ProgressView() }
-            if let error { Text(error.localizedDescription).foregroundStyle(Theme.dangerText) }
-            ForEach(files) { file in DisclosureGroup { if let patch = file.patch { ScrollView(.horizontal) { Text(patch).font(Theme.mono(12)).textSelection(.enabled) } } else { Text("Patch unavailable").foregroundStyle(Theme.mutedForeground) } } label: { VStack(alignment: .leading) { Text(file.filename).font(Theme.mono(13)); Text("+\(file.additions) −\(file.deletions) · \(file.status)").font(Theme.font(12)).foregroundStyle(Theme.mutedForeground) } } }
+        Group {
+            if scrolls {
+                list
+                    .overlay { if files.isEmpty && !loading && error == nil && task.pullRequests.isEmpty { EmptyPane(title: "No code changes yet", systemImage: "chevron.left.forwardslash.chevron.right", message: "The Review Slicer opens the PR after implementation finishes.") } }
+            } else {
+                compactContent
+            }
         }
-        .themedList()
-        .overlay { if files.isEmpty && !loading && error == nil && task.pullRequests.isEmpty { EmptyPane(title: "No code changes yet", systemImage: "chevron.left.forwardslash.chevron.right", message: "The Review Slicer opens the PR after implementation finishes.") } }
         .task(id: repository) { await load() }
     }
+
+    private var list: some View {
+        List {
+            rows
+        }
+        .themedList()
+    }
+
+    private var compactContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if files.isEmpty && !loading && error == nil && task.pullRequests.isEmpty {
+                EmptyPane(title: "No code changes yet", systemImage: "chevron.left.forwardslash.chevron.right", message: "The Review Slicer opens the PR after implementation finishes.")
+                    .padding(.top, 60)
+            } else {
+                rows
+            }
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder private var rows: some View {
+        if task.pullRequests.count > 1 { Picker("Repository", selection: $repository) { Text("First PR").tag(String?.none); ForEach(task.pullRequests) { Text($0.repository).tag(Optional($0.repository)) } } }
+        ForEach(task.pullRequests) { pr in if let url = URL(string: pr.url) { Link(destination: url) { Label("#\(pr.number) · \(pr.repository)", systemImage: "arrow.up.right.square").foregroundStyle(Theme.accent) } } }
+        if loading { ProgressView() }
+        if let error { Text(error.localizedDescription).foregroundStyle(Theme.dangerText) }
+        ForEach(files) { file in DisclosureGroup { if let patch = file.patch { ScrollView(.horizontal) { Text(patch).font(Theme.mono(12)).textSelection(.enabled) } } else { Text("Patch unavailable").foregroundStyle(Theme.mutedForeground) } } label: { VStack(alignment: .leading) { Text(file.filename).font(Theme.mono(13)); Text("+\(file.additions) −\(file.deletions) · \(file.status)").font(Theme.font(12)).foregroundStyle(Theme.mutedForeground) } } }
+    }
+
     private func load() async { loading = true; defer { loading = false }; do { files = try await api.diff(taskId: task.id, repository: repository); error = nil } catch { self.error = error } }
 }
 
 private struct TaskReviewView: View {
     let task: TaskDetail
+    var scrolls = true
     @State private var selectedID: String?
 
     var body: some View {
@@ -776,11 +849,14 @@ private struct TaskReviewView: View {
         Group {
             if docs.isEmpty {
                 EmptyPane(title: "No automated review yet", systemImage: "doc.text.magnifyingglass", message: "Commit guide, diff explanation, and adversarial review will appear here after review completes.")
-            } else {
+                    .padding(.top, scrolls ? 0 : 60)
+            } else if scrolls {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 0) { sidebar(docs); document(docs) }
                     VStack(spacing: 0) { compactPicker(docs); document(docs) }
                 }
+            } else {
+                VStack(spacing: 0) { compactPicker(docs); documentContent(docs) }
             }
         }
         .onAppear { selectFirstIfNeeded(docs) }
@@ -836,39 +912,41 @@ private struct TaskReviewView: View {
     }
 
     private func document(_ docs: [ReviewDocument]) -> some View {
+        ScrollView { documentContent(docs) }
+    }
+
+    private func documentContent(_ docs: [ReviewDocument]) -> some View {
         let selected = docs.first { $0.id == selectedID } ?? docs.first
-        return ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                if let selected {
-                    VStack(alignment: .leading, spacing: 6) {
-                        SectionLabel(text: selected.label)
-                        HStack(spacing: 10) {
-                            Text(Formatters.day(selected.artifact.createdAt) + " · " + Formatters.time(selected.artifact.createdAt))
-                            Text(ByteCountFormatter.string(fromByteCount: Int64(selected.artifact.byteSize), countStyle: .file))
-                        }
-                        .font(Theme.mono(11)).foregroundStyle(Theme.mutedForeground)
+        return VStack(alignment: .leading, spacing: 16) {
+            if let selected {
+                VStack(alignment: .leading, spacing: 6) {
+                    SectionLabel(text: selected.label)
+                    HStack(spacing: 10) {
+                        Text(Formatters.day(selected.artifact.createdAt) + " · " + Formatters.time(selected.artifact.createdAt))
+                        Text(ByteCountFormatter.string(fromByteCount: Int64(selected.artifact.byteSize), countStyle: .file))
                     }
-                    if let content = selected.content {
-                        MarkdownText(source: content)
-                            .padding(16)
-                            .surface(Theme.muted, radius: Theme.Radius.row)
-                    } else {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("This review is stored securely and is not loaded into the page.")
-                                .font(Theme.secondaryBody).foregroundStyle(Theme.mutedForeground)
-                            if let link = selected.artifact.downloadUrl.flatMap(URL.init(string:)) {
-                                Link(destination: link) { Label("Download review", systemImage: "arrow.down.doc").foregroundStyle(Theme.accent) }
-                            }
-                        }
+                    .font(Theme.mono(11)).foregroundStyle(Theme.mutedForeground)
+                }
+                if let content = selected.content {
+                    MarkdownText(source: content)
                         .padding(16)
                         .surface(Theme.muted, radius: Theme.Radius.row)
+                } else {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("This review is stored securely and is not loaded into the page.")
+                            .font(Theme.secondaryBody).foregroundStyle(Theme.mutedForeground)
+                        if let link = selected.artifact.downloadUrl.flatMap(URL.init(string:)) {
+                            Link(destination: link) { Label("Download review", systemImage: "arrow.down.doc").foregroundStyle(Theme.accent) }
+                        }
                     }
+                    .padding(16)
+                    .surface(Theme.muted, radius: Theme.Radius.row)
                 }
             }
-            .padding(24)
-            .frame(maxWidth: 980, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(24)
+        .frame(maxWidth: 980, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func selectFirstIfNeeded(_ docs: [ReviewDocument]) {
@@ -917,34 +995,98 @@ private struct TaskReviewView: View {
 
 private struct TaskStepsView: View {
     let task: TaskDetail
+    var scrolls = true
     var body: some View {
-        List(task.events.sorted { $0.createdAt > $1.createdAt }) { event in
-            VStack(alignment: .leading, spacing: 4) {
-                Text(event.type.replacingOccurrences(of: "-", with: " ").capitalized).font(Theme.bodyMedium)
-                if let from = event.fromState, let to = event.toState { Text("\(from) → \(to)").font(Theme.mono(12)).foregroundStyle(Theme.mutedForeground) }
-                Text(Formatters.day(event.createdAt) + " · " + Formatters.time(event.createdAt)).font(Theme.mono(11)).foregroundStyle(Theme.mutedForeground)
+        Group {
+            if scrolls {
+                list
+                    .overlay { if task.events.isEmpty { EmptyPane(title: "No steps yet", systemImage: "list.number") } }
+            } else {
+                compactContent
             }
-            .listRowBackground(Theme.card)
+        }
+    }
+
+    private var list: some View {
+        List(task.events.sorted { $0.createdAt > $1.createdAt }) { event in
+            eventRow(event)
         }
         .themedList()
-        .overlay { if task.events.isEmpty { EmptyPane(title: "No steps yet", systemImage: "list.number") } }
+    }
+
+    private var compactContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if task.events.isEmpty {
+                EmptyPane(title: "No steps yet", systemImage: "list.number")
+                    .padding(.top, 60)
+            } else {
+                ForEach(task.events.sorted { $0.createdAt > $1.createdAt }) { event in
+                    eventRow(event)
+                        .padding(14)
+                        .surface(Theme.card)
+                }
+            }
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func eventRow(_ event: TaskEvent) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(event.type.replacingOccurrences(of: "-", with: " ").capitalized).font(Theme.bodyMedium)
+            if let from = event.fromState, let to = event.toState { Text("\(from) → \(to)").font(Theme.mono(12)).foregroundStyle(Theme.mutedForeground) }
+            Text(Formatters.day(event.createdAt) + " · " + Formatters.time(event.createdAt)).font(Theme.mono(11)).foregroundStyle(Theme.mutedForeground)
+        }
+        .listRowBackground(Theme.card)
     }
 }
 
 private struct TaskArtifactsView: View {
     let artifacts: [Artifact]
+    var scrolls = true
     var body: some View {
-        List(artifacts) { artifact in
-            DisclosureGroup {
-                if let content = artifact.content { Text(content).font(Theme.mono(12)).textSelection(.enabled) }
-                if let link = artifact.downloadUrl.flatMap(URL.init(string:)) { Link("Download", destination: link) }
-            } label: {
-                Label { VStack(alignment: .leading) { Text(artifact.name); Text(ByteCountFormatter.string(fromByteCount: Int64(artifact.byteSize), countStyle: .file)).font(Theme.font(12)).foregroundStyle(Theme.mutedForeground) } } icon: { Image(systemName: "doc") }
+        Group {
+            if scrolls {
+                list
+                    .overlay { if artifacts.isEmpty { EmptyPane(title: "No artifacts", systemImage: "archivebox") } }
+            } else {
+                compactContent
             }
-            .listRowBackground(Theme.card)
+        }
+    }
+
+    private var list: some View {
+        List(artifacts) { artifact in
+            artifactRow(artifact)
         }
         .themedList()
-        .overlay { if artifacts.isEmpty { EmptyPane(title: "No artifacts", systemImage: "archivebox") } }
+    }
+
+    private var compactContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if artifacts.isEmpty {
+                EmptyPane(title: "No artifacts", systemImage: "archivebox")
+                    .padding(.top, 60)
+            } else {
+                ForEach(artifacts) { artifact in
+                    artifactRow(artifact)
+                        .padding(14)
+                        .surface(Theme.card)
+                }
+            }
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func artifactRow(_ artifact: Artifact) -> some View {
+        DisclosureGroup {
+            if let content = artifact.content { Text(content).font(Theme.mono(12)).textSelection(.enabled) }
+            if let link = artifact.downloadUrl.flatMap(URL.init(string:)) { Link("Download", destination: link) }
+        } label: {
+            Label { VStack(alignment: .leading) { Text(artifact.name); Text(ByteCountFormatter.string(fromByteCount: Int64(artifact.byteSize), countStyle: .file)).font(Theme.font(12)).foregroundStyle(Theme.mutedForeground) } } icon: { Image(systemName: "doc") }
+        }
+        .listRowBackground(Theme.card)
     }
 }
 
