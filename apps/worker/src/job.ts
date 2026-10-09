@@ -1,23 +1,24 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { OUTPUT_DIR_ENV, RESULT_FILE_ENV, type AgentJobPayload, type AgentResult, type GitHubFeedbackReference, type JobDispatch, type PrResult } from '@sindral/shared';
+import { OUTPUT_DIR_ENV, protocolInstructions, RESULT_FILE_ENV, type AgentJobPayload, type AgentResult, type GitHubFeedbackReference, type JobContext, type JobDispatch, type PrResult, type StepOutputKind, type WorkflowStep } from '@sindral/shared';
 import type { ApiClient } from './api.js';
 import { collectOutputArtifacts, mergeArtifacts } from './artifacts.js';
 import { runConflictResolution } from './conflict.js';
 import { workdirPaths, type PublishCheck, type WorkerConfig } from './config.js';
 import { buildAgentEnv, type EngineRegistry } from './engines/index.js';
+import type { EngineRunResult } from './engines/types.js';
 import { JobEventStream } from './events.js';
 import { gitAuth, gitIn } from './git.js';
 import { commitAndPush, ensurePr, ghRunner, type GhRunner } from './github.js';
 import type { Logger } from './logger.js';
-import { buildPrompt } from './prompt.js';
+import { buildPrompt, workspaceNote } from './prompt.js';
 import { runRebaseStack } from './rebase.js';
 import { runMergePullRequests } from './merge.js';
 import { run as runCommand, type RunResult, type run } from './proc.js';
 import { Redactor } from './redact.js';
 import { describeFailure, extractJsonCandidate, markdownPlanResult, parseRawResult, readResultFile, summaryOf, validateResult } from './result.js';
-import { assertPathContained, type GitFactory, type WorkspaceManager } from './workspace.js';
+import { assertPathContained, type GitFactory, type Workspace, type WorkspaceManager } from './workspace.js';
 
 export const SHUTDOWN_REASON = 'worker shutting down';
 export const JOB_CANCELLED_REASON = 'job cancelled';
@@ -194,7 +195,7 @@ async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx:
   let lineCount = 0;
   const ticker = setInterval(() => events.progress(`Still running ${engineName} (${lineCount} output lines so far)`), ctx.progressIntervalMs ?? PROGRESS_INTERVAL_MS);
   ticker.unref?.();
-  let run;
+  let run: EngineRunResult | null = null;
   try {
     run = await engine.run({
       cwd: workspace.cwd,
@@ -213,22 +214,57 @@ async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx:
   } finally {
     clearInterval(ticker);
   }
+  if (run === null) throw new Error(`Engine "${engineName}" did not return a run result`);
 
   if (run.missing) throw new Error(`Engine "${engineName}" could not be started (binary not found)`);
   if (run.cancelled || signal.aborted) throw new Error(String(signal.reason ?? SHUTDOWN_REASON));
   if (run.timedOut) throw new Error(describeFailure(`timed out after ${Math.round(config.jobTimeoutMs / 60_000)} minutes`, run.tail, ctx.redactor));
 
-  const exitNote = run.exitCode === 0 ? '' : ` (${engineName} exited with code ${run.exitCode ?? 'unknown'})`;
+  const exitNote = (r: EngineRunResult) => (r.exitCode === 0 ? '' : ` (${engineName} exited with code ${r.exitCode ?? 'unknown'})`);
   let resultText = await readResultFile(resultFile);
   if (resultText === null) {
     // Read-only steps cannot write files; accept the JSON from the final message instead.
     resultText = extractJsonCandidate(run.finalText);
     if (resultText !== null) write('result file missing; using JSON from the final agent message');
   }
-  const fallbackPlan = resultText === null && output === 'plan' ? markdownPlanResult(run.finalText) : null;
+  let fallbackPlan = resultText === null && output === 'plan' ? markdownPlanResult(run.finalText) : null;
   if (fallbackPlan) write('result file missing; using Markdown from the final agent message as the plan');
-  const parsed = fallbackPlan ? { ok: true as const, value: fallbackPlan } : parseRawResult(resultText, output);
-  if (!parsed.ok) throw new Error(describeFailure(`${parsed.reason}${exitNote}`, run.tail, ctx.redactor));
+  let parsed = fallbackPlan ? { ok: true as const, value: fallbackPlan } : parseRawResult(resultText, output);
+  if (!parsed.ok) {
+    const reason = parsed.reason;
+    write(`result file unusable (${reason}); running one recovery pass`);
+    events.progress(`Recovering result for step "${step.label}"`);
+    await fsp.rm(resultFile, { force: true });
+    const recovery = await engine.run({
+      cwd: workspace.cwd,
+      prompt: buildResultRecoveryPrompt({ step, output, context: payload.context, resultFile, outputDir, workspace, reason }),
+      step,
+      env,
+      timeoutMs: config.jobTimeoutMs,
+      signal,
+      writableDirs: [paths.results, outputDir],
+      onOutput: (line) => {
+        lineCount++;
+        events.line(line);
+        write(line);
+      },
+    });
+    if (recovery.missing) throw new Error(`Engine "${engineName}" could not be started (binary not found)`);
+    if (recovery.cancelled || signal.aborted) throw new Error(String(signal.reason ?? SHUTDOWN_REASON));
+    if (recovery.timedOut) throw new Error(describeFailure(`result recovery timed out after ${Math.round(config.jobTimeoutMs / 60_000)} minutes`, recovery.tail, ctx.redactor));
+    run = recovery;
+    resultText = await readResultFile(resultFile);
+    if (resultText === null) {
+      resultText = extractJsonCandidate(recovery.finalText);
+      if (resultText !== null) write('result recovery did not write the file; using JSON from the recovery final message');
+    } else {
+      write('result recovery wrote the missing result file');
+    }
+    fallbackPlan = resultText === null && output === 'plan' ? markdownPlanResult(recovery.finalText) : null;
+    if (fallbackPlan) write('result recovery returned Markdown in the final message as the plan');
+    parsed = fallbackPlan ? { ok: true as const, value: fallbackPlan } : parseRawResult(resultText, output);
+  }
+  if (!parsed.ok) throw new Error(describeFailure(`${parsed.reason}${exitNote(run)}`, run.tail, ctx.redactor));
   const raw = parsed.value;
 
   let candidate: Record<string, unknown> = raw;
@@ -263,6 +299,38 @@ async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx:
   const validated = validateResult(candidate);
   if (!validated.ok) throw new Error(describeFailure(`${validated.reason}${exitNote}`, run.tail, ctx.redactor));
   return validated.value;
+}
+
+function buildResultRecoveryPrompt(input: {
+  step: WorkflowStep;
+  output: StepOutputKind;
+  context: Partial<JobContext>;
+  resultFile: string;
+  outputDir: string;
+  workspace: Workspace;
+  reason: string;
+}): string {
+  const context = input.context;
+  const lines = [
+    `The previous run for step "${input.step.label}" (${input.step.id}) finished, but Sindral could not parse the required result file.`,
+    `Failure reason: ${input.reason}`,
+    '',
+    'Your only job is to recover the machine-readable step result.',
+    'Do not modify repository files, create commits, rewrite branches, push, or open pull requests.',
+    'Inspect the workspace, git history, and task context only as needed to summarize the work that already happened.',
+    '',
+    'Task context:',
+    `- Task key: ${context.task_key ?? ''}`,
+    `- Title: ${context.task_title ?? ''}`,
+    `- Description: ${context.task_description ?? ''}`,
+    `- Required outcome: ${context.task_outcome ?? ''}`,
+    `- Acceptance criteria: ${context.acceptance_criteria ?? ''}`,
+    `- Feedback being addressed: ${context.feedback ?? ''}`,
+    '',
+    protocolInstructions(input.output, input.resultFile),
+    workspaceNote(input.workspace, input.outputDir, false),
+  ];
+  return lines.join('\n');
 }
 
 interface PublishOptions extends AgentJobContext {

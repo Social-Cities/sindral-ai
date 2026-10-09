@@ -168,6 +168,24 @@ describe('runJob', () => {
     expect(api.failed).toHaveLength(0);
   });
 
+  it('runs one recovery pass when the result file is missing and the final message is not structured', async () => {
+    let calls = 0;
+    const engine = fakeEngine(async (opts) => {
+      calls++;
+      if (calls === 1) return { finalText: 'Implemented the change.' };
+      expect(opts.prompt).toContain('Your only job is to recover the machine-readable step result.');
+      expect(opts.prompt).toContain('Do not modify repository files');
+      await fs.writeFile(opts.env['SINDRAL_RESULT_FILE']!, JSON.stringify({ summary: 'Recovered implementation result.' }));
+      return { tail: ['recovered result'] };
+    });
+    const d = dispatch({ payload: agentPayload({ repos: [], step: step({ output: 'implementation' }) }) });
+    const { deps: jobDeps, api } = deps(engine, docWorkspace());
+    const outcome = await runJob(d, jobDeps, new AbortController().signal);
+    expect(outcome).toEqual({ status: 'completed', result: { kind: 'implementation', summary: 'Recovered implementation result.' } });
+    expect(engine.runs).toHaveLength(2);
+    expect(api.failed).toHaveLength(0);
+  });
+
   it('fails when the result does not match the schema', async () => {
     const engine = fakeEngine(async (opts) => {
       await fs.writeFile(opts.env['SINDRAL_RESULT_FILE']!, JSON.stringify({ summary: 's', verdict: 'MAYBE' }));
