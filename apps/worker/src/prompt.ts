@@ -29,7 +29,7 @@ export function workspaceNote(workspace: Workspace, outputDir: string, canModify
   lines.push('Hard rule: never create, edit, rename, or delete GitHub Actions workflow files under `.github/workflows/`; omit those changes from your final work.');
   if (canModifyRepository) {
     lines.push(
-      'Commit your work on the current branch with clear messages. Do NOT push, do NOT switch branches and do NOT open a pull request; the worker does that after you finish.',
+      'Commit your work on the current branch with clear messages when possible. If local hooks or commit policy block you, leave the changes staged or unstaged and still finish; the worker commits through its publish path. Do NOT push, do NOT switch branches and do NOT open a pull request; the worker does that after you finish.',
       `Non-code deliverables (reports, notes) go into \`${outputDir}\` (\`$${OUTPUT_DIR_ENV}\`).`,
     );
   } else {

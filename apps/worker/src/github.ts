@@ -112,7 +112,7 @@ function fail(what: string, result: RunResult): never {
 /** Commits any uncommitted work (agents are asked to commit, but do not always) and pushes the branch. */
 export async function commitAndPush(
   git: GitRunner,
-  opts: { taskKey: string; summary: string; branch: string; baseBranch: string },
+  opts: { taskKey: string; summary: string; branch: string; baseBranch: string; beforePush?: () => Promise<void>; onRecovery?: (message: string) => void; sleep?: (ms: number) => Promise<void> },
 ): Promise<{ committed: boolean; omittedWorkflowPaths: string[] }> {
   const omittedWorkflowPaths: string[] = [];
   let status = await git(['status', '--porcelain']);
@@ -127,8 +127,15 @@ export async function commitAndPush(
   await git(['fetch', '--prune', 'origin']);
   const changed = await git(['diff', '--name-status', `origin/${opts.baseBranch}...HEAD`]);
   const committedWorkflowPaths = workflowPathsFromNameStatus(changed.stdout);
-  omittedWorkflowPaths.push(...(await omitCommittedWorkflowChanges(git, `origin/${opts.baseBranch}`, committedWorkflowPaths)));
-  if (committedWorkflowPaths.length > 0) {
+  const omittedCommittedWorkflowPaths = await omitCommittedWorkflowChanges(git, {
+    baseRef: `origin/${opts.baseBranch}`,
+    paths: committedWorkflowPaths,
+    taskKey: opts.taskKey,
+    summary: opts.summary,
+    onRecovery: opts.onRecovery,
+  });
+  omittedWorkflowPaths.push(...omittedCommittedWorkflowPaths);
+  if (omittedCommittedWorkflowPaths.length > 0) {
     const cleanupStatus = await git(['status', '--porcelain']);
     if (cleanupStatus.stdout.trim()) {
       await git(['add', '-A']);
@@ -141,7 +148,7 @@ export async function commitAndPush(
         '--no-verify',
         `--author=${COMMIT_AUTHOR}`,
         '-m',
-        `${opts.taskKey}: omit GitHub workflow changes`,
+        commitMessage(opts.taskKey, opts.summary),
       ]);
       committed = true;
     }
@@ -155,7 +162,13 @@ export async function commitAndPush(
     await git.try(['rebase', '--abort']);
     fail(`rebase onto ${opts.baseBranch}`, rebase);
   }
-  await git(['push', '--force-with-lease', '-u', 'origin', `${opts.branch}:${opts.branch}`]);
+  await opts.beforePush?.();
+  await pushWithRecovery(git, {
+    branch: opts.branch,
+    baseBranch: opts.baseBranch,
+    onRecovery: opts.onRecovery,
+    sleep: opts.sleep,
+  });
   return { committed, omittedWorkflowPaths: [...new Set(omittedWorkflowPaths)].sort() };
 }
 
@@ -167,18 +180,80 @@ async function omitUncommittedWorkflowChanges(git: GitRunner, paths: readonly st
   return workflowPaths;
 }
 
-async function omitCommittedWorkflowChanges(git: GitRunner, baseRef: string, paths: readonly string[]): Promise<string[]> {
-  const workflowPaths = uniqueWorkflowPaths(paths);
+async function omitCommittedWorkflowChanges(
+  git: GitRunner,
+  opts: { baseRef: string; paths: readonly string[]; taskKey: string; summary: string; onRecovery?: (message: string) => void },
+): Promise<string[]> {
+  const workflowPaths = uniqueWorkflowPaths(opts.paths);
   for (const workflowPath of workflowPaths) {
-    const baseHasPath = await git.try(['cat-file', '-e', `${baseRef}:${workflowPath}`]);
+    const baseHasPath = await git.try(['cat-file', '-e', `${opts.baseRef}:${workflowPath}`]);
     if (baseHasPath.failed || baseHasPath.exitCode !== 0) {
       await git.try(['rm', '-f', '--', workflowPath]);
     } else {
-      await git(['restore', '--source', baseRef, '--staged', '--worktree', '--', workflowPath]);
+      await git(['restore', '--source', opts.baseRef, '--staged', '--worktree', '--', workflowPath]);
     }
   }
   if (workflowPaths.length > 0) await git.try(['clean', '-fd', '--', GITHUB_WORKFLOWS_DIR]);
+  if (workflowPaths.length > 0) {
+    opts.onRecovery?.(`Omitting GitHub Actions workflow changes from ${workflowPaths.join(', ')} before publishing.`);
+    await git(['reset', '--soft', opts.baseRef]);
+    for (const workflowPath of workflowPaths) {
+      const baseHasPath = await git.try(['cat-file', '-e', `${opts.baseRef}:${workflowPath}`]);
+      if (baseHasPath.failed || baseHasPath.exitCode !== 0) {
+        await git.try(['rm', '-f', '--', workflowPath]);
+      } else {
+        await git(['restore', '--source', opts.baseRef, '--staged', '--worktree', '--', workflowPath]);
+      }
+    }
+    await git.try(['clean', '-fd', '--', GITHUB_WORKFLOWS_DIR]);
+  }
   return workflowPaths;
+}
+
+async function pushWithRecovery(
+  git: GitRunner,
+  opts: { branch: string; baseBranch: string; onRecovery?: (message: string) => void; sleep?: (ms: number) => Promise<void> },
+): Promise<void> {
+  const sleep = opts.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const pushed = await git.try(['push', '--force-with-lease', '-u', 'origin', `${opts.branch}:${opts.branch}`]);
+    if (!pushed.failed && pushed.exitCode === 0) return;
+    if (attempt >= 3 || isPermanentPushFailure(pushed)) fail('git push', pushed);
+    if (isLeaseFailure(pushed)) {
+      opts.onRecovery?.('Push was rejected because the remote branch moved; fetching, rebasing and retrying.');
+      await git(['fetch', '--prune', 'origin']);
+      const target = (await git.try(['rev-parse', '--verify', `origin/${opts.branch}`])).exitCode === 0 ? `origin/${opts.branch}` : `origin/${opts.baseBranch}`;
+      const rebase = await git.try(['-c', 'user.name=Sindral AI', '-c', 'user.email=sindral@users.noreply.github.com', 'rebase', target]);
+      if (rebase.failed || rebase.exitCode !== 0) {
+        await git.try(['rebase', '--abort']);
+        fail(`rebase onto ${target}`, rebase);
+      }
+      continue;
+    }
+    if (isTransientPushFailure(pushed)) {
+      const delay = attempt * 1_000;
+      opts.onRecovery?.(`Push failed transiently; retrying in ${Math.round(delay / 1000)}s.`);
+      await sleep(delay);
+      continue;
+    }
+    fail('git push', pushed);
+  }
+}
+
+function resultText(result: RunResult): string {
+  return `${result.stderr}\n${result.stdout}\n${result.message}`;
+}
+
+function isLeaseFailure(result: RunResult): boolean {
+  return /(stale info|fetch first|non-fast-forward|rejected|failed to push some refs|would clobber existing tag)/i.test(resultText(result));
+}
+
+function isTransientPushFailure(result: RunResult): boolean {
+  return /(timeout|timed out|connection reset|connection refused|network is unreachable|the remote end hung up|5\d\d|temporarily unavailable|try again)/i.test(resultText(result)) || result.timedOut;
+}
+
+function isPermanentPushFailure(result: RunResult): boolean {
+  return /(authentication failed|could not read username|permission denied|repository not found|resource not accessible|protected branch hook declined|cannot update workflow|refusing to allow an OAuth App)/i.test(resultText(result));
 }
 
 function workflowPathsFromNameStatus(stdout: string): string[] {

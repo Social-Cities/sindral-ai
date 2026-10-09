@@ -247,9 +247,10 @@ describe('commitAndPush', () => {
     await expect(commitAndPush(git.factory('/wt', { configArgs: [], secrets: [] }), {
       taskKey: 'ENG-1', summary: 'Did it', branch: 'b', baseBranch: 'main',
     })).resolves.toEqual({ committed: true, omittedWorkflowPaths: ['.github/workflows/release.yml'] });
-    expect(git.find('cat-file', '-e', 'origin/main:.github/workflows/release.yml')).toHaveLength(1);
-    expect(git.find('restore', '--source', 'origin/main', '--staged', '--worktree', '--', '.github/workflows/release.yml')).toHaveLength(1);
-    const commit = git.calls.find((c) => c.args.includes('commit') && c.args.includes('ENG-1: omit GitHub workflow changes'));
+    expect(git.find('cat-file', '-e', 'origin/main:.github/workflows/release.yml')).toHaveLength(2);
+    expect(git.find('restore', '--source', 'origin/main', '--staged', '--worktree', '--', '.github/workflows/release.yml')).toHaveLength(2);
+    expect(git.find('reset', '--soft', 'origin/main')).toHaveLength(1);
+    const commit = git.calls.find((c) => c.args.includes('commit') && c.args.includes('ENG-1: Did it'));
     expect(commit).toBeDefined();
     expect(git.find('push')).toHaveLength(1);
   });
@@ -262,5 +263,54 @@ describe('commitAndPush', () => {
     })).resolves.toEqual({ committed: false, omittedWorkflowPaths: ['.github/workflows/ci.yml'] });
     expect(git.find('restore', '--staged', '--worktree', '--', '.github/workflows/')).toHaveLength(1);
     expect(git.find('add', '-A')).toHaveLength(0);
+  });
+
+  it('runs a before-push hook before pushing', async () => {
+    const order: string[] = [];
+    const git = fakeGit((args) => {
+      if (args[0] === 'push') order.push('push');
+      return undefined;
+    });
+    await commitAndPush(git.factory('/wt', { configArgs: [], secrets: [] }), {
+      taskKey: 'ENG-1',
+      summary: 'Did it',
+      branch: 'b',
+      baseBranch: 'main',
+      beforePush: async () => {
+        order.push('check');
+      },
+    });
+    expect(order).toEqual(['check', 'push']);
+  });
+
+  it('rebases and retries when force-with-lease rejects the push', async () => {
+    let pushCalls = 0;
+    const recoveries: string[] = [];
+    const git = fakeGit((args) => {
+      if (args[0] === 'push') return pushCalls++ === 0 ? failed('! [rejected] b -> b (stale info)') : ok();
+      if (args[0] === 'rev-parse') return ok('abc');
+      return undefined;
+    });
+    await commitAndPush(git.factory('/wt', { configArgs: [], secrets: [] }), {
+      taskKey: 'ENG-1',
+      summary: 'Did it',
+      branch: 'b',
+      baseBranch: 'main',
+      onRecovery: (message) => recoveries.push(message),
+    });
+    expect(git.find('push')).toHaveLength(2);
+    expect(git.calls.filter((call) => call.args.includes('rebase') && call.args.includes('origin/b'))).toHaveLength(1);
+    expect(recoveries.join('\n')).toContain('remote branch moved');
+  });
+
+  it('does not retry permanent push failures', async () => {
+    const git = fakeGit((args) => (args[0] === 'push' ? failed('remote: Repository not found.') : undefined));
+    await expect(commitAndPush(git.factory('/wt', { configArgs: [], secrets: [] }), {
+      taskKey: 'ENG-1',
+      summary: 'Did it',
+      branch: 'b',
+      baseBranch: 'main',
+    })).rejects.toThrow(/git push failed.*Repository not found/);
+    expect(git.find('push')).toHaveLength(1);
   });
 });

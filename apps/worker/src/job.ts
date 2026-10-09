@@ -5,7 +5,7 @@ import { OUTPUT_DIR_ENV, RESULT_FILE_ENV, type AgentJobPayload, type AgentResult
 import type { ApiClient } from './api.js';
 import { collectOutputArtifacts, mergeArtifacts } from './artifacts.js';
 import { runConflictResolution } from './conflict.js';
-import { workdirPaths, type WorkerConfig } from './config.js';
+import { workdirPaths, type PublishCheck, type WorkerConfig } from './config.js';
 import { buildAgentEnv, type EngineRegistry } from './engines/index.js';
 import { JobEventStream } from './events.js';
 import { gitAuth, gitIn } from './git.js';
@@ -14,7 +14,7 @@ import type { Logger } from './logger.js';
 import { buildPrompt } from './prompt.js';
 import { runRebaseStack } from './rebase.js';
 import { runMergePullRequests } from './merge.js';
-import type { run } from './proc.js';
+import { run as runCommand, type RunResult, type run } from './proc.js';
 import { Redactor } from './redact.js';
 import { describeFailure, extractJsonCandidate, markdownPlanResult, parseRawResult, readResultFile, summaryOf, validateResult } from './result.js';
 import { assertPathContained, type GitFactory, type WorkspaceManager } from './workspace.js';
@@ -302,6 +302,22 @@ async function publishPr(opts: PublishOptions): Promise<Record<string, unknown>>
       summary: opts.summary,
       branch: repo.branch,
       baseBranch: repo.baseBranch,
+      beforePush: () => runPublishChecks({
+        checks: opts.config.publishChecks,
+        mode: opts.config.publishCheckMode,
+        timeoutMs: opts.config.publishCheckTimeoutMs,
+        cwd: repo.dir,
+        command: opts.command,
+        signal: opts.signal,
+        onProgress: (message) => {
+          opts.events.progress(message);
+          opts.write(`${repo.repo.full}: ${message}`);
+        },
+      }),
+      onRecovery: (message) => {
+        opts.events.progress(message);
+        opts.write(`${repo.repo.full}: ${message}`);
+      },
     });
     if (omittedWorkflowPaths.length > 0) {
       opts.write(`${repo.repo.full}: omitted GitHub Actions workflow changes from ${omittedWorkflowPaths.join(', ')}`);
@@ -343,6 +359,41 @@ async function publishPr(opts: PublishOptions): Promise<Record<string, unknown>>
   }
   if (!prUrl) throw new Error('no pull request was created');
   return { kind: 'pr', summary: opts.summary, prUrl, branch, pullRequests };
+}
+
+async function runPublishChecks(opts: {
+  checks: readonly PublishCheck[];
+  mode: WorkerConfig['publishCheckMode'];
+  timeoutMs: number;
+  cwd: string;
+  command?: typeof run;
+  signal: AbortSignal;
+  onProgress: (message: string) => void;
+}): Promise<void> {
+  if (opts.mode === 'off' || opts.checks.length === 0) return;
+  const command = opts.command ?? runCommand;
+  opts.onProgress(`Running ${opts.checks.length} publish check${opts.checks.length === 1 ? '' : 's'} (${opts.mode})`);
+  const failures: string[] = [];
+  for (const check of opts.checks) {
+    opts.onProgress(`Running publish check: ${[check.command, ...check.args].join(' ')}`);
+    const result = await command(check.command, check.args, { cwd: opts.cwd, signal: opts.signal, timeoutMs: opts.timeoutMs });
+    if (result.failed || result.exitCode !== 0) {
+      failures.push(formatCheckFailure(check, result));
+      opts.onProgress(`Publish check failed: ${check.command}`);
+      if (opts.mode === 'strict') break;
+    }
+  }
+  if (failures.length > 0 && opts.mode === 'strict') {
+    throw new Error(`Publish checks failed; fix these before publishing:\n\n${failures.join('\n\n')}`);
+  }
+  if (failures.length > 0) {
+    opts.onProgress(`Publish checks failed in advisory mode; publishing will continue.`);
+  }
+}
+
+function formatCheckFailure(check: PublishCheck, result: RunResult): string {
+  const output = (result.stderr.trim() || result.stdout.trim() || result.message).slice(0, 4_000);
+  return `$ ${[check.command, ...check.args].join(' ')}\nexit ${result.exitCode ?? result.code ?? '?'}${output ? `\n${output}` : ''}`;
 }
 
 function assertJobId(id: string): string {

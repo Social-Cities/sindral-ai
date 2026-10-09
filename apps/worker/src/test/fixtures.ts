@@ -20,6 +20,9 @@ export function testConfig(overrides: Partial<WorkerConfig> = {}): WorkerConfig 
     jobTimeoutMs: 60_000,
     retentionMs: 7 * 24 * 60 * 60_000,
     allowPatMerge: true,
+    publishChecks: [],
+    publishCheckMode: 'off',
+    publishCheckTimeoutMs: 30 * 60_000,
     logLevel: 'silent',
     ...overrides,
   };

@@ -20,6 +20,9 @@ describe('loadConfig', () => {
     expect(config.jobTimeoutMs).toBe(90 * 60_000);
     expect(config.retentionMs).toBe(7 * 24 * 60 * 60_000);
     expect(config.allowPatMerge).toBe(false);
+    expect(config.publishChecks).toEqual([]);
+    expect(config.publishCheckMode).toBe('off');
+    expect(config.publishCheckTimeoutMs).toBe(30 * 60_000);
     expect(config.logLevel).toBe('info');
   });
 
@@ -39,7 +42,7 @@ describe('loadConfig', () => {
 
   it('parses numeric and named settings', () => {
     const config = loadConfig(
-      { ...base, SINDRAL_CONCURRENCY: '4', SINDRAL_JOB_TIMEOUT_MINUTES: '15', SINDRAL_RETENTION_DAYS: '30', SINDRAL_WORKER_NAME: 'mac', LOG_LEVEL: 'debug', SINDRAL_CLAUDE_BIN: '/opt/claude', SINDRAL_EXTRA_PATH: '/opt/homebrew/bin:/usr/local/bin', SINDRAL_ALLOW_PAT_MERGE: 'true' },
+      { ...base, SINDRAL_CONCURRENCY: '4', SINDRAL_JOB_TIMEOUT_MINUTES: '15', SINDRAL_RETENTION_DAYS: '30', SINDRAL_WORKER_NAME: 'mac', LOG_LEVEL: 'debug', SINDRAL_CLAUDE_BIN: '/opt/claude', SINDRAL_EXTRA_PATH: '/opt/homebrew/bin:/usr/local/bin', SINDRAL_ALLOW_PAT_MERGE: 'true', SINDRAL_PUBLISH_CHECKS: 'pnpm lint; pnpm test -- --run', SINDRAL_PUBLISH_CHECK_MODE: 'strict', SINDRAL_PUBLISH_CHECK_TIMEOUT_MINUTES: '5' },
       opts,
     );
     expect(config.concurrency).toBe(4);
@@ -50,6 +53,17 @@ describe('loadConfig', () => {
     expect(config.claudeBin).toBe('/opt/claude');
     expect(config.extraPath).toBe('/opt/homebrew/bin:/usr/local/bin');
     expect(config.allowPatMerge).toBe(true);
+    expect(config.publishChecks).toEqual([
+      { command: 'pnpm', args: ['lint'] },
+      { command: 'pnpm', args: ['test', '--', '--run'] },
+    ]);
+    expect(config.publishCheckMode).toBe('strict');
+    expect(config.publishCheckTimeoutMs).toBe(5 * 60_000);
+  });
+
+  it('parses quoted publish checks', () => {
+    const config = loadConfig({ ...base, SINDRAL_PUBLISH_CHECKS: 'pnpm exec prettier --check "src/**/*.ts"' }, opts);
+    expect(config.publishChecks).toEqual([{ command: 'pnpm', args: ['exec', 'prettier', '--check', 'src/**/*.ts'] }]);
   });
 
   it('rejects a malformed worker key', () => {
@@ -63,6 +77,8 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...base, SINDRAL_CONCURRENCY: '9' }, opts)).toThrow(/SINDRAL_CONCURRENCY/);
     expect(() => loadConfig({ ...base, SINDRAL_CONCURRENCY: '0' }, opts)).toThrow(/SINDRAL_CONCURRENCY/);
     expect(() => loadConfig({ ...base, SINDRAL_RETENTION_DAYS: '-1' }, opts)).toThrow(/SINDRAL_RETENTION_DAYS/);
+    expect(() => loadConfig({ ...base, SINDRAL_PUBLISH_CHECK_MODE: 'blocking' }, opts)).toThrow(/SINDRAL_PUBLISH_CHECK_MODE/);
+    expect(() => loadConfig({ ...base, SINDRAL_PUBLISH_CHECKS: 'pnpm "lint' }, opts)).toThrow(/Unclosed quote/);
     expect(() => loadConfig({ ...base, LOG_LEVEL: 'loud' }, opts)).toThrow(/LOG_LEVEL/);
   });
 

@@ -8,7 +8,7 @@ import type { Engine, EngineRunOptions, EngineRunResult } from './engines/types.
 import type { GhRunner } from './github.js';
 import { runJob, type JobDeps } from './job.js';
 import { silentLogger } from './logger.js';
-import { agentPayload, dispatch, fakeGit, GH_TOKEN, ok, step, testConfig, WORKER_KEY } from './test/fixtures.js';
+import { agentPayload, dispatch, failed, fakeGit, GH_TOKEN, ok, step, testConfig, WORKER_KEY } from './test/fixtures.js';
 import type { Workspace, WorkspaceManager } from './workspace.js';
 
 type EngineScript = (opts: EngineRunOptions) => Promise<Partial<EngineRunResult>>;
@@ -259,6 +259,75 @@ describe('runJob', () => {
     expect(body).toContain('## Acceptance Criteria\n\n- Requests above the limit are rejected.');
     expect(body).toContain('## Testing\n\n- Ran the limiter tests.');
     expect(api.events.some((e) => e.type === 'message' && e.message.includes('pull/9'))).toBe(true);
+  });
+
+  it('runs configured publish checks before pushing', async () => {
+    const wt = path.join(workdir, 'worktrees', 'ENG-142', 'widgets');
+    const workspace: Workspace = {
+      taskKey: 'ENG-142',
+      cwd: wt,
+      repos: [{ repo: { owner: 'acme', name: 'widgets', full: 'acme/widgets' }, repoDir: '/base', dir: wt, branch: 'sindral/eng-142', baseBranch: 'main', resumed: false }],
+    };
+    const engine = fakeEngine(async (opts) => {
+      await fs.writeFile(opts.env['SINDRAL_RESULT_FILE']!, JSON.stringify({ summary: 'Implemented limiter.' }));
+      return {};
+    });
+    const order: string[] = [];
+    const git = fakeGit((args) => {
+      if (args[0] === 'push') order.push('push');
+      return undefined;
+    });
+    const gh: GhRunner = async (args) => {
+      if (args[1] === 'list') return ok('[]');
+      if (args[1] === 'create') return ok('https://github.com/acme/widgets/pull/9');
+      return ok();
+    };
+    const command = vi.fn(async () => {
+      order.push('check');
+      return ok();
+    });
+    const d = dispatch();
+    const { deps: jobDeps, api } = deps(engine, workspace, {
+      git: git.factory,
+      gh: () => gh,
+      command,
+      config: testConfig({ workdir, publishChecks: [{ command: 'pnpm', args: ['test'] }], publishCheckMode: 'strict' }),
+    });
+
+    const outcome = await runJob(d, jobDeps, new AbortController().signal);
+
+    expect(outcome.status).toBe('completed');
+    expect(command).toHaveBeenCalledWith('pnpm', ['test'], expect.objectContaining({ cwd: wt }));
+    expect(order).toEqual(['check', 'push']);
+    expect(api.failed).toHaveLength(0);
+  });
+
+  it('blocks strict publish check failures before pushing', async () => {
+    const wt = path.join(workdir, 'worktrees', 'ENG-142', 'widgets');
+    const workspace: Workspace = {
+      taskKey: 'ENG-142',
+      cwd: wt,
+      repos: [{ repo: { owner: 'acme', name: 'widgets', full: 'acme/widgets' }, repoDir: '/base', dir: wt, branch: 'sindral/eng-142', baseBranch: 'main', resumed: false }],
+    };
+    const engine = fakeEngine(async (opts) => {
+      await fs.writeFile(opts.env['SINDRAL_RESULT_FILE']!, JSON.stringify({ summary: 'Implemented limiter.' }));
+      return {};
+    });
+    const git = fakeGit();
+    const command = vi.fn(async () => failed('lint failed'));
+    const d = dispatch();
+    const { deps: jobDeps, api } = deps(engine, workspace, {
+      git: git.factory,
+      command,
+      config: testConfig({ workdir, publishChecks: [{ command: 'pnpm', args: ['lint'] }], publishCheckMode: 'strict' }),
+    });
+
+    const outcome = await runJob(d, jobDeps, new AbortController().signal);
+
+    expect(outcome.status).toBe('failed');
+    expect(api.failed[0]).toContain('Publish checks failed');
+    expect(api.failed[0]).toContain('lint failed');
+    expect(git.find('push')).toHaveLength(0);
   });
 
   it('reports "worker shutting down" when aborted', async () => {

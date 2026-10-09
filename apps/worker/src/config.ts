@@ -5,6 +5,7 @@ import { z } from 'zod';
 export const WORKER_KEY_RE = /^sk_sindral_[0-9a-f]{40}$/;
 
 const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const;
+const PUBLISH_CHECK_MODES = ['off', 'advisory', 'strict'] as const;
 
 const configSchema = z.object({
   SINDRAL_SERVER_URL: z
@@ -23,8 +24,16 @@ const configSchema = z.object({
   SINDRAL_JOB_TIMEOUT_MINUTES: z.coerce.number().int().min(1).max(24 * 60).default(90),
   SINDRAL_RETENTION_DAYS: z.coerce.number().int().min(0).max(3650).default(7),
   SINDRAL_ALLOW_PAT_MERGE: z.enum(['true', 'false']).default('false'),
+  SINDRAL_PUBLISH_CHECKS: z.string().trim().optional(),
+  SINDRAL_PUBLISH_CHECK_MODE: z.enum(PUBLISH_CHECK_MODES).default('off'),
+  SINDRAL_PUBLISH_CHECK_TIMEOUT_MINUTES: z.coerce.number().int().min(1).max(24 * 60).default(30),
   LOG_LEVEL: z.enum(LOG_LEVELS).default('info'),
 });
+
+export interface PublishCheck {
+  command: string;
+  args: string[];
+}
 
 export interface WorkerConfig {
   serverUrl: string;
@@ -39,6 +48,9 @@ export interface WorkerConfig {
   jobTimeoutMs: number;
   retentionMs: number;
   allowPatMerge: boolean;
+  publishChecks: PublishCheck[];
+  publishCheckMode: (typeof PUBLISH_CHECK_MODES)[number];
+  publishCheckTimeoutMs: number;
   logLevel: (typeof LOG_LEVELS)[number];
 }
 
@@ -90,8 +102,64 @@ export function loadConfig(
     jobTimeoutMs: c.SINDRAL_JOB_TIMEOUT_MINUTES * 60_000,
     retentionMs: c.SINDRAL_RETENTION_DAYS * 24 * 60 * 60_000,
     allowPatMerge: c.SINDRAL_ALLOW_PAT_MERGE === 'true',
+    publishChecks: parsePublishChecks(c.SINDRAL_PUBLISH_CHECKS ?? ''),
+    publishCheckMode: c.SINDRAL_PUBLISH_CHECK_MODE,
+    publishCheckTimeoutMs: c.SINDRAL_PUBLISH_CHECK_TIMEOUT_MINUTES * 60_000,
     logLevel: c.LOG_LEVEL,
   };
+}
+
+export function parsePublishChecks(value: string): PublishCheck[] {
+  return value
+    .split(/\r?\n|;/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const parts = splitCommandLine(line);
+      if (parts.length === 0) throw new ConfigError(`Invalid empty publish check: ${JSON.stringify(line)}`);
+      const [command, ...args] = parts;
+      if (!command) throw new ConfigError(`Invalid publish check: ${JSON.stringify(line)}`);
+      return { command, args };
+    });
+}
+
+function splitCommandLine(line: string): string[] {
+  const parts: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | null = null;
+  let escaped = false;
+  for (const ch of line) {
+    if (escaped) {
+      current += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (ch === quote) quote = null;
+      else current += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (current) {
+        parts.push(current);
+        current = '';
+      }
+      continue;
+    }
+    current += ch;
+  }
+  if (escaped) current += '\\';
+  if (quote) throw new ConfigError(`Unclosed quote in publish check: ${line}`);
+  if (current) parts.push(current);
+  return parts;
 }
 
 /** Well-known sub-directories of the workdir. */
