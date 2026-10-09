@@ -26,6 +26,7 @@ export function workspaceNote(workspace: Workspace, outputDir: string, canModify
   if (workspace.repos.length > 1) {
     lines.push('This task spans several repositories; use the absolute paths above to work in the others.');
   }
+  lines.push('Hard rule: never create, edit, rename, or delete GitHub Actions workflow files under `.github/workflows/`; omit those changes from your final work.');
   if (canModifyRepository) {
     lines.push(
       'Commit your work on the current branch with clear messages. Do NOT push, do NOT switch branches and do NOT open a pull request; the worker does that after you finish.',

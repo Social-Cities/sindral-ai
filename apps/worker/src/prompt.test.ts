@@ -45,6 +45,7 @@ describe('buildPrompt', () => {
     expect(prompt).toContain('`acme/widgets` is checked out at `/w/worktrees/ENG-142/widgets` (your current working directory) on branch `sindral/eng-142` (base branch `main`)');
     expect(prompt).toContain('`acme/api` is checked out at `/w/worktrees/ENG-142/api` on branch `sindral/eng-142` (base branch `develop`)');
     expect(prompt).toContain('spans several repositories');
+    expect(prompt).toContain('never create, edit, rename, or delete GitHub Actions workflow files under `.github/workflows/`');
     expect(prompt).toContain('Do NOT push');
     expect(prompt).not.toContain('Inspect the repository only');
     expect(prompt).toContain('/w/outputs/j1');
@@ -63,6 +64,7 @@ describe('buildPrompt', () => {
     });
     expect(prompt).toContain('Inspect the repository only');
     expect(prompt).toContain('Do NOT modify repository files');
+    expect(prompt).toContain('never create, edit, rename, or delete GitHub Actions workflow files under `.github/workflows/`');
     expect(prompt).toContain('Write only the required result JSON file');
     expect(prompt).not.toContain('Commit your work');
   });

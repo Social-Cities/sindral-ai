@@ -8,6 +8,7 @@ export const SINDRAL_MARKER = '<!-- sindral -->';
 export const COMMIT_AUTHOR = 'Sindral AI <sindral@users.noreply.github.com>';
 const MAX_PR_SECTION_LENGTH = 2_000;
 const TRUNCATION_NOTICE = '\n\n_Section truncated for readability._';
+const GITHUB_WORKFLOWS_DIR = '.github/workflows/';
 
 interface PrTextSections {
   motivation?: string;
@@ -112,8 +113,11 @@ function fail(what: string, result: RunResult): never {
 export async function commitAndPush(
   git: GitRunner,
   opts: { taskKey: string; summary: string; branch: string; baseBranch: string },
-): Promise<{ committed: boolean }> {
-  const status = await git(['status', '--porcelain']);
+): Promise<{ committed: boolean; omittedWorkflowPaths: string[] }> {
+  const omittedWorkflowPaths: string[] = [];
+  let status = await git(['status', '--porcelain']);
+  omittedWorkflowPaths.push(...(await omitUncommittedWorkflowChanges(git, workflowPathsFromStatus(status.stdout))));
+  if (omittedWorkflowPaths.length > 0) status = await git(['status', '--porcelain']);
   let committed = false;
   if (status.stdout.trim()) {
     await git(['add', '-A']);
@@ -121,6 +125,27 @@ export async function commitAndPush(
     committed = true;
   }
   await git(['fetch', '--prune', 'origin']);
+  const changed = await git(['diff', '--name-status', `origin/${opts.baseBranch}...HEAD`]);
+  const committedWorkflowPaths = workflowPathsFromNameStatus(changed.stdout);
+  omittedWorkflowPaths.push(...(await omitCommittedWorkflowChanges(git, `origin/${opts.baseBranch}`, committedWorkflowPaths)));
+  if (committedWorkflowPaths.length > 0) {
+    const cleanupStatus = await git(['status', '--porcelain']);
+    if (cleanupStatus.stdout.trim()) {
+      await git(['add', '-A']);
+      await git([
+        '-c',
+        'user.name=Sindral AI',
+        '-c',
+        'user.email=sindral@users.noreply.github.com',
+        'commit',
+        '--no-verify',
+        `--author=${COMMIT_AUTHOR}`,
+        '-m',
+        `${opts.taskKey}: omit GitHub workflow changes`,
+      ]);
+      committed = true;
+    }
+  }
   const rebase = await git.try([
     '-c', 'user.name=Sindral AI',
     '-c', 'user.email=sindral@users.noreply.github.com',
@@ -131,7 +156,72 @@ export async function commitAndPush(
     fail(`rebase onto ${opts.baseBranch}`, rebase);
   }
   await git(['push', '--force-with-lease', '-u', 'origin', `${opts.branch}:${opts.branch}`]);
-  return { committed };
+  return { committed, omittedWorkflowPaths: [...new Set(omittedWorkflowPaths)].sort() };
+}
+
+async function omitUncommittedWorkflowChanges(git: GitRunner, paths: readonly string[]): Promise<string[]> {
+  const workflowPaths = uniqueWorkflowPaths(paths);
+  if (workflowPaths.length === 0) return [];
+  await git.try(['restore', '--staged', '--worktree', '--', GITHUB_WORKFLOWS_DIR]);
+  await git.try(['clean', '-fd', '--', GITHUB_WORKFLOWS_DIR]);
+  return workflowPaths;
+}
+
+async function omitCommittedWorkflowChanges(git: GitRunner, baseRef: string, paths: readonly string[]): Promise<string[]> {
+  const workflowPaths = uniqueWorkflowPaths(paths);
+  for (const workflowPath of workflowPaths) {
+    const baseHasPath = await git.try(['cat-file', '-e', `${baseRef}:${workflowPath}`]);
+    if (baseHasPath.failed || baseHasPath.exitCode !== 0) {
+      await git.try(['rm', '-f', '--', workflowPath]);
+    } else {
+      await git(['restore', '--source', baseRef, '--staged', '--worktree', '--', workflowPath]);
+    }
+  }
+  if (workflowPaths.length > 0) await git.try(['clean', '-fd', '--', GITHUB_WORKFLOWS_DIR]);
+  return workflowPaths;
+}
+
+function workflowPathsFromNameStatus(stdout: string): string[] {
+  const paths: string[] = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const [, ...linePaths] = line.split('\t');
+    paths.push(...linePaths.map((part) => normalizeGitPath(part)));
+  }
+  return paths.filter(Boolean);
+}
+
+function workflowPathsFromStatus(stdout: string): string[] {
+  const paths: string[] = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const body = line.slice(3);
+    if (!body) continue;
+    const rename = body.split(' -> ');
+    paths.push(...rename.map((part) => normalizeGitPath(part)));
+  }
+  return paths.filter(Boolean);
+}
+
+function normalizeGitPath(pathname: string): string {
+  const trimmed = pathname.trim();
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    try {
+      return JSON.parse(trimmed) as string;
+    } catch {
+      return trimmed.slice(1, -1);
+    }
+  }
+  return trimmed;
+}
+
+function isGitHubWorkflowPath(pathname: string): boolean {
+  const normalized = pathname.replace(/\\/g, '/').replace(/^\.\/+/, '');
+  return normalized.startsWith(GITHUB_WORKFLOWS_DIR);
+}
+
+function uniqueWorkflowPaths(paths: readonly string[]): string[] {
+  return [...new Set(paths.filter(isGitHubWorkflowPath))].sort();
 }
 
 export interface EnsurePrOptions {

@@ -192,7 +192,7 @@ describe('commitAndPush', () => {
     const result = await commitAndPush(git.factory('/wt', { configArgs: [], secrets: [] }), {
       taskKey: 'ENG-1', summary: 'Did it', branch: 'sindral/eng-1', baseBranch: 'main',
     });
-    expect(result.committed).toBe(true);
+    expect(result).toEqual({ committed: true, omittedWorkflowPaths: [] });
     expect(git.find('add', '-A')).toHaveLength(1);
     const commit = git.calls.find((c) => c.args.includes('commit'));
     expect(commit?.args).toContain('--author=Sindral AI <sindral@users.noreply.github.com>');
@@ -207,7 +207,7 @@ describe('commitAndPush', () => {
     const result = await commitAndPush(git.factory('/wt', { configArgs: [], secrets: [] }), {
       taskKey: 'ENG-1', summary: 'Did it', branch: 'b', baseBranch: 'develop',
     });
-    expect(result.committed).toBe(false);
+    expect(result).toEqual({ committed: false, omittedWorkflowPaths: [] });
     expect(git.calls.some((c) => c.args.includes('commit'))).toBe(false);
     expect(git.calls.filter((call) => call.args.includes('rebase') && call.args.includes('origin/develop'))).toHaveLength(1);
     expect(git.find('push')).toHaveLength(1);
@@ -220,5 +220,47 @@ describe('commitAndPush', () => {
     })).rejects.toThrow(/rebase onto main failed.*CONFLICT/);
     expect(git.find('rebase', '--abort')).toHaveLength(1);
     expect(git.find('push')).toHaveLength(0);
+  });
+
+  it('omits uncommitted GitHub Actions workflow changes before committing', async () => {
+    let statusCalls = 0;
+    const git = fakeGit((args) => {
+      if (args[0] === 'status') return ok(statusCalls++ === 0 ? ' M .github/workflows/ci.yml\n M src/a.ts' : ' M src/a.ts');
+      return undefined;
+    });
+    await expect(commitAndPush(git.factory('/wt', { configArgs: [], secrets: [] }), {
+      taskKey: 'ENG-1', summary: 'Did it', branch: 'b', baseBranch: 'main',
+    })).resolves.toEqual({ committed: true, omittedWorkflowPaths: ['.github/workflows/ci.yml'] });
+    expect(git.find('restore', '--staged', '--worktree', '--', '.github/workflows/')).toHaveLength(1);
+    expect(git.find('clean', '-fd', '--', '.github/workflows/')).toHaveLength(1);
+    expect(git.find('add', '-A')).toHaveLength(1);
+    expect(git.find('push')).toHaveLength(1);
+  });
+
+  it('omits committed GitHub Actions workflow changes before pushing', async () => {
+    let statusCalls = 0;
+    const git = fakeGit((args) => {
+      if (args[0] === 'status') return ok(statusCalls++ === 0 ? '' : ' M .github/workflows/release.yml');
+      if (args[0] === 'diff' && args[1] === '--name-status') return ok('M\tsrc/a.ts\nM\t.github/workflows/release.yml\n');
+      return undefined;
+    });
+    await expect(commitAndPush(git.factory('/wt', { configArgs: [], secrets: [] }), {
+      taskKey: 'ENG-1', summary: 'Did it', branch: 'b', baseBranch: 'main',
+    })).resolves.toEqual({ committed: true, omittedWorkflowPaths: ['.github/workflows/release.yml'] });
+    expect(git.find('cat-file', '-e', 'origin/main:.github/workflows/release.yml')).toHaveLength(1);
+    expect(git.find('restore', '--source', 'origin/main', '--staged', '--worktree', '--', '.github/workflows/release.yml')).toHaveLength(1);
+    const commit = git.calls.find((c) => c.args.includes('commit') && c.args.includes('ENG-1: omit GitHub workflow changes'));
+    expect(commit).toBeDefined();
+    expect(git.find('push')).toHaveLength(1);
+  });
+
+  it('omits renamed GitHub Actions workflow paths from porcelain status', async () => {
+    let statusCalls = 0;
+    const git = fakeGit((args) => (args[0] === 'status' ? ok(statusCalls++ === 0 ? 'R  .github/workflows/ci.yml -> docs/ci.yml' : '') : undefined));
+    await expect(commitAndPush(git.factory('/wt', { configArgs: [], secrets: [] }), {
+      taskKey: 'ENG-1', summary: 'Did it', branch: 'b', baseBranch: 'main',
+    })).resolves.toEqual({ committed: false, omittedWorkflowPaths: ['.github/workflows/ci.yml'] });
+    expect(git.find('restore', '--staged', '--worktree', '--', '.github/workflows/')).toHaveLength(1);
+    expect(git.find('add', '-A')).toHaveLength(0);
   });
 });

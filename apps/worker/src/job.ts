@@ -297,12 +297,15 @@ async function publishPr(opts: PublishOptions): Promise<Record<string, unknown>>
     if (opts.signal.aborted) throw new Error(String(opts.signal.reason ?? SHUTDOWN_REASON));
     opts.events.progress(`Pushing ${repo.branch} to ${repo.repo.full}`);
     const git = gitFactory(repo.dir, auth);
-    const { committed } = await commitAndPush(git, {
+    const { committed, omittedWorkflowPaths } = await commitAndPush(git, {
       taskKey: opts.taskKey,
       summary: opts.summary,
       branch: repo.branch,
       baseBranch: repo.baseBranch,
     });
+    if (omittedWorkflowPaths.length > 0) {
+      opts.write(`${repo.repo.full}: omitted GitHub Actions workflow changes from ${omittedWorkflowPaths.join(', ')}`);
+    }
     opts.write(`${repo.repo.full}: pushed ${repo.branch}${committed ? ' (committed leftover changes)' : ''}`);
     const pr = await ensurePr({
       gh,
