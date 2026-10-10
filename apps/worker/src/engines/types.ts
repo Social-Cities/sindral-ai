@@ -10,6 +10,8 @@ export interface EngineRunOptions {
   signal?: AbortSignal;
   /** Directories outside the cwd the agent must be allowed to write (results, outputs). */
   writableDirs?: string[];
+  /** Engine-native session ID to continue instead of starting a fresh session. */
+  resumeSessionId?: string | null;
   onOutput: (line: string) => void;
 }
 
@@ -19,6 +21,8 @@ export interface EngineRunResult {
   tail: string[];
   /** The agent's final message, used as a fallback when it could not write the result file. */
   finalText: string | null;
+  /** Engine-native session ID captured from the run, when the CLI exposes it. */
+  sessionId: string | null;
   timedOut: boolean;
   cancelled: boolean;
   /** The engine binary could not be spawned (ENOENT). */
@@ -28,6 +32,8 @@ export interface EngineRunResult {
 export interface EngineCapabilities {
   available: boolean;
   version: string | null;
+  /** Whether the CLI can resume a previous engine session by ID. */
+  supportsResume?: boolean;
 }
 
 export interface Engine {

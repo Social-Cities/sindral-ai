@@ -23,7 +23,7 @@ function fakeEngine(script: EngineScript, available = true): Engine & { runs: En
     run: async (opts) => {
       runs.push(opts);
       const partial = await script(opts);
-      return { exitCode: 0, tail: [], finalText: null, timedOut: false, cancelled: false, missing: false, ...partial };
+      return { exitCode: 0, tail: [], finalText: null, sessionId: null, timedOut: false, cancelled: false, missing: false, ...partial };
     },
   };
 }
@@ -31,19 +31,22 @@ function fakeEngine(script: EngineScript, available = true): Engine & { runs: En
 function fakeApi() {
   const events: JobEvent[] = [];
   const completed: AgentResult[] = [];
+  const completedSessionIds: (string | null | undefined)[] = [];
   const failed: string[] = [];
   const cancelled: string[] = [];
   return {
     events,
     completed,
+    completedSessionIds,
     failed,
     cancelled,
     postEvent: vi.fn(async (_id: string, event: JobEvent) => {
       events.push(event);
       return { ok: true as const };
     }),
-    complete: vi.fn(async (_id: string, result: AgentResult) => {
+    complete: vi.fn(async (_id: string, result: AgentResult, _attempt: number, _leaseToken: string, agentSessionId?: string | null) => {
       completed.push(result);
+      completedSessionIds.push(agentSessionId);
       return { ok: true as const };
     }),
     fail: vi.fn(async (_id: string, error: string) => {
@@ -118,6 +121,21 @@ describe('runJob', () => {
     const log = await fs.readFile(path.join(workdir, 'logs', `${d.job.id}.log`), 'utf8');
     expect(log).toContain('working...');
     expect(log).toContain('job completed');
+  });
+
+  it('passes stored session IDs to the engine and reports the next session ID', async () => {
+    const engine = fakeEngine(async (opts) => {
+      expect(opts.resumeSessionId).toBe('session-prev');
+      await fs.writeFile(opts.env['SINDRAL_RESULT_FILE']!, JSON.stringify({ summary: 'planned', plan: '# Plan' }));
+      return { sessionId: 'session-next' };
+    });
+    const d = dispatch({ payload: agentPayload({ repos: [], resumeSessionId: 'session-prev', step: step({ output: 'plan', resumeSessionKey: 'planning' }) }) }, null);
+    const { deps: jobDeps, api } = deps(engine, docWorkspace());
+
+    const outcome = await runJob(d, jobDeps, new AbortController().signal);
+
+    expect(outcome).toMatchObject({ status: 'completed', agentSessionId: 'session-next' });
+    expect(api.completedSessionIds).toEqual(['session-next']);
   });
 
   it('reports a canonical-path violation without writing through an escaped log directory', async () => {

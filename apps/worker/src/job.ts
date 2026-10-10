@@ -39,7 +39,12 @@ export interface JobDeps {
   progressIntervalMs?: number;
 }
 
-export type JobOutcome = { status: 'completed'; result: AgentResult } | { status: 'failed' | 'cancelled'; error: string };
+export type JobOutcome = { status: 'completed'; result: AgentResult; agentSessionId?: string | null } | { status: 'failed' | 'cancelled'; error: string };
+
+interface AgentJobRun {
+  result: AgentResult;
+  agentSessionId: string | null;
+}
 
 /**
  * Runs one dispatched job end to end and reports the outcome to the server.
@@ -57,59 +62,68 @@ export async function runJob(dispatch: JobDispatch, deps: JobDeps, signal: Abort
   try {
     local = await openLocalLog(deps.config.workdir, job.id);
     write(`job ${job.id} started (${job.kind}, attempt ${job.attempt})`);
-    const result =
+    const run =
       job.payload.kind === 'rebase-stack'
-        ? await runRebaseStack({
-            payload: job.payload,
-            workspaces: deps.workspaces,
-            githubToken: credentials.githubToken,
-            redactor,
-            git: deps.git,
-            signal,
-            onProgress: (m) => {
-              events.progress(m);
-              write(m);
-            },
-          })
-        : job.payload.kind === 'resolve-rebase-conflict'
-          ? await runConflictResolution({
-              dispatch,
+        ? {
+            result: await runRebaseStack({
               payload: job.payload,
-              config: deps.config,
               workspaces: deps.workspaces,
-              engines: deps.engines,
-              redactor,
               githubToken: credentials.githubToken,
-              signal,
+              redactor,
               git: deps.git,
-              command: deps.command,
-              env: deps.env,
-              onOutput: (line) => {
-                events.line(line);
-                write(line);
+              signal,
+              onProgress: (m) => {
+                events.progress(m);
+                write(m);
               },
-              onProgress: (message) => {
-                events.progress(message);
-                write(message);
-              },
-            })
-          : job.payload.kind === 'merge-pull-requests'
-            ? await runMergePullRequests({
+            }),
+            agentSessionId: null,
+          }
+        : job.payload.kind === 'resolve-rebase-conflict'
+          ? {
+              result: await runConflictResolution({
+                dispatch,
                 payload: job.payload,
+                config: deps.config,
+                workspaces: deps.workspaces,
+                engines: deps.engines,
+                redactor,
                 githubToken: credentials.githubToken,
-                ghBin: deps.config.ghBin,
-                allowPatMerge: credentials.githubCredential === 'github-app' || deps.config.allowPatMerge,
-                gh: deps.gh?.(credentials.githubToken),
                 signal,
+                git: deps.git,
+                command: deps.command,
+                env: deps.env,
+                onOutput: (line) => {
+                  events.line(line);
+                  write(line);
+                },
                 onProgress: (message) => {
                   events.progress(message);
                   write(message);
                 },
-              })
+              }),
+              agentSessionId: null,
+            }
+          : job.payload.kind === 'merge-pull-requests'
+            ? {
+                result: await runMergePullRequests({
+                  payload: job.payload,
+                  githubToken: credentials.githubToken,
+                  ghBin: deps.config.ghBin,
+                  allowPatMerge: credentials.githubCredential === 'github-app' || deps.config.allowPatMerge,
+                  gh: deps.gh?.(credentials.githubToken),
+                  signal,
+                  onProgress: (message) => {
+                    events.progress(message);
+                    write(message);
+                  },
+                }),
+                agentSessionId: null,
+              }
             : await runAgentJob(dispatch, job.payload, { ...deps, redactor, events, write, signal });
-    await deps.api.complete(job.id, result, job.attempt, dispatch.lease.token);
+    await deps.api.complete(job.id, run.result, job.attempt, dispatch.lease.token, run.agentSessionId);
     write('job completed');
-    outcome = { status: 'completed', result };
+    outcome = { status: 'completed', result: run.result, ...(run.agentSessionId ? { agentSessionId: run.agentSessionId } : {}) };
   } catch (err) {
     const message = signal.aborted ? String(signal.reason ?? SHUTDOWN_REASON) : redactor.redactError(err);
     log.error({ err: message }, 'job failed');
@@ -142,7 +156,7 @@ interface AgentJobContext extends JobDeps {
   signal: AbortSignal;
 }
 
-async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx: AgentJobContext): Promise<AgentResult> {
+async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx: AgentJobContext): Promise<AgentJobRun> {
   const { job, credentials } = dispatch;
   const { config, events, write, signal } = ctx;
   const step = payload.step;
@@ -191,6 +205,7 @@ async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx:
   });
 
   write(`running ${engineName} in ${workspace.cwd}`);
+  if (payload.resumeSessionId) write(`resuming ${engineName} session ${payload.resumeSessionId}`);
   events.progress(`Running ${engineName} for step "${step.label}"`);
   let lineCount = 0;
   const ticker = setInterval(() => events.progress(`Still running ${engineName} (${lineCount} output lines so far)`), ctx.progressIntervalMs ?? PROGRESS_INTERVAL_MS);
@@ -205,6 +220,7 @@ async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx:
       timeoutMs: config.jobTimeoutMs,
       signal,
       writableDirs: [paths.results, outputDir],
+      resumeSessionId: payload.resumeSessionId,
       onOutput: (line) => {
         lineCount++;
         events.line(line);
@@ -243,6 +259,7 @@ async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx:
       timeoutMs: config.jobTimeoutMs,
       signal,
       writableDirs: [paths.results, outputDir],
+      resumeSessionId: run.sessionId ?? payload.resumeSessionId,
       onOutput: (line) => {
         lineCount++;
         events.line(line);
@@ -298,7 +315,7 @@ async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx:
 
   const validated = validateResult(candidate);
   if (!validated.ok) throw new Error(describeFailure(`${validated.reason}${exitNote}`, run.tail, ctx.redactor));
-  return validated.value;
+  return { result: validated.value, agentSessionId: run.sessionId };
 }
 
 function buildResultRecoveryPrompt(input: {

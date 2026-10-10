@@ -53,12 +53,18 @@ describe('claude args', () => {
     expect(args.join(' ')).toContain('--add-dir /w/results --add-dir /w/outputs/j1');
   });
 
+  it('resumes a previous Claude session when a session id is supplied', () => {
+    const args = buildClaudeArgs(step(), { supportsEffort: false, supportsResume: true }, ['/w/results'], '00000000-0000-4000-8000-000000000001');
+    expect(args[args.indexOf('--resume') + 1]).toBe('00000000-0000-4000-8000-000000000001');
+  });
+
   it('captures the final message for the result-file fallback', () => {
     const final = parseClaudeLine(JSON.stringify({ type: 'result', subtype: 'success', result: '{"summary":"s"}' }));
     expect(final.finalText).toBe('{"summary":"s"}');
     const assistant = parseClaudeLine(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'hi' }] } }));
     expect(assistant.assistantText).toBe('hi');
     expect(parseClaudeLine(JSON.stringify({ type: 'user', message: { content: [{ type: 'text', text: 'x' }] } })).assistantText).toBeUndefined();
+    expect(parseClaudeLine(JSON.stringify({ type: 'system', subtype: 'init', model: 'm', session_id: '00000000-0000-4000-8000-000000000001' })).sessionId).toBe('00000000-0000-4000-8000-000000000001');
   });
 });
 
@@ -114,9 +120,17 @@ describe('codex args', () => {
     expect(args).toEqual(expect.arrayContaining(['--add-dir', '/w/results', '--add-dir', '/w/outputs/j1']));
   });
 
+  it('uses codex exec resume when a session id is supplied', () => {
+    const args = buildCodexArgs(step(), ['/w/results'], '019d8984-e2e4-7e21-a35e-028098cb38b5');
+    expect(args.slice(0, 3)).toEqual(['exec', 'resume', '--model']);
+    expect(args).toContain('019d8984-e2e4-7e21-a35e-028098cb38b5');
+    expect(args.at(-1)).toBe('-');
+  });
+
   it('captures agent messages for the result-file fallback', () => {
     expect(parseCodexLine(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: '{"summary":"s"}' } })).agentText).toBe('{"summary":"s"}');
     expect(parseCodexLine(JSON.stringify({ type: 'item.completed', item: { type: 'reasoning', text: 'hmm' } })).agentText).toBeUndefined();
+    expect(parseCodexLine(JSON.stringify({ type: 'thread.started', thread_id: '019d8984-e2e4-7e21-a35e-028098cb38b5' })).sessionId).toBe('019d8984-e2e4-7e21-a35e-028098cb38b5');
   });
 });
 

@@ -14,6 +14,7 @@ import {
   snapshotWorkflow,
   transition,
   type AgentResult,
+  type AgentEngine,
   type CreateTaskInput,
   type Job,
   type JobContext,
@@ -566,12 +567,29 @@ export class Orchestrator {
     const context = await this.buildJobContext(userId, task, feedbackOverride);
     const contractPrompt = step.output === 'plan' ? PLANNING_CONTRACT_PROMPT : TASK_CONTRACT_PROMPT;
     const stepWithContract = { ...step, prompt: `${step.prompt ?? ''}\n\n${contractPrompt}`.trim() };
+    const resumeSessionId = await this.findResumeSessionId(userId, task.id, step);
     return {
       taskId: task.id,
       kind: 'agent',
       stepId: step.id,
-      payload: { kind: 'agent', step: stepWithContract, context, repos: task.repos, branch: task.branch, baseBranch: task.baseBranch, prUrl: task.prUrl },
+      payload: { kind: 'agent', step: stepWithContract, context, repos: task.repos, branch: task.branch, baseBranch: task.baseBranch, prUrl: task.prUrl, resumeSessionId },
     };
+  }
+
+  private async findResumeSessionId(userId: string, taskId: string, step: WorkflowStep): Promise<string | null> {
+    const sessionKey = step.resumeSessionKey?.trim();
+    if (!sessionKey) return null;
+    const engine = step.engine ?? 'claude';
+    const events = await this.repo.listEvents(userId, taskId);
+    for (const event of [...events].reverse()) {
+      if (event.type !== 'agent-session' || !event.detail || typeof event.detail !== 'object') continue;
+      const detail = event.detail as Record<string, unknown>;
+      if (detail['engine'] !== engine) continue;
+      if (detail['sessionKey'] !== sessionKey) continue;
+      const sessionId = detail['sessionId'];
+      if (typeof sessionId === 'string' && sessionId.trim()) return sessionId;
+    }
+    return null;
   }
 
   private async buildMergeJob(userId: string, task: Task, stepId: string): Promise<Parameters<Repository['createJob']>[1]> {
@@ -636,7 +654,7 @@ export class Orchestrator {
 
   // ---------------------------------------------------------------- worker results
 
-  async completeJob(userId: string, jobId: string, result: AgentResult, expectedAttempt: number, leaseToken: string): Promise<void> {
+  async completeJob(userId: string, jobId: string, result: AgentResult, expectedAttempt: number, leaseToken: string, agentSessionId?: string | null): Promise<void> {
     const job = await this.repo.getJob(userId, jobId);
     if (!job) throw notFound('Job');
     if (job.attempt !== expectedAttempt) throw conflict(`Job attempt ${expectedAttempt} has been superseded`);
@@ -686,6 +704,7 @@ export class Orchestrator {
       else if (result.kind === 'merge') await this.applyMergeResult(userId, claim.job, task, result);
       else {
         let current = await this.applyResult(userId, claim.job, task, result);
+        await this.recordAgentSession(userId, claim.job, agentSessionId ?? null);
         await this.repo.createMessage(userId, {
           taskId: task.id,
           role: 'agent',
@@ -816,6 +835,21 @@ export class Orchestrator {
     }
     if (result.kind === 'merge' && !result.complete) this.metrics?.inc('sindral_merge_failures_total');
     if (result.kind === 'verdict' && result.verdict === 'NO_GO') this.metrics?.inc('sindral_validation_failures_total', { surface: 'verification' });
+  }
+
+  private async recordAgentSession(userId: string, job: Job, sessionId: string | null): Promise<void> {
+    if (!sessionId || job.payload.kind !== 'agent') return;
+    const step = job.payload.step;
+    const sessionKey = step.resumeSessionKey?.trim();
+    if (!sessionKey) return;
+    const engine: AgentEngine = step.engine ?? 'claude';
+    await this.repo.createEvent(userId, {
+      taskId: job.taskId,
+      type: 'agent-session',
+      stepId: step.id,
+      detail: { jobId: job.id, stepId: step.id, sessionKey, engine, sessionId },
+      dedupeKey: `job:${job.id}:agent-session`,
+    });
   }
 
   private async beginJobOutcome(

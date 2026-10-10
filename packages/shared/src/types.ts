@@ -69,6 +69,11 @@ export interface WorkflowStep {
   tools?: ToolName[];
   permissions?: Permission[];
   output?: StepOutputKind;
+  /**
+   * Agent-session continuity key. Steps with the same key may resume the same
+   * underlying Claude/Codex session, which is useful for feedback loops.
+   */
+  resumeSessionKey?: string;
   /** Optional canvas position for the workflow editor. */
   position?: { x: number; y: number };
 }
@@ -319,6 +324,8 @@ export interface AgentJobPayload {
   baseBranch: string | null;
   /** Existing PR to update, if any. */
   prUrl: string | null;
+  /** Engine-native session to resume when dispatching a feedback/retry pass. */
+  resumeSessionId?: string | null;
 }
 
 export interface RebaseStackJobPayload {

@@ -104,8 +104,13 @@ export class ApiClient {
     return this.post<{ ok: true }>(`/api/worker/jobs/${encodeURIComponent(jobId)}/events`, event);
   }
 
-  complete(jobId: string, result: AgentResult, attempt: number, leaseToken: string): Promise<{ ok: true }> {
-    return this.post<{ ok: true }>(`/api/worker/jobs/${encodeURIComponent(jobId)}/complete`, { attempt, leaseToken, result });
+  complete(jobId: string, result: AgentResult, attempt: number, leaseToken: string, agentSessionId?: string | null): Promise<{ ok: true }> {
+    return this.post<{ ok: true }>(`/api/worker/jobs/${encodeURIComponent(jobId)}/complete`, {
+      attempt,
+      leaseToken,
+      result,
+      ...(agentSessionId ? { agentSessionId } : {}),
+    });
   }
 
   fail(jobId: string, error: string, attempt: number, leaseToken: string): Promise<{ ok: true }> {

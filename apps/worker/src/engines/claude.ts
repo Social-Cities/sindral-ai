@@ -16,6 +16,8 @@ export const CLAUDE_TOOL_MAP: Record<ToolName, string[]> = {
 export interface ClaudeCapabilities extends EngineCapabilities {
   /** Whether `claude --help` advertises an `--effort` flag. */
   supportsEffort: boolean;
+  /** Whether `claude --help` advertises a `--resume` flag. */
+  supportsResume: boolean;
 }
 
 export function claudeAllowedTools(step: WorkflowStep): string[] {
@@ -41,7 +43,7 @@ export function claudeEffort(mode: AgentMode | undefined): string | null {
   }
 }
 
-export function buildClaudeArgs(step: WorkflowStep, caps: Pick<ClaudeCapabilities, 'supportsEffort'>, writableDirs: string[] = []): string[] {
+export function buildClaudeArgs(step: WorkflowStep, caps: Pick<ClaudeCapabilities, 'supportsEffort'> & Partial<Pick<ClaudeCapabilities, 'supportsResume'>>, writableDirs: string[] = [], resumeSessionId?: string | null): string[] {
   const args = ['-p', '--output-format', 'stream-json', '--verbose'];
   if (step.model) args.push('--model', step.model);
   // Worker agents run inside Sindral-managed checkouts. Keep the workflow
@@ -51,6 +53,7 @@ export function buildClaudeArgs(step: WorkflowStep, caps: Pick<ClaudeCapabilitie
   args.push('--permission-mode', 'bypassPermissions');
   const effort = claudeEffort(step.mode);
   if (caps.supportsEffort && effort) args.push('--effort', effort);
+  if (resumeSessionId && caps.supportsResume !== false) args.push('--resume', resumeSessionId);
   // The result file and output dir live outside the worktree. `--add-dir`
   // keeps them visible to Claude even when they are not under the repository.
   for (const dir of writableDirs) args.push('--add-dir', dir);
@@ -70,6 +73,7 @@ export interface ClaudeLine {
   /** Text of the final assistant message, when this event carries it. */
   finalText?: string;
   assistantText?: string;
+  sessionId?: string;
 }
 
 /** Turns one `stream-json` line into human-readable lines (may be empty). */
@@ -107,7 +111,8 @@ export function parseClaudeLine(line: string): ClaudeLine {
     return typeof event['result'] === 'string' ? { lines: [parts.join(' ')], finalText: event['result'] } : { lines: [parts.join(' ')] };
   }
   if (type === 'system' && event['subtype'] === 'init') {
-    return { lines: [`[claude] session started model=${String(event['model'] ?? '?')}`] };
+    const sessionId = typeof event['session_id'] === 'string' ? event['session_id'] : typeof event['sessionId'] === 'string' ? event['sessionId'] : undefined;
+    return { lines: [`[claude] session started model=${String(event['model'] ?? '?')}`], ...(sessionId ? { sessionId } : {}) };
   }
   return { lines: [] };
 }
@@ -129,19 +134,23 @@ export class ClaudeEngine implements Engine {
 
   private async doProbe(): Promise<ClaudeCapabilities> {
     const version = await run(this.bin, ['--version'], { timeoutMs: 15_000 });
-    if (version.failed || version.code === 'ENOENT') return { available: false, version: null, supportsEffort: false };
+    if (version.failed || version.code === 'ENOENT') return { available: false, version: null, supportsEffort: false, supportsResume: false };
     const help = await run(this.bin, ['--help'], { timeoutMs: 15_000 });
     const supportsEffort = /--effort\b/.test(`${help.stdout}\n${help.stderr}`);
-    return { available: true, version: extractVersion(version.stdout), supportsEffort };
+    const supportsResume = /--resume\b/.test(`${help.stdout}\n${help.stderr}`);
+    return { available: true, version: extractVersion(version.stdout), supportsEffort, supportsResume };
   }
 
   async run(opts: EngineRunOptions): Promise<EngineRunResult> {
     const caps = await this.probe();
-    if (!caps.available) return { exitCode: null, tail: [], finalText: null, timedOut: false, cancelled: false, missing: true };
+    if (!caps.available) return { exitCode: null, tail: [], finalText: null, sessionId: null, timedOut: false, cancelled: false, missing: true };
     const tail = new OutputTail();
     let finalText: string | null = null;
     let lastAssistant: string | null = null;
-    const result = await stream(this.bin, buildClaudeArgs(opts.step, caps, opts.writableDirs), {
+    let sessionId: string | null = null;
+    const resumeSessionId = caps.supportsResume ? opts.resumeSessionId : null;
+    if (opts.resumeSessionId && !caps.supportsResume) opts.onOutput('[claude] resume is not supported by this CLI; starting a fresh session');
+    const result = await stream(this.bin, buildClaudeArgs(opts.step, caps, opts.writableDirs, resumeSessionId), {
       cwd: opts.cwd,
       env: opts.env,
       extendEnv: false,
@@ -152,14 +161,15 @@ export class ClaudeEngine implements Engine {
         const parsed = parseClaudeLine(line);
         if (parsed.finalText !== undefined) finalText = parsed.finalText;
         if (parsed.assistantText !== undefined) lastAssistant = parsed.assistantText;
+        if (parsed.sessionId !== undefined) sessionId = parsed.sessionId;
         for (const text of parsed.lines) {
           tail.push(text);
           opts.onOutput(text);
         }
       },
     });
-    if (result.code === 'ENOENT') return { exitCode: null, tail: tail.get(), finalText: null, timedOut: false, cancelled: false, missing: true };
+    if (result.code === 'ENOENT') return { exitCode: null, tail: tail.get(), finalText: null, sessionId, timedOut: false, cancelled: false, missing: true };
     if (result.failed && result.exitCode === null && result.message) tail.push(result.message);
-    return { exitCode: result.exitCode, tail: tail.get(), finalText: finalText ?? lastAssistant, timedOut: result.timedOut, cancelled: result.cancelled, missing: false };
+    return { exitCode: result.exitCode, tail: tail.get(), finalText: finalText ?? lastAssistant, sessionId, timedOut: result.timedOut, cancelled: result.cancelled, missing: false };
   }
 }

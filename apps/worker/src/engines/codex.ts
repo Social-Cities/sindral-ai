@@ -2,14 +2,18 @@ import type { WorkflowStep } from '@sindral/shared';
 import { run, stream } from '../proc.js';
 import { extractVersion, OutputTail, type Engine, type EngineCapabilities, type EngineRunOptions, type EngineRunResult } from './types.js';
 
+export interface CodexCapabilities extends EngineCapabilities {
+  supportsResume: boolean;
+}
+
 export function normalizeCodexModel(model: string | undefined): string | undefined {
   if (model === 'gpt-5-codex' || model === 'gpt-5') return 'gpt-6.1-sol';
   if (model === 'o4-mini') return 'gpt-6-luna';
   return model;
 }
 
-export function buildCodexArgs(step: WorkflowStep, writableDirs: string[] = []): string[] {
-  const args = ['exec'];
+export function buildCodexArgs(step: WorkflowStep, writableDirs: string[] = [], resumeSessionId?: string | null): string[] {
+  const args = resumeSessionId ? ['exec', 'resume'] : ['exec'];
   const model = normalizeCodexModel(step.model);
   if (model) args.push('--model', model);
   // Worker agents run inside Sindral-managed checkouts. Keep workflow
@@ -20,7 +24,9 @@ export function buildCodexArgs(step: WorkflowStep, writableDirs: string[] = []):
   // keeps them in the visible workspace when the CLI builds its context.
   for (const dir of writableDirs) args.push('--add-dir', dir);
   // Non-code tasks run in a plain tmp directory; codex refuses to start outside a git repo otherwise.
-  args.push('--skip-git-repo-check', '--json', '-');
+  args.push('--skip-git-repo-check', '--json');
+  if (resumeSessionId) args.push(resumeSessionId);
+  args.push('-');
   return args;
 }
 
@@ -33,6 +39,7 @@ export interface CodexLine {
   lines: string[];
   /** Text of an agent message, when this event carries one. */
   agentText?: string;
+  sessionId?: string;
 }
 
 /** Turns one `codex exec --json` event line into human-readable lines. */
@@ -48,7 +55,10 @@ export function parseCodexLine(line: string): CodexLine {
   }
   const type = typeof event['type'] === 'string' ? event['type'] : '';
   const item = (event['item'] ?? null) as Record<string, unknown> | null;
-  if (type === 'thread.started') return { lines: ['[codex] session started'] };
+  if (type === 'thread.started') {
+    const sessionId = typeof event['thread_id'] === 'string' ? event['thread_id'] : typeof event['threadId'] === 'string' ? event['threadId'] : typeof event['id'] === 'string' ? event['id'] : undefined;
+    return { lines: ['[codex] session started'], ...(sessionId ? { sessionId } : {}) };
+  }
   if (type === 'turn.failed' || type === 'error') {
     const err = event['error'] as { message?: unknown } | undefined;
     return { lines: [`[codex] error: ${short(err?.message ?? event['message'] ?? 'unknown')}`] };
@@ -85,25 +95,29 @@ export function formatCodexLine(line: string): string[] {
 
 export class CodexEngine implements Engine {
   readonly name = 'codex' as const;
-  private caps: Promise<EngineCapabilities> | null = null;
+  private caps: Promise<CodexCapabilities> | null = null;
 
   constructor(private readonly bin: string) {}
 
-  probe(): Promise<EngineCapabilities> {
+  probe(): Promise<CodexCapabilities> {
     this.caps ??= (async () => {
       const version = await run(this.bin, ['--version'], { timeoutMs: 15_000 });
-      if (version.failed || version.code === 'ENOENT') return { available: false, version: null };
-      return { available: true, version: extractVersion(version.stdout) };
+      if (version.failed || version.code === 'ENOENT') return { available: false, version: null, supportsResume: false };
+      const help = await run(this.bin, ['exec', '--help'], { timeoutMs: 15_000 });
+      return { available: true, version: extractVersion(version.stdout), supportsResume: /\bresume\b/.test(`${help.stdout}\n${help.stderr}`) };
     })();
     return this.caps;
   }
 
   async run(opts: EngineRunOptions): Promise<EngineRunResult> {
     const caps = await this.probe();
-    if (!caps.available) return { exitCode: null, tail: [], finalText: null, timedOut: false, cancelled: false, missing: true };
+    if (!caps.available) return { exitCode: null, tail: [], finalText: null, sessionId: null, timedOut: false, cancelled: false, missing: true };
     const tail = new OutputTail();
     let finalText: string | null = null;
-    const result = await stream(this.bin, buildCodexArgs(opts.step, opts.writableDirs), {
+    let sessionId: string | null = null;
+    const resumeSessionId = caps.supportsResume ? opts.resumeSessionId : null;
+    if (opts.resumeSessionId && !caps.supportsResume) opts.onOutput('[codex] resume is not supported by this CLI; starting a fresh session');
+    const result = await stream(this.bin, buildCodexArgs(opts.step, opts.writableDirs, resumeSessionId), {
       cwd: opts.cwd,
       env: opts.env,
       extendEnv: false,
@@ -113,14 +127,15 @@ export class CodexEngine implements Engine {
       onLine: (line) => {
         const parsed = parseCodexLine(line);
         if (parsed.agentText !== undefined) finalText = parsed.agentText;
+        if (parsed.sessionId !== undefined) sessionId = parsed.sessionId;
         for (const text of parsed.lines) {
           tail.push(text);
           opts.onOutput(text);
         }
       },
     });
-    if (result.code === 'ENOENT') return { exitCode: null, tail: tail.get(), finalText: null, timedOut: false, cancelled: false, missing: true };
+    if (result.code === 'ENOENT') return { exitCode: null, tail: tail.get(), finalText: null, sessionId, timedOut: false, cancelled: false, missing: true };
     if (result.failed && result.exitCode === null && result.message) tail.push(result.message);
-    return { exitCode: result.exitCode, tail: tail.get(), finalText, timedOut: result.timedOut, cancelled: result.cancelled, missing: false };
+    return { exitCode: result.exitCode, tail: tail.get(), finalText, sessionId, timedOut: result.timedOut, cancelled: result.cancelled, missing: false };
   }
 }

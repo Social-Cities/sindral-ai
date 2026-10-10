@@ -18,6 +18,7 @@ export const workflowStepSchema = z.object({
   tools: z.array(z.enum(ALL_TOOLS)).max(ALL_TOOLS.length).optional(),
   permissions: z.array(z.enum(ALL_PERMISSIONS)).max(ALL_PERMISSIONS.length).optional(),
   output: z.enum(ALL_OUTPUT_KINDS).optional(),
+  resumeSessionKey: z.string().trim().min(1).max(64).regex(/^[a-z0-9][a-z0-9-_]*$/i).optional(),
   position: z.object({ x: z.number().finite(), y: z.number().finite() }).optional(),
 });
 
@@ -311,7 +312,12 @@ export const agentResultSchema = z.discriminatedUnion('kind', [
   }),
 ]);
 
-export const workerJobCompleteSchema = z.object({ attempt: z.number().int().positive(), leaseToken: z.string().uuid(), result: agentResultSchema });
+export const workerJobCompleteSchema = z.object({
+  attempt: z.number().int().positive(),
+  leaseToken: z.string().uuid(),
+  result: agentResultSchema,
+  agentSessionId: z.string().trim().min(1).max(200).optional(),
+});
 export const workerJobFailSchema = z.object({ attempt: z.number().int().positive(), leaseToken: z.string().uuid(), error: z.string().trim().min(1).max(20_000) });
 export const workerJobCancelSchema = z.object({ attempt: z.number().int().positive(), leaseToken: z.string().uuid() });
 

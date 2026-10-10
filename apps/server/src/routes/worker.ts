@@ -169,8 +169,8 @@ export const workerRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx 
   app.post('/api/worker/jobs/:id/complete', async (request) => {
     const { userId } = request.worker!;
     const { id } = validate(idParamsSchema, request.params);
-    const { attempt, leaseToken, result } = validate(workerJobCompleteSchema, request.body);
-    await orchestrator.completeJob(userId, id, result, attempt, leaseToken);
+    const { attempt, leaseToken, result, agentSessionId } = validate(workerJobCompleteSchema, request.body);
+    await orchestrator.completeJob(userId, id, result, attempt, leaseToken, agentSessionId ?? null);
     return { ok: true as const };
   });
 

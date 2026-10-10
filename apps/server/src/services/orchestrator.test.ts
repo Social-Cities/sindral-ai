@@ -270,13 +270,15 @@ describe('feedback loops', () => {
   it('chat on plan-review dispatches the revision agent with the feedback in context', async () => {
     let task = await newTask();
     await orch().applyUserEvent(userId, task.id, 'start');
-    await completeNext(ctx, userId, plan());
+    const planningJob = await claimNext(ctx, userId);
+    await orch().completeJob(userId, planningJob!.id, plan(), planningJob!.attempt, planningJob!.leaseToken, '00000000-0000-4000-8000-000000000001');
     const { message, task: after } = await orch().postUserMessage(userId, task.id, 'Please add tests', 'web');
     expect(message?.role).toBe('user');
     expect(after.state).toBe('planning-feedback');
     const job = (await queuedJobs(task.id))[0]!;
     expect(agentPayload(job).step.id).toBe('planning-feedback');
     expect(agentPayload(job).context.feedback).toBe('Please add tests');
+    expect(agentPayload(job).resumeSessionId).toBe('00000000-0000-4000-8000-000000000001');
     const messages = await ctx.repo.listMessages(userId, task.id);
     expect(messages.at(-1)).toMatchObject({ role: 'system', source: 'web', content: 'Got it — Revise Plan is working on your request.' });
     await completeNext(ctx, userId, {
@@ -371,7 +373,8 @@ describe('feedback loops', () => {
     await orch().applyUserEvent(userId, task.id, 'start');
     await completeNext(ctx, userId, plan());
     await orch().applyUserEvent(userId, task.id, 'approve');
-    await completeNext(ctx, userId, implementation());
+    const implementationJob = await claimNext(ctx, userId);
+    await orch().completeJob(userId, implementationJob!.id, implementation(), implementationJob!.attempt, implementationJob!.leaseToken, '00000000-0000-4000-8000-000000000002');
     await completeNext(ctx, userId, reviewSlice());
     await completeNext(ctx, userId, review());
     await completeNext(ctx, userId, verdict(false, 'Fix the null check'));
@@ -381,6 +384,7 @@ describe('feedback loops', () => {
     expect(agentPayload(job).context.feedback).toBe('Fix the null check');
     expect(agentPayload(job).context.verify_report).toBe('# Verify');
     expect(agentPayload(job).prUrl).toBe('https://github.com/acme/app/pull/1');
+    expect(agentPayload(job).resumeSessionId).toBe('00000000-0000-4000-8000-000000000002');
     await completeNext(ctx, userId, reviewSlice());
     task = await reload(ctx, userId, task);
     expect(task.state).toBe('adversarial-review');
