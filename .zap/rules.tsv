@@ -1,0 +1,4 @@
+# React SPA detection is informational, not a security vulnerability. Keep
+# fail_action enabled for all other alerts, including the entire CSP rule.
+# https://www.zaproxy.org/docs/alerts/10109/
+10109	IGNORE	Modern Web Application (expected React SPA)

@@ -91,6 +91,7 @@ jobs:
           target: http://127.0.0.1:8787
           fail_action: true
           allow_issue_writing: false
+          rules_file_name: .zap/rules.tsv
           artifact_name: zap-baseline-report
       - name: Stop Supabase
         if: always()

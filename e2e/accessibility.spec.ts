@@ -2,6 +2,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { FULL_SDLC_WORKFLOW, snapshotWorkflow } from '../packages/shared/dist/index.js';
 import { installMockBackend, makePullRequest, makeTask, signIn } from './mockBackend';
+import { createTestApp, testConfig } from '../apps/server/src/test/helpers.js';
 
 async function expectNoSeriousViolations(page: Page) {
   const result = await new AxeBuilder({ page }).analyze();
@@ -12,6 +13,16 @@ async function expectNoSeriousViolations(page: Page) {
 for (const theme of ['dark', 'light'] as const) {
   test(`login, home, tasks, and task review have no serious automated accessibility violations in ${theme} mode`, async ({ page }) => {
     await page.emulateMedia({ colorScheme: theme });
+    // Exercise the deployed API's policy rather than Vite preview's open policy.
+    const server = await createTestApp({ config: testConfig({ supabaseUrl: 'http://127.0.0.1:55321' }) });
+    const health = await server.app.inject({ url: '/api/health' });
+    const policy = String(health.headers['content-security-policy']);
+    await server.app.close();
+    await page.route('**/*', async (route) => {
+      if (route.request().resourceType() !== 'document') return route.fallback();
+      const response = await route.fetch();
+      await route.fulfill({ response, headers: { ...response.headers(), 'content-security-policy': policy } });
+    });
     const task = makeTask({
       state: 'in-review',
       currentStepId: 'in-review',
@@ -28,6 +39,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expectNoSeriousViolations(page);
     await page.goto('/tasks');
     await expect(page.getByTestId('task-card')).toBeVisible();
+    await expect(page.getByTestId('status-badge').first()).toHaveCSS('background-color', 'rgba(34, 211, 238, 0.08)');
     await expectNoSeriousViolations(page);
     await page.goto(`/tasks/${task.id}`);
     await expect(page.getByRole('button', { name: 'Accept & merge' })).toBeVisible();
