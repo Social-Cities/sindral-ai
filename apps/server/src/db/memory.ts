@@ -51,6 +51,20 @@ function clone<T>(value: T): T {
  * cannot mutate stored state by accident.
  */
 export class MemoryRepository implements Repository {
+  private readonly maintenanceLeases = new Map<string, { token: string; expiresAt: number }>();
+
+  async acquireMaintenanceLease(name: string, ttlSeconds: number): Promise<string | null> {
+    const existing = this.maintenanceLeases.get(name);
+    if (existing && existing.expiresAt > Date.now()) return null;
+    const token = randomUUID();
+    this.maintenanceLeases.set(name, { token, expiresAt: Date.now() + ttlSeconds * 1000 });
+    return token;
+  }
+
+  async releaseMaintenanceLease(name: string, token: string): Promise<void> {
+    if (this.maintenanceLeases.get(name)?.token === token) this.maintenanceLeases.delete(name);
+  }
+
   private readonly profiles = new Map<string, Profile & { taskCounter: number }>();
   private readonly workflows = new Map<string, WorkflowRecord>();
   private readonly projects = new Map<string, Omit<Project, 'repositories'>>();
@@ -725,6 +739,15 @@ export class MemoryRepository implements Repository {
 
   async listJobsForTask(userId: string, taskId: string): Promise<Job[]> {
     return [...this.jobs.values()].filter((j) => j.userId === userId && j.taskId === taskId).map(clone);
+  }
+
+  async updateExpiredJob(job: ActiveJob, expiredBefore: string, patch: JobPatch): Promise<Job | null> {
+    const current = this.jobs.get(job.id);
+    if (!current || current.userId !== job.userId || current.attempt !== job.attempt
+      || !['claimed', 'running'].includes(current.status)
+      || !current.leaseExpiresAt || Date.parse(current.leaseExpiresAt) > Date.parse(expiredBefore)
+      || (this.jobLeaseTokens.get(job.id) ?? null) !== job.leaseToken) return null;
+    return this.updateJob(job.userId, job.id, patch);
   }
 
   async updateJob(userId: string, id: string, patch: JobPatch): Promise<Job | null> {

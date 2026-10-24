@@ -290,6 +290,9 @@ export interface PushDeviceUpsert {
  * cross-user lookups are explicitly named so they stand out in review.
  */
 export interface Repository {
+  /** Cross-instance maintenance lock; expires if an invocation is terminated. */
+  acquireMaintenanceLease(name: string, ttlSeconds: number): Promise<string | null>;
+  releaseMaintenanceLease(name: string, token: string): Promise<void>;
   /** Cross-tenant aggregate only; contains no identifiers or user content. */
   getOperationalSnapshot(now?: Date): Promise<OperationalSnapshot>;
   // profiles
@@ -367,6 +370,8 @@ export interface Repository {
   getJob(userId: string, id: string): Promise<Job | null>;
   listJobsForTask(userId: string, taskId: string): Promise<Job[]>;
   updateJob(userId: string, id: string, patch: JobPatch): Promise<Job | null>;
+  /** Fence recovery against heartbeats, completion, and newer claims after the sweep snapshot. */
+  updateExpiredJob(job: ActiveJob, expiredBefore: string, patch: JobPatch): Promise<Job | null>;
   /** Atomically claim queued jobs, serialised per task (see `claim_jobs` in the migration). */
   claimJobs(userId: string, workerId: string, max: number, allowedKinds?: JobKind[]): Promise<ClaimedJob[]>;
   renewJobLeases(userId: string, workerId: string, jobs: { jobId: string; leaseToken: string }[]): Promise<number>;

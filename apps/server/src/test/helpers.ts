@@ -13,6 +13,8 @@ export const TEST_JWT_SECRET = 'test-jwt-secret-that-is-long-enough-for-hs256-01
 export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
     environment: 'development',
+    runtime: 'server',
+    cronSecret: undefined,
     supabaseUrl: 'http://127.0.0.1:54321',
     supabaseAnonKey: 'anon',
     supabaseServiceRoleKey: 'service',

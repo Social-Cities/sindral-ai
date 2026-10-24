@@ -1,6 +1,5 @@
-import { buildApp } from './app.js';
+import { initializeApp } from './bootstrap.js';
 import { ConfigError, loadConfig } from './config.js';
-import { SupabaseRepository, createSupabaseClient } from './db/supabase.js';
 
 async function main(): Promise<void> {
   let config;
@@ -14,9 +13,7 @@ async function main(): Promise<void> {
     throw err;
   }
 
-  const repo = new SupabaseRepository(createSupabaseClient(config.supabaseUrl, config.supabaseServiceRoleKey));
-  await repo.assertCompatibleSchema();
-  const app = await buildApp({ config, repo });
+  const app = await initializeApp(config);
 
   const shutdown = (signal: string): void => {
     app.log.info({ signal }, 'shutting down');

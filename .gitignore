@@ -12,6 +12,7 @@ test-results/
 *.log
 .DS_Store
 .vite/
+.vercel/
 supabase/.temp/
 supabase/.branches/
 .sindral/
