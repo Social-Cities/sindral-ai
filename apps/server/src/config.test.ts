@@ -16,6 +16,8 @@ describe('config', () => {
   it('parses and applies defaults', () => {
     const config = parseConfig(valid);
     expect(config.environment).toBe('development');
+    expect(config.runtime).toBe('server');
+    expect(config.cronSecret).toBeUndefined();
     expect(config.port).toBe(8787);
     expect(config.host).toBe('0.0.0.0');
     expect(config.webOrigins).toEqual(['http://localhost:5173', 'https://app.example.com']);
@@ -58,6 +60,10 @@ describe('config', () => {
   });
 
   it('fails fast with a readable message', () => {
+    expect(() => parseConfig({ ...valid, SINDRAL_RUNTIME: 'vercel' })).toThrow(/CRON_SECRET/);
+    expect(() => parseConfig({ ...valid, SINDRAL_RUNTIME: 'vercel', CRON_SECRET: 'short' })).toThrow(/CRON_SECRET/);
+    expect(parseConfig({ ...valid, SINDRAL_RUNTIME: 'vercel', CRON_SECRET: 'c'.repeat(32) }).runtime).toBe('vercel');
+    expect(() => parseConfig({ ...valid, SINDRAL_RUNTIME: 'other' })).toThrow(/SINDRAL_RUNTIME/);
     expect(() => parseConfig({ ...valid, SECRETS_ENCRYPTION_KEY: 'short', PORT: 'abc' })).toThrow(ConfigError);
     try {
       parseConfig({ ...valid, SECRETS_ENCRYPTION_KEY: 'short' });

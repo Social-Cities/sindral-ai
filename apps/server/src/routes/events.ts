@@ -36,20 +36,29 @@ export const eventRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx }
       if (!res.writableEnded) res.write(`data: ${JSON.stringify(event)}\n\n`);
     };
     send({ type: 'ping' });
+    // A function may never see publications from a different instance. Clients
+    // periodically refetch their authenticated durable state in this mode.
+    if (ctx.sseRefreshMs > 0) send({ type: 'sync' });
     const unsubscribe = ctx.hub.subscribe(userId, send);
     const timer = setInterval(() => send({ type: 'ping' }), ctx.ssePingMs);
+    const refreshTimer = ctx.sseRefreshMs > 0 ? setInterval(() => send({ type: 'sync' }), ctx.sseRefreshMs) : null;
+    const lifetimeTimer = ctx.sseMaxDurationMs > 0 ? setTimeout(() => close(), ctx.sseMaxDurationMs) : null;
 
     let closed = false;
     const close = (): void => {
       if (closed) return;
       closed = true;
       clearInterval(timer);
+      if (refreshTimer) clearInterval(refreshTimer);
+      if (lifetimeTimer) clearTimeout(lifetimeTimer);
       unsubscribe();
       open.delete(close);
+      res.off('close', close);
+      res.off('error', close);
       if (!res.writableEnded) res.end();
     };
     open.add(close);
-    request.raw.on('close', close);
+    res.on('close', close);
     res.on('error', close);
   });
 };

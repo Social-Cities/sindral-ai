@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "buildCommand": "pnpm build:vercel",
+  "outputDirectory": "apps/web/dist",
+  "env": { "NODEJS_HELPERS": "0" },
+  "functions": { "api/handler.mjs": { "maxDuration": 300 } },
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "/api/handler" },
+    { "source": "/((?!api(?:/|$)).*)", "destination": "/index.html" }
+  ],
+  "crons": [{ "path": "/api/cron/sweep", "schedule": "* * * * *" }]
+}

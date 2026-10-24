@@ -1459,9 +1459,22 @@ export class Orchestrator {
 
   /** Requeue (or fail) jobs whose worker disappeared. Runs periodically from the app. */
   async sweepStaleJobs(now: Date = this.now()): Promise<{ requeued: number; failed: number }> {
+    // Longer than Vercel's 300s hard deadline. A terminated invocation leaves a
+    // lease that expires automatically, rather than permanently blocking recovery.
+    const token = await this.repo.acquireMaintenanceLease('stale-jobs', 360);
+    if (!token) return { requeued: 0, failed: 0 };
+    try {
+      return await this.recoverStaleJobs(now, Date.now() + 240_000);
+    } finally {
+      await this.repo.releaseMaintenanceLease('stale-jobs', token);
+    }
+  }
+
+  private async recoverStaleJobs(now: Date, deadline: number): Promise<{ requeued: number; failed: number }> {
     let requeued = 0;
     let failed = 0;
     for (const job of await this.repo.listActiveJobs()) {
+      if (Date.now() >= deadline) break; // Leave remaining work for the next cron invocation.
       if (job.status === 'applying') {
         const outcomeStartedAt = job.outcomeStartedAt ? Date.parse(job.outcomeStartedAt) : 0;
         if (outcomeStartedAt > now.getTime() - OUTCOME_LEASE_MS) continue;
@@ -1479,13 +1492,15 @@ export class Orchestrator {
       if (leaseExpiresAt > now.getTime()) continue;
       this.metrics?.inc('sindral_lease_expiries_total', { kind: job.kind });
       if (job.attempt < MAX_JOB_ATTEMPTS) {
-        await this.repo.updateJob(job.userId, job.id, { status: 'queued', workerId: null, claimedAt: null, leaseExpiresAt: null, attempt: job.attempt + 1 });
+        const recovered = await this.repo.updateExpiredJob(job, now.toISOString(), { status: 'queued', workerId: null, claimedAt: null, leaseExpiresAt: null, attempt: job.attempt + 1 });
+        if (!recovered) continue;
         requeued += 1;
         this.metrics?.inc('sindral_job_retries_total', { kind: job.kind });
         this.log.warn({ userId: job.userId, taskId: job.taskId, jobId: job.id, attempt: job.attempt + 1 }, 'requeued job from lost worker');
       } else {
         const error = 'Worker stopped responding and the job exhausted its retries';
-        await this.repo.updateJob(job.userId, job.id, { status: 'failed', error, finishedAt: now.toISOString() });
+        const recovered = await this.repo.updateExpiredJob(job, now.toISOString(), { status: 'failed', error, finishedAt: now.toISOString() });
+        if (!recovered) continue;
         const task = await this.repo.getTask(job.userId, job.taskId);
         if (task) await this.failTask(job.userId, task, job, error);
         failed += 1;

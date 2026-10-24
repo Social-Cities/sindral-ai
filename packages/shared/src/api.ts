@@ -87,4 +87,6 @@ export type ServerEvent =
   | { type: 'task.created'; taskId: string }
   | { type: 'task.deleted'; taskId: string }
   | { type: 'worker.updated'; workerId: string }
+  /** Refetch active queries from the API; safe across serverless instances. */
+  | { type: 'sync' }
   | { type: 'ping' };

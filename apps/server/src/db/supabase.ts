@@ -75,7 +75,7 @@ export function createSupabaseClient(url: string, serviceRoleKey: string): Supab
   });
 }
 
-export const EXPECTED_SCHEMA_VERSION = '20261005194103';
+export const EXPECTED_SCHEMA_VERSION = '20261024173119';
 
 // ---- row shapes (snake_case, as stored) ----
 interface ProfileRow {
@@ -536,6 +536,14 @@ export class SupabaseRepository implements Repository {
   private artifactBucketReady: Promise<void> | null = null;
 
   constructor(private readonly client: SupabaseClient) {}
+
+  async acquireMaintenanceLease(name: string, ttlSeconds: number): Promise<string | null> {
+    return run<string | null>(this.client.rpc('acquire_maintenance_lease', { p_name: name, p_ttl_seconds: ttlSeconds }));
+  }
+
+  async releaseMaintenanceLease(name: string, token: string): Promise<void> {
+    await run(this.client.rpc('release_maintenance_lease', { p_name: name, p_token: token }));
+  }
 
   async getOperationalSnapshot(): Promise<OperationalSnapshot> {
     const snapshot = await run<{
@@ -1217,6 +1225,15 @@ export class SupabaseRepository implements Repository {
 
   async updateJob(userId: string, id: string, patch: JobPatch): Promise<Job | null> {
     const row = await run<JobRow | null>(this.client.from('jobs').update(jobPatchToRow(patch)).eq('user_id', userId).eq('id', id).select('*').maybeSingle());
+    return row ? mapJob(row) : null;
+  }
+
+  async updateExpiredJob(job: ActiveJob, expiredBefore: string, patch: JobPatch): Promise<Job | null> {
+    let query = this.client.from('jobs').update(jobPatchToRow(patch))
+      .eq('user_id', job.userId).eq('id', job.id).eq('attempt', job.attempt)
+      .in('status', ['claimed', 'running']).lte('lease_expires_at', expiredBefore);
+    query = job.leaseToken ? query.eq('lease_token', job.leaseToken) : query.is('lease_token', null);
+    const row = await run<JobRow | null>(query.select('*').maybeSingle());
     return row ? mapJob(row) : null;
   }
 

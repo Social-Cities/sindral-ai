@@ -49,7 +49,7 @@ describe('runConflictResolution', () => {
       probe: async () => ({ available: true, version: '1' }),
       run: async (opts) => {
         await script(opts.env['SINDRAL_RESULT_FILE']!, opts.cwd);
-        return { exitCode: 0, tail: [], finalText: null, timedOut: false, cancelled: false, missing: false };
+        return { exitCode: 0, tail: [], finalText: null, sessionId: null, timedOut: false, cancelled: false, missing: false };
       },
     };
   }
