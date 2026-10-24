@@ -9,28 +9,31 @@ async function expectNoSeriousViolations(page: Page) {
   expect(material, material.map((violation) => `${violation.id}: ${violation.help} (${violation.nodes.length} node(s))`).join('\n')).toEqual([]);
 }
 
-test('login, home, tasks, and task review have no serious automated accessibility violations', async ({ page }) => {
-  const task = makeTask({
-    state: 'in-review',
-    currentStepId: 'in-review',
-    repos: ['acme/api'],
-    prUrl: 'https://github.com/acme/api/pull/42',
-    pullRequests: [makePullRequest()],
-    pinnedWorkflow: snapshotWorkflow(FULL_SDLC_WORKFLOW),
+for (const theme of ['dark', 'light'] as const) {
+  test(`login, home, tasks, and task review have no serious automated accessibility violations in ${theme} mode`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: theme });
+    const task = makeTask({
+      state: 'in-review',
+      currentStepId: 'in-review',
+      repos: ['acme/api'],
+      prUrl: 'https://github.com/acme/api/pull/42',
+      pullRequests: [makePullRequest()],
+      pinnedWorkflow: snapshotWorkflow(FULL_SDLC_WORKFLOW),
+    });
+    await installMockBackend(page, { tasks: [task] });
+    await page.goto('/login');
+    await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
+    await expectNoSeriousViolations(page);
+    await signIn(page);
+    await expectNoSeriousViolations(page);
+    await page.goto('/tasks');
+    await expect(page.getByTestId('task-card')).toBeVisible();
+    await expectNoSeriousViolations(page);
+    await page.goto(`/tasks/${task.id}`);
+    await expect(page.getByRole('button', { name: 'Accept & merge' })).toBeVisible();
+    await expectNoSeriousViolations(page);
   });
-  await installMockBackend(page, { tasks: [task] });
-  await page.goto('/login');
-  await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
-  await expectNoSeriousViolations(page);
-  await signIn(page);
-  await expectNoSeriousViolations(page);
-  await page.goto('/tasks');
-  await expect(page.getByTestId('task-card')).toBeVisible();
-  await expectNoSeriousViolations(page);
-  await page.goto(`/tasks/${task.id}`);
-  await expect(page.getByRole('button', { name: 'Accept & merge' })).toBeVisible();
-  await expectNoSeriousViolations(page);
-});
+}
 
 test('core task screens reflow at tablet width without document overflow', async ({ page }) => {
   await page.setViewportSize({ width: 768, height: 1024 });

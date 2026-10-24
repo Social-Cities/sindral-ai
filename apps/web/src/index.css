@@ -84,7 +84,8 @@
   --color-secondary: #eef1f7;
   --color-secondary-foreground: #4b5565;
   --color-muted: #f1f4f9;
-  --color-muted-foreground: #667085;
+  /* Maintain AA contrast for small labels on tinted workflow panels. */
+  --color-muted-foreground: #566176;
   --color-accent: #5b5bd6;
   --color-accent-foreground: #ffffff;
   --color-border: #d8deea;
@@ -95,7 +96,7 @@
   --color-success: #047857;
   --color-success-strong: #047857;
   --color-warning: #b45309;
-  --color-danger: #dc2626;
+  --color-danger: #b91c1c;
   --color-danger-strong: #b91c1c;
 
   --color-diff-surface: #f8fafc;

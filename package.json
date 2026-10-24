@@ -6,6 +6,12 @@
   "engines": {
     "node": ">=22"
   },
+  "pnpm": {
+    "overrides": {
+      "source-map-js@<1.2.2": "1.2.2",
+      "undici@>=8.0.0 <8.12.2": "8.12.2"
+    }
+  },
   "scripts": {
     "build": "pnpm -r run build",
     "build:vercel": "pnpm --filter @sindral/server... build && pnpm --filter @sindral/web build",
