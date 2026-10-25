@@ -11,7 +11,7 @@ struct SindralAIApp: App {
     init() {
         #if DEBUG
         if DemoMode.isEnabled {
-            _store = State(initialValue: AppStore(configuration: DemoMode.configuration, urlSession: DemoMode.urlSession))
+            _store = State(initialValue: AppStore(configuration: DemoMode.configuration, urlSession: DemoMode.urlSession, keychain: KeychainStore(service: "ai.sindral.demo.auth")))
             return
         }
         #endif
@@ -60,6 +60,9 @@ private struct RootView: View {
             if session.session != nil {
                 PushNotificationDelegate.configure(store: store, router: router)
                 await store.bootstrap()
+                #if DEBUG
+                if DemoMode.isEnabled { return }
+                #endif
                 await store.requestPushNotifications()
             }
         }

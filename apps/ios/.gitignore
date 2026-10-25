@@ -1,3 +1,4 @@
 Config/Local.xcconfig
+Config/*.local.xcconfig
 *.xcuserstate
 xcuserdata/

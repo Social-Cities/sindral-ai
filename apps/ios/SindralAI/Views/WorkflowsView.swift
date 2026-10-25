@@ -374,7 +374,7 @@ private struct StepConfigPanel: View {
 
     static let engines = ["claude", "codex"]
     static let modes = ["high", "normal", "low"]
-    static let outputs = ["plan", "pr", "review", "verdict", "document", "troubleshoot", "conflict-resolution", "merge"]
+    static let outputs = ["plan", "implementation", "pr", "review-slice", "review", "verdict", "document", "design", "troubleshoot", "conflict-resolution", "merge"]
     static let tools = ["read_file", "write_file", "run_command", "search_codebase", "list_directory", "create_pr", "web_search"]
     static let permissions = ["read", "write", "execute"]
     static let models = ["claude": ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5", "claude-fable-5-1"], "codex": ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol"]]
@@ -431,7 +431,12 @@ private struct StepConfigPanel: View {
             let options = (Self.models[step.engine ?? ""] ?? []) + (step.model.map { model in (Self.models[step.engine ?? ""] ?? []).contains(model) ? [] : [model] } ?? [])
             menu(selection: Binding(get: { step.model ?? "" }, set: { step.model = $0 }), options: options, mono: true)
         }
-        field("Output") { menu(selection: Binding(get: { step.output ?? "" }, set: { step.output = $0 }), options: Self.outputs, mono: true) }
+        field("Output") {
+            menu(selection: Binding(get: { step.output ?? "" }, set: {
+                step.output = $0
+                if $0 == "design" { step.engine = "claude"; step.resumeSessionKey = "design" }
+            }), options: Self.outputs, mono: true)
+        }
         field("Prompt") {
             TextEditor(text: Binding(get: { step.prompt ?? "" }, set: { step.prompt = $0 }))
                 .font(Theme.mono(13)).scrollContentBackground(.hidden)

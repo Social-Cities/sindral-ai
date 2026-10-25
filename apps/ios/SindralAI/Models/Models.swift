@@ -47,6 +47,7 @@ struct WorkflowStep: Codable, Identifiable, Hashable, Sendable {
     var tools: [String]?
     var permissions: [String]?
     var output: String?
+    var resumeSessionKey: String?
     var position: WorkflowPosition?
 }
 
@@ -195,6 +196,7 @@ struct TaskDetail: Codable, Identifiable, Hashable, Sendable {
     let artifacts: [Artifact]
     let repositories: [TaskRepository]
     let pullRequests: [PullRequest]
+    var designInput: DesignInputSummary? = nil
 
     var summary: SindralTask { SindralTask(id: id, userId: userId, version: version, key: key, title: title, description: description, projectId: projectId, outcome: outcome, acceptanceCriteria: acceptanceCriteria, state: state, currentStepId: currentStepId, workflowId: workflowId, pinnedWorkflow: pinnedWorkflow, repos: repos, ticketUrl: ticketUrl, prUrl: prUrl, branch: branch, baseBranch: baseBranch, plan: plan, parentTaskId: parentTaskId, sequence: sequence, failedStepId: failedStepId, lastError: lastError, createdAt: createdAt, updatedAt: updatedAt) }
 }

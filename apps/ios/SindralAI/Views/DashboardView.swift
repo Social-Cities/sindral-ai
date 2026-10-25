@@ -176,7 +176,7 @@ struct CreateTaskCard: View {
     @Environment(AppRouter.self) private var router
     var onCreated: () -> Void = {}
 
-    private enum Mode: String, CaseIterable { case text = "New task", url = "Paste a URL", project = "New project" }
+    private enum Mode: String, CaseIterable { case text = "New task", design = "Design an app", url = "Paste a URL", project = "New project" }
     @State private var mode = Mode.text
     @State private var textInput = ""
     @State private var urlInput = ""
@@ -196,30 +196,40 @@ struct CreateTaskCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 0) {
-                ForEach(Mode.allCases, id: \.self) { item in
-                    let selected = mode == item
-                    Button { mode = item } label: {
-                        Text(item.rawValue)
-                            .font(Theme.font(15, .medium))
-                            .foregroundStyle(selected ? Theme.foreground : Theme.mutedForeground)
-                            .padding(.horizontal, 12).frame(height: 48)
-                            .overlay(alignment: .bottom) { if selected { Rectangle().fill(Theme.accent).frame(height: 2) } }
-                            .contentShape(Rectangle())
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 0) {
+                    ForEach(Mode.allCases, id: \.self) { item in
+                        let selected = mode == item
+                        Button { mode = item } label: {
+                            Text(item.rawValue)
+                                .font(Theme.font(15, .medium))
+                                .foregroundStyle(selected ? Theme.foreground : Theme.mutedForeground)
+                                .padding(.horizontal, 12).frame(height: 48)
+                                .overlay(alignment: .bottom) { if selected { Rectangle().fill(Theme.accent).frame(height: 2) } }
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(selected ? .isSelected : [])
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(selected ? .isSelected : [])
                 }
+                .padding(.horizontal, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
             .hairline(.bottom)
 
             VStack(alignment: .leading, spacing: 14) {
                 if mode == .project {
                     ProjectsSettingsCard(embedded: true)
                 } else {
-                    if mode == .text { textMode } else { urlMode }
+                    if mode == .text || mode == .design { textMode } else { urlMode }
+                    if mode == .design {
+                        Label("Describe your app, review the screens, then approve a design for implementation.", systemImage: "sparkles")
+                            .font(Theme.secondaryBody).foregroundStyle(Theme.accent)
+                        if designWorkflow == nil {
+                            Text("The server has no design workflow. Refresh workflows or add one in Workflows.")
+                                .font(Theme.secondaryBody).foregroundStyle(Theme.warning)
+                        }
+                    }
                     projectSection
                     repoSection
                     if let formError { Text(formError).font(Theme.font(13)).foregroundStyle(Theme.dangerText) }
@@ -238,6 +248,11 @@ struct CreateTaskCard: View {
         .onAppear { pickDefaultWorkflow(); pickDefaultProject() }
         .onChange(of: store.workflows) { pickDefaultWorkflow() }
         .onChange(of: store.projects) { pickDefaultProject() }
+        .onChange(of: mode) { _, mode in
+            formError = nil
+            if mode == .design { projectID = ""; reposInput = "" }
+            else { pickDefaultProject() }
+        }
         .task { await loadGitHubCatalog() }
         .onChange(of: router.section) { _, section in
             guard section == .home else { return }
@@ -252,6 +267,7 @@ struct CreateTaskCard: View {
                 Menu {
                     if !store.projects.isEmpty {
                         Picker("Project", selection: $projectID) {
+                            if mode == .design { Text("No project").tag("") }
                             ForEach(store.projects) { project in
                                 Text(project.name).tag(project.id)
                             }
@@ -282,7 +298,7 @@ struct CreateTaskCard: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 Image(systemName: "shippingbox").font(.system(size: 13)).foregroundStyle(Theme.mutedForeground)
-                TextField("", text: $reposInput, prompt: Text(verbatim: selectedProject != nil ? "Repositories: leave empty to use all project repos" : "Repositories: owner/name, owner/other").foregroundStyle(Theme.mutedForeground))
+                TextField("", text: $reposInput, prompt: Text(verbatim: mode == .design ? "Reference repositories (optional): owner/name" : selectedProject != nil ? "Repositories: leave empty to use all project repos" : "Repositories: owner/name, owner/other").foregroundStyle(Theme.mutedForeground))
                     .font(Theme.mono(13)).foregroundStyle(Theme.foreground)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                     .onChange(of: reposInput) { formError = nil }
@@ -311,7 +327,7 @@ struct CreateTaskCard: View {
                     .surface(Theme.input, radius: Theme.Radius.control)
                 }
                 .accessibilityLabel("Add repository")
-            } else if selectedProject == nil {
+            } else if selectedProject == nil && mode != .design {
                 if let catalog = githubCatalog, catalog.connected {
                     if catalog.repositories.isEmpty {
                         Text("No GitHub repositories are available.")
@@ -355,7 +371,8 @@ struct CreateTaskCard: View {
     private var createButton: some View {
                     Button { Task { await create() } } label: {
                         HStack(spacing: 10) {
-                            Text("Create task").fixedSize()
+                            if creating { ProgressView().tint(.white) }
+                            Text(mode == .design ? "Create design" : "Create task").fixedSize()
                             Text("⌘↵").font(Theme.mono(11)).padding(.horizontal, 5).padding(.vertical, 2)
                                 .background(.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 5))
                                 .accessibilityHidden(true)
@@ -367,8 +384,9 @@ struct CreateTaskCard: View {
     }
 
     private var textMode: some View {
-        TextField("", text: $textInput, prompt: Text("Describe the task in detail. Include the problem, expected behavior, and any relevant context...").foregroundStyle(Theme.mutedForeground), axis: .vertical)
+        TextField("", text: $textInput, prompt: Text(mode == .design ? "Describe your app, its users, screens, flows, and visual direction…" : "Describe the task in detail. Include the problem, expected behavior, and any relevant context...").foregroundStyle(Theme.mutedForeground), axis: .vertical)
             .font(Theme.body).foregroundStyle(Theme.foreground).lineSpacing(4)
+            .lineLimit(5...12)
             .frame(minHeight: 128, alignment: .topLeading)
             .accessibilityLabel("Task description")
     }
@@ -417,7 +435,7 @@ struct CreateTaskCard: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "point.3.connected.trianglepath.dotted").font(.system(size: 13))
-                Text(store.workflows.first { $0.id == workflowID }?.name ?? "Workflow").lineLimit(1).fixedSize()
+                Text((mode == .design ? designWorkflow : store.workflows.first { $0.id == workflowID })?.name ?? "Workflow").lineLimit(1)
                 Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
             }
             .font(Theme.font(15)).foregroundStyle(Theme.secondaryForeground)
@@ -425,9 +443,14 @@ struct CreateTaskCard: View {
             .surface(Theme.secondary.opacity(0.6), radius: Theme.Radius.control)
         }
         .accessibilityLabel("Workflow")
+        .disabled(mode == .design)
     }
 
-    private var canCreate: Bool { mode == .text ? !textInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty : ticket != nil }
+    private var designWorkflow: Workflow? { store.workflows.first(where: \.isDesign) }
+    private var canCreate: Bool {
+        if mode == .design { return designWorkflow != nil && !textInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        return mode == .text ? !textInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty : ticket != nil
+    }
     private var selectedProject: Project? { store.projects.first { $0.id == projectID } }
 
     private func pickDefaultWorkflow() {
@@ -436,6 +459,7 @@ struct CreateTaskCard: View {
     }
 
     private func pickDefaultProject() {
+        guard mode != .design else { return }
         guard projectID.isEmpty || !store.projects.contains(where: { $0.id == projectID }) else { return }
         projectID = store.projects.first?.id ?? ""
     }
@@ -482,8 +506,8 @@ struct CreateTaskCard: View {
         formError = nil
         guard let repos = parseRepos() else { return }
         creating = true; defer { creating = false }
-        let description = mode == .text ? textInput.trimmingCharacters(in: .whitespacesAndNewlines) : ticket?.description ?? ""
-        let title = mode == .text ? String((description.split(separator: "\n").first ?? "").prefix(200)) : ticket?.title ?? ""
+        let description = mode != .url ? textInput.trimmingCharacters(in: .whitespacesAndNewlines) : ticket?.description ?? ""
+        let title = mode != .url ? String((description.split(separator: "\n").first ?? "").prefix(200)) : ticket?.title ?? ""
         do {
             let resolvedProjectID = projectID.isEmpty ? nil : projectID
             var resolvedRepos = repos
@@ -491,10 +515,11 @@ struct CreateTaskCard: View {
                 resolvedRepos = project.repositories.map(\.repository)
             }
 
-            _ = try await api.createTask(title: title, description: description, ticket: mode == .url ? ticket : nil, projectId: resolvedProjectID, repos: resolvedRepos, workflowId: workflowID.isEmpty ? nil : workflowID)
+            let created = try await api.createTask(title: title, description: description, ticket: mode == .url ? ticket : nil, projectId: resolvedProjectID, repos: resolvedRepos, workflowId: mode == .design ? designWorkflow?.id : (workflowID.isEmpty ? nil : workflowID))
             textInput = ""; urlInput = ""; ticket = nil; reposInput = ""; projectID = resolvedProjectID ?? ""
             await store.refreshTasks()
             onCreated()
+            if mode == .design { router.openTask(created.id) }
         } catch { formError = error.localizedDescription }
     }
 
@@ -508,7 +533,7 @@ struct CreateTaskCard: View {
             let data = try Data(contentsOf: url)
             guard data.count <= 1_048_576 else { uploadNote = "File is larger than 1 MB."; return }
             let content = String(decoding: data, as: UTF8.self)
-            mode = .text
+            if mode != .design { mode = .text }
             textInput = textInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? content : "\(textInput.trimmingCharacters(in: .whitespacesAndNewlines))\n\n\(content)"
             uploadNote = "Loaded \(url.lastPathComponent)"
         } catch { uploadNote = "Could not read the file." }

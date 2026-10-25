@@ -40,7 +40,7 @@ enum Theme {
     static let borderStrong = color(dark: 0x2A2A44, light: 0xB9C2D2)
     static let foreground = color(dark: 0xDDE1EE, light: 0x111827)
     static let secondaryForeground = color(dark: 0x8B92A8, light: 0x4B5565)
-    static let mutedForeground = color(dark: 0x7B849A, light: 0x667085)
+    static let mutedForeground = color(dark: 0x7B849A, light: 0x566176)
     static let primary = color(dark: 0x7C3AED, light: 0x6D28D9)
     static let accent = color(dark: 0x818CF8, light: 0x5B5BD6)
     static let success = color(dark: 0x047857, light: 0x047857)
@@ -112,6 +112,9 @@ struct StateStyle: Hashable {
 
     static let known: [String: StateStyle] = [
         "todo": .init(label: "Todo", color: Color(hex: 0x8B92A8), pulses: false),
+        "designing": .init(label: "Designing", color: Theme.violet, pulses: true),
+        "design-review": .init(label: "Design Review", color: Theme.accent, pulses: false),
+        "design-revising": .init(label: "Revising Design", color: Theme.violet, pulses: true),
         "planning": .init(label: "Planning", color: Color(hex: 0xFBBF24), pulses: true),
         "plan-review": .init(label: "Plan Review", color: Color(hex: 0x38BDF8), pulses: false),
         "planning-feedback": .init(label: "Plan Feedback", color: Color(hex: 0xFB923C), pulses: true),

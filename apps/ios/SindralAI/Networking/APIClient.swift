@@ -67,10 +67,20 @@ final class APIClient {
 
     func listTasks() async throws -> [SindralTask] { let response: TasksResponse = try await request("api/tasks"); return response.tasks }
     func task(_ id: String) async throws -> TaskDetail { let response: TaskResponse<TaskDetail> = try await request("api/tasks/\(id)"); return response.task }
-    func createTask(title: String, description: String, ticket: TicketImport?, projectId: String? = nil, repos: [String], workflowId: String?, newRepository: NewGitHubRepository? = nil) async throws -> SindralTask {
-        struct Body: Encodable { let title: String; let description: String; let ticketUrl: String?; let key: String?; let projectId: String?; let workflowId: String?; let repos: [String]; let newRepository: NewGitHubRepository? }
+    func createTask(title: String, description: String, ticket: TicketImport?, projectId: String? = nil, repos: [String], workflowId: String?, newRepository: NewGitHubRepository? = nil, designHandoff: DesignHandoffRequest? = nil) async throws -> SindralTask {
+        struct Body: Encodable { let title: String; let description: String; let ticketUrl: String?; let key: String?; let projectId: String?; let workflowId: String?; let repos: [String]; let newRepository: NewGitHubRepository?; let designHandoff: DesignHandoffRequest? }
         let key = ticket.flatMap { $0.id.range(of: "^[A-Z][A-Z0-9]*-[0-9]+$", options: .regularExpression) == nil ? nil : $0.id }
-        let response: TaskResponse<SindralTask> = try await request("api/tasks", method: "POST", body: Body(title: title, description: description, ticketUrl: ticket?.url, key: key, projectId: projectId, workflowId: workflowId, repos: repos, newRepository: newRepository)); return response.task
+        let response: TaskResponse<SindralTask> = try await request("api/tasks", method: "POST", body: Body(title: title, description: description, ticketUrl: ticket?.url, key: key, projectId: projectId, workflowId: workflowId, repos: repos, newRepository: newRepository, designHandoff: designHandoff)); return response.task
+    }
+    func design(taskId: String) async throws -> DesignOverview { try await request("api/tasks/\(taskId)/design") }
+    func designRevision(taskId: String, revisionId: String) async throws -> DesignRevisionView {
+        try await request("api/tasks/\(taskId)/design/revisions/\(revisionId)")
+    }
+    func approveDesign(taskId: String, revisionId: String, expectedVersion: Int) async throws -> DesignRevision {
+        struct Body: Encodable { let revisionId: String; let expectedVersion: Int }
+        struct Response: Decodable { let revision: DesignRevision }
+        let response: Response = try await request("api/tasks/\(taskId)/design/approve", method: "POST", body: Body(revisionId: revisionId, expectedVersion: expectedVersion))
+        return response.revision
     }
     func updateTask(_ id: String, title: String, description: String, projectId: String?, repos: [String], workflowId: String?) async throws -> SindralTask {
         struct Body: Encodable { let title: String; let description: String; let projectId: String?; let repos: [String]; let workflowId: String? }
@@ -137,8 +147,10 @@ final class APIClient {
     func profile() async throws -> Profile { let response: ProfileResponse = try await request("api/me"); return response.user }
     func importTicket(_ url: String) async throws -> TicketImport { struct Body: Encodable { let url: String }; let response: TicketResponse = try await request("api/tickets/import", method: "POST", body: Body(url: url)); return response.ticket }
 
-    private func url(for path: String) throws -> URL {
-        guard let url = URL(string: path, relativeTo: baseURL)?.absoluteURL else { throw APIError.invalidURL }
+    func url(for path: String) throws -> URL {
+        // Every REST route is rooted at /api on the combined Vercel frontend/API origin.
+        guard let url = URL(string: "/" + path.trimmingCharacters(in: CharacterSet(charactersIn: "/")), relativeTo: baseURL)?.absoluteURL,
+              url.scheme == baseURL.scheme, url.host == baseURL.host, url.port == baseURL.port else { throw APIError.invalidURL }
         return url
     }
     private func decodeError(data: Data, status: Int) -> APIError {

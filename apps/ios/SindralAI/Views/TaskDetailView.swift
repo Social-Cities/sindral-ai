@@ -27,6 +27,8 @@ struct TaskDetailView: View {
     @State private var showingJobs = false
     @State private var confirmingDelete = false
     @State private var pendingClose: String?
+    @State private var loadedTaskID: String?
+    @State private var userSelectedTab = false
 
     private var isCompact: Bool { horizontalSizeClass == .compact }
     /// Changes whenever the list refresh (SSE) reports a newer version of this task.
@@ -54,6 +56,9 @@ struct TaskDetailView: View {
             Text("This stops queued work for the task and hides it from the default Active task view. If an agent is already working, wait for it to finish first. You can still find the task with the status filter.")
         }
         .task(id: "\(taskID)|\(listVersion)") { await load() }
+        .onChange(of: task?.resolvedWorkflow(store.workflows)?.isDesign) { _, isDesign in
+            if isDesign == true, !userSelectedTab { selectedTab = .design }
+        }
     }
 
     private func content(_ task: TaskDetail) -> some View {
@@ -98,7 +103,37 @@ struct TaskDetailView: View {
 
     // MARK: Toolbar
 
-    private func toolbar(_ task: TaskDetail) -> some View {
+    @ViewBuilder private func toolbar(_ task: TaskDetail) -> some View {
+        if isCompact {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    Text(task.key).font(Theme.mono(13)).foregroundStyle(Theme.mutedForeground)
+                    StatusBadge(state: task.state, step: task.currentStep(store.workflows))
+                    Spacer(minLength: 0)
+                    moreMenu(task)
+                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(task.summary.availableActions(workflows: store.workflows)) { action in
+                            Button(action.label) { Task { await run(action.event) } }
+                                .buttonStyle(.sindral(ButtonVariant.forEvent(action.event))).disabled(isActing)
+                        }
+                        if task.isAgentActive(store.workflows) {
+                            Button("Stop agent") { Task { await stopAgent() } }.buttonStyle(.sindral(.warning)).disabled(isActing)
+                            ProgressView().tint(Theme.violet)
+                            Text("Agent working…").font(Theme.secondaryBody).foregroundStyle(Theme.secondaryForeground)
+                        }
+                    }.fixedSize(horizontal: true, vertical: false)
+                }
+                if let actionError { Text(actionError).font(Theme.secondaryBody).foregroundStyle(Theme.dangerText) }
+            }
+            .padding(.horizontal, 20).padding(.vertical, 10).hairline(.bottom)
+        } else {
+            regularToolbar(task)
+        }
+    }
+
+    private func regularToolbar(_ task: TaskDetail) -> some View {
         let actions = task.summary.availableActions(workflows: store.workflows)
             .filter { $0.event != "approve" || (selectedTab != .summary && selectedTab != .plan) }
         let agentActive = task.isAgentActive(store.workflows)
@@ -172,7 +207,7 @@ struct TaskDetailView: View {
 
     private func tabs(_ task: TaskDetail) -> [DetailTab] {
         DetailTab.allCases.filter { tab in
-            tab != .review || hasReviewSurface(task)
+            (tab != .review || hasReviewSurface(task)) && (tab != .design || task.hasDesign(store.workflows))
         }
     }
 
@@ -189,7 +224,7 @@ struct TaskDetailView: View {
         let bar = HStack(spacing: 4) {
             ForEach(tabs(task)) { tab in
                 let selected = selectedTab == tab
-                Button { selectedTab = tab } label: {
+                Button { selectedTab = tab; userSelectedTab = true } label: {
                     HStack(spacing: 6) {
                         Text(tab.title)
                         if let count = count(tab, task) { Text("\(count)").font(Theme.mono(11)).foregroundStyle(Theme.mutedForeground) }
@@ -229,6 +264,7 @@ struct TaskDetailView: View {
     @ViewBuilder private func tabContent(_ task: TaskDetail) -> some View {
         let canApprove = task.summary.availableActions(workflows: store.workflows).contains { $0.event == "approve" }
         switch selectedTab {
+        case .design: TaskDesignView(task: task, didChange: { await load() }, onConversation: { selectedTab = .chat })
         case .summary:
             TaskSummaryView(task: task, canApprove: canApprove, approving: isActing,
                             onApprove: { Task { await run("approve") } }, onViewPlan: { selectedTab = .plan },
@@ -246,6 +282,7 @@ struct TaskDetailView: View {
     @ViewBuilder private func compactTabContent(_ task: TaskDetail) -> some View {
         let canApprove = task.summary.availableActions(workflows: store.workflows).contains { $0.event == "approve" }
         switch selectedTab {
+        case .design: TaskDesignView(task: task, scrolls: false, didChange: { await load() }, onConversation: { selectedTab = .chat })
         case .summary:
             TaskSummaryView(task: task, canApprove: canApprove, approving: isActing, scrolls: false,
                             onApprove: { Task { await run("approve") } }, onViewPlan: { selectedTab = .plan },
@@ -264,7 +301,19 @@ struct TaskDetailView: View {
 
     private func load() async {
         isLoading = task == nil; defer { isLoading = false }
-        do { task = try await api.task(taskID); error = nil } catch { self.error = error }
+        do {
+            let loaded = try await api.task(taskID)
+            try Task.checkCancellation()
+            task = loaded; error = nil
+            if loadedTaskID != taskID {
+                selectedTab = loaded.resolvedWorkflow(store.workflows)?.isDesign == true ? .design : .summary
+                userSelectedTab = false
+                #if DEBUG
+                if DemoMode.isEnabled, let tab = DemoMode.tab { selectedTab = tab; userSelectedTab = true }
+                #endif
+                loadedTaskID = taskID
+            }
+        } catch is CancellationError { } catch { self.error = error }
     }
 
     private func run(_ event: String) async {
@@ -286,7 +335,7 @@ struct TaskDetailView: View {
 }
 
 enum DetailTab: String, CaseIterable, Identifiable {
-    case summary, plan, chat, code, review, steps, artifacts
+    case summary, design, plan, chat, code, review, steps, artifacts
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -860,7 +909,7 @@ private struct TaskReviewView: View {
             }
         }
         .onAppear { selectFirstIfNeeded(docs) }
-        .onChange(of: docs.map(\.id)) { _ in selectFirstIfNeeded(documents) }
+        .onChange(of: docs.map(\.id)) { selectFirstIfNeeded(documents) }
     }
 
     private var documents: [ReviewDocument] {

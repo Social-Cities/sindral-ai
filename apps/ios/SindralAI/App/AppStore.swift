@@ -15,8 +15,8 @@ final class AppStore {
     var errorMessage: String?
     private var eventTask: Task<Void, Never>?
 
-    init(configuration: AppConfiguration, urlSession: URLSession = .shared) {
-        let session = SessionStore(configuration: configuration, urlSession: urlSession)
+    init(configuration: AppConfiguration, urlSession: URLSession = .shared, keychain: KeychainStore = KeychainStore(service: "ai.sindral.app.auth")) {
+        let session = SessionStore(configuration: configuration, urlSession: urlSession, keychain: keychain)
         self.session = session
         self.api = APIClient(baseURL: configuration.apiURL, sessionStore: session, urlSession: urlSession)
     }
@@ -56,7 +56,9 @@ final class AppStore {
             while !Task.isCancelled, session.session != nil {
                 do {
                     liveStatus = "Connecting"
-                    var request = URLRequest(url: api.baseURL.appending(path: "api/events"))
+                    var request = URLRequest(url: try api.url(for: "api/events"))
+                    request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                    request.cachePolicy = .reloadIgnoringLocalCacheData
                     request.setValue("Bearer \(try await session.validAccessToken())", forHTTPHeaderField: "Authorization")
                     let (bytes, response) = try await api.urlSession.bytes(for: request)
                     guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }

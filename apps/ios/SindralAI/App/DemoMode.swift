@@ -81,7 +81,19 @@ enum DemoFixtures {
         case ("POST", "/auth/v1/token"), ("POST", "/auth/v1/signup"):
             return Data(#"{"access_token":"demo","refresh_token":"demo","expires_in":86400,"user":{"id":"demo-user","email":"luc@example.com"}}"#.utf8)
         case ("GET", "/api/tasks"): return json(["tasks": tasks])
-        case ("GET", "/api/workflows"): return json(["workflows": [fullSDLC]])
+        case ("GET", "/api/workflows"): return json(["workflows": [fullSDLC, designWorkflow]])
+        case ("GET", "/api/projects"): return json(["projects": [Project]()])
+        case ("GET", "/api/github/catalog"): return json(GitHubCatalog(connected: true, source: "oauth", repositories: [], owners: []))
+        case ("GET", "/api/tasks/d1/design"):
+            let revision = designRevision
+            return json(DesignOverview(revisions: [.init(id: revision.id, taskId: revision.taskId, jobId: revision.jobId, summary: revision.result.summary,
+                designUrl: revision.result.designUrl, screens: revision.result.screens, createdAt: revision.createdAt, approvedAt: revision.approvedAt)],
+                checkpointAt: ago(minutes: 1), input: nil, inputPreviewUrls: []))
+        case ("GET", "/api/tasks/d1/design/revisions/demo-revision"):
+            return json(DemoRevisionResponse(revision: designRevision, previewUrls: ["/api/design-previews/d1?token=demo"]))
+        case ("POST", "/api/tasks/d1/design/approve"):
+            designLock.withLock { designApproved = true }
+            return json(["revision": designRevision])
         case ("GET", "/api/workers"): return json(["workers": workers])
         case ("GET", "/api/me"): return json(["user": Profile(id: "demo-user", email: "luc@example.com", displayName: "Luc")])
         case ("GET", "/api/settings/worker-keys"): return json(["keys": [WorkerKey(id: "key-1", name: "MacBook Pro", keyPrefix: "sk" + "_sindral_7f3a", createdAt: ago(days: 12), lastUsedAt: ago(minutes: 2), revokedAt: nil)]])
@@ -150,11 +162,13 @@ enum DemoFixtures {
 
     static let workers = [Worker(id: "w1", name: "MacBook Pro", hostname: "lucs-mbp.local", version: "0.1.0", status: "online", runningJobs: 1, lastSeenAt: ago(minutes: 1))]
 
-    private static func task(_ id: String, key: String, title: String, state: String, step: String?, updated: String, description: String = "", outcome: String = "", criteria: String = "", ticket: String? = nil, pr: String? = nil, plan: String? = nil, lastError: String? = nil) -> SindralTask {
-        SindralTask(id: id, userId: "demo-user", version: 3, key: key, title: title, description: description, projectId: nil, outcome: outcome, acceptanceCriteria: criteria, state: state, currentStepId: step, workflowId: "wf-default", pinnedWorkflow: nil, repos: ["social-cities/sindral-ai"], ticketUrl: ticket, prUrl: pr, branch: pr == nil ? nil : "sindral/\(key.lowercased())", baseBranch: "main", plan: plan, parentTaskId: nil, sequence: nil, failedStepId: lastError == nil ? nil : "merge", lastError: lastError, createdAt: ago(days: 4), updatedAt: updated)
+    private static func task(_ id: String, key: String, title: String, state: String, step: String?, updated: String, description: String = "", outcome: String = "", criteria: String = "", ticket: String? = nil, pr: String? = nil, plan: String? = nil, lastError: String? = nil, workflowID: String = "wf-default") -> SindralTask {
+        SindralTask(id: id, userId: "demo-user", version: 3, key: key, title: title, description: description, projectId: nil, outcome: outcome, acceptanceCriteria: criteria, state: state, currentStepId: step, workflowId: workflowID, pinnedWorkflow: nil, repos: ["social-cities/sindral-ai"], ticketUrl: ticket, prUrl: pr, branch: pr == nil ? nil : "sindral/\(key.lowercased())", baseBranch: "main", plan: plan, parentTaskId: nil, sequence: nil, failedStepId: lastError == nil ? nil : "merge", lastError: lastError, createdAt: ago(days: 4), updatedAt: updated)
     }
 
     static let tasks: [SindralTask] = [
+        task("d1", key: "SIN-62", title: "Design a calmer workspace", state: "design-review", step: "design-review", updated: ago(minutes: 1),
+             description: "A focused workspace for reviewing agent work, decisions and next steps.", workflowID: "wf-design"),
         task("t51", key: "SIN-51", title: "Add rate limiting to the worker job API", state: "in-review", step: "in-review", updated: ago(minutes: 4),
              description: "Workers poll `/api/worker/jobs` in a tight loop when idle. Add a per-key token bucket and return `429` with **Retry-After** so misbehaving workers back off.",
              outcome: "Worker endpoints are rate limited per worker key, with limits configurable by environment variable.",
@@ -203,5 +217,40 @@ enum DemoFixtures {
             Artifact(id: "artifact-review-t51", taskId: id, jobId: "job-review", name: "adversarial-review.md", contentType: "text/markdown", content: "## Findings\nNo blocking findings.\n\n## Residual risk\nRate-limit windows should be watched after rollout to confirm production worker cadence.", byteSize: 126, downloadUrl: nil, createdAt: ago(minutes: 6)),
         ]
     }
+
+    static let designWorkflow = Workflow(id: "wf-design", name: "Claude Design", description: "Design, review and approve an app.", entryStepId: "todo",
+        steps: [
+            .init(id: "todo", type: "human", label: "Design brief", state: "todo"),
+            .init(id: "design", type: "agent", label: "Create design", state: "designing", engine: "claude", model: "claude-opus-5", mode: "high", prompt: "Design {{task_description}}", output: "design", resumeSessionKey: "design"),
+            .init(id: "design-review", type: "human", label: "Review design", state: "design-review"),
+            .init(id: "design-revise", type: "agent", label: "Revise design", state: "design-revising", engine: "claude", model: "claude-opus-5", mode: "high", prompt: "Revise {{feedback}}", output: "design", resumeSessionKey: "design"),
+            .init(id: "done", type: "end", label: "Approved design", state: "done"),
+        ], edges: [
+            .init(from: "todo", to: "design", event: "start", label: "Start designing"),
+            .init(from: "design", to: "design-review", event: "complete"),
+            .init(from: "design-review", to: "design-revise", event: "feedback"),
+            .init(from: "design-revise", to: "design-review", event: "complete"),
+            .init(from: "design-review", to: "done", event: "accept", label: "Finish design"),
+        ])
+
+    private struct DemoRevisionResponse: Encodable { let revision: DesignRevision; let previewUrls: [String] }
+    private static let designLock = NSLock()
+    private nonisolated(unsafe) static var designApproved = false
+    static var designRevision: DesignRevision {
+        .init(id: "demo-revision", taskId: "d1", jobId: "demo-job", result: .init(kind: "design",
+            summary: "A quieter command center with a clear daily focus, concise task cards, and a dedicated review queue.",
+            designUrl: "https://claude.ai/design/demo", specification: "## Workspace\nUse a warm neutral canvas, violet accents, and generous spacing.\n\n## Screens and flows\n- Home highlights the current focus and the next review.\n- Tasks show state, owner, and a concise description.\n- Review surfaces the approved design and implementation scope.\n\n## Responsive behavior\nUse a single column on iPhone and a sidebar on iPad.\n\n## Interaction states\nProvide loading, empty, error, and offline states for every data view.",
+            questions: [], screens: [.init(name: "Workspace", path: "index.html")],
+            files: [.init(path: "index.html", contentType: "text/html", encoding: "utf8", content: designHTML, sha256: "demo")],
+            outcome: nil, acceptanceCriteria: nil), createdAt: ago(minutes: 2),
+            approvedAt: designLock.withLock { designApproved } ? ago(minutes: 1) : nil)
+    }
+
+    static let designHTML = """
+    <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+    <style>*{box-sizing:border-box}body{margin:0;background:#f6f5f2;color:#24242e;font:15px -apple-system,sans-serif;padding:28px 22px}header{display:flex;justify-content:space-between;align-items:center;font-weight:650}.logo{background:#7257c7;color:white;border-radius:9px;padding:8px 11px}small{font-size:10px;letter-spacing:1.5px;color:#76727f}h1{font-size:34px;line-height:1.08;letter-spacing:-1.3px;margin:18px 0 12px}p{color:#797482;line-height:1.6}.focus{background:#eae5f6;border-radius:18px;padding:22px;margin:26px 0}h2{font-size:21px;letter-spacing:-.5px;margin:12px 0}.pill{display:inline-block;background:white;border-radius:20px;padding:7px 11px;color:#7257c7;font-size:11px}.row{padding:16px 0;border-bottom:1px solid #e4e1e8;display:flex;gap:14px;align-items:center}.dot{width:9px;height:9px;border-radius:50%;background:#977bd3}.meta{font-size:11px;color:#8c8595;margin-top:6px}</style></head>
+    <body><header><span><span class="logo">s</span> &nbsp; sindral</span><span>◉</span></header><div style="margin-top:38px"><small>YOUR WORKSPACE</small><h1>Room for<br>your next idea.</h1><p>Make space for the work that matters.</p></div><div class="focus"><small>TODAY’S FOCUS</small><h2>A calmer command center</h2><p>One clear place to review, decide,<br>and keep things moving.</p><span class="pill">Ready for your review ↗</span></div><small>IN MOTION · 2</small><div class="row"><span class="dot"></span><div>Refine the onboarding flow<div class="meta">Design · Ready for review</div></div></div><div class="row"><span class="dot" style="background:#5ba58d"></span><div>Build the workspace shell<div class="meta">Implementation · In progress</div></div></div></body></html>
+    """
 }
 #endif

@@ -1,7 +1,7 @@
-// Supply these values in an untracked Local.xcconfig or CI build settings.
-SINDRAL_API_URL = https:/$()/api.example.com
-SUPABASE_URL = https:/$()/project.supabase.co
-SUPABASE_ANON_KEY =
+// Public client configuration for the hosted Vercel deployment.
+SINDRAL_API_URL = https:/$()/sindral-ai.vercel.app
+SUPABASE_URL = https:/$()/xixnyviobybjvrgfgjun.supabase.co
+SUPABASE_ANON_KEY = sb_publishable_Ix59CPIhLfoybKVySQNL7g_0Dyozz7F
 APS_ENVIRONMENT = production
 PUSH_ENVIRONMENT = production
-#include? "Local.xcconfig"
+#include? "Release.local.xcconfig"
