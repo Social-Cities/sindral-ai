@@ -2,3 +2,7 @@
 # fail_action enabled for all other alerts, including the entire CSP rule.
 # https://www.zaproxy.org/docs/alerts/10109/
 10109	IGNORE	Modern Web Application (expected React SPA)
+# Public SPA files and content-hashed assets are intentionally cacheable. This
+# rule reports that fact at informational risk; private-data cache alerts remain enabled.
+# https://www.zaproxy.org/docs/alerts/10049-3/
+10049	IGNORE	Content Cacheability (public static assets)

@@ -20,6 +20,11 @@ The entry point does not bind a port, install signal handlers, or exit the proce
 It initializes once per warm instance, checks the database schema, and retries
 initialization on a later request if a cold start fails.
 
+Vercel disables Node's experimental `require(ESM)` support. Static-file serving
+dependencies are loaded only by the standalone server, so the API does not depend
+on that feature. `pnpm check:vercel` imports the compiled function with the same
+restriction; both CI and `pnpm build:vercel` run this check after building.
+
 ## Environment and database
 
 Use separate hosted Supabase projects for production and staging/preview work.
@@ -50,6 +55,11 @@ Set these Vercel environment variables for each intended deployment environment:
 | `VITE_API_URL` | Empty for this combined frontend/API deployment |
 | `SINDRAL_JOB_DISPATCH_ENABLED` | `true` when ready to lease jobs |
 | `SINDRAL_AUTO_MERGE_ENABLED` | `false` initially |
+
+Set a nonempty `WEB_ORIGIN` separately for Production and Preview: use the
+production frontend origin for Production and the preview's origin for Preview.
+Environment-variable edits take effect on the next deployment. An empty value
+causes a configuration error even if the frontend itself loads successfully.
 
 Configure the optional GitHub OAuth/App and APNs settings from `.env.example` as
 needed. Set `GITHUB_OAUTH_CALLBACK_URL` and the GitHub OAuth App callback to
