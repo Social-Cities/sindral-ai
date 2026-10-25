@@ -7,13 +7,12 @@ The Sindral worker is a small Node daemon that runs on a developer's machine. It
 Requirements: Node 22+, `git`, and the CLIs you want to use (`claude`, `codex`, `gh`). The worker probes for them on startup and reports which are available to the server; steps that need a missing engine fail with a clear message instead of hanging.
 
 ```sh
-pnpm install            # from the monorepo root
-just build-worker       # builds shared first, then the worker
+just build-worker       # from the monorepo root; installs dependencies and builds
 ```
 
 Install [`just`](https://just.systems/man/en/installation.html) to use these
 commands (`brew install just` on macOS). To build without it, run
-`pnpm --filter @sindral/worker... build`.
+`pnpm install --frozen-lockfile` followed by `pnpm --filter @sindral/worker... build`.
 
 ## Configure
 
@@ -39,7 +38,7 @@ Create a worker key in the Sindral UI (Settings → Worker keys) and put it in t
 ## Run
 
 ```sh
-just                                 # builds shared + worker, then starts the daemon
+just                                 # refreshes dependencies, builds shared + worker, then starts the daemon
 pnpm --filter @sindral/worker dev      # tsx, pretty logs
 pnpm --filter @sindral/worker start    # node dist/cli.js start
 sindral-worker clean --dry-run         # preview inactive retained files eligible for cleanup
@@ -48,6 +47,13 @@ sindral-worker clean                   # remove eligible files after server leas
 
 `just start-worker` is an explicit alternative to `just`. Use `just --list` to
 list all commands.
+
+The build and start recipes run `pnpm install --frozen-lockfile` before compiling,
+so newly added dependencies are installed after pulling updates. If you run the
+low-level `pnpm` build, dev, or start commands directly, run that install command
+from the repository root after updating the checkout. If missing-module errors
+such as `TS2307: Cannot find module '@anthropic-ai/claude-agent-sdk'` appear after
+an update, refresh the local dependency installation before rebuilding.
 
 The Codex app's project actions use the same recipes: **Start worker** runs
 `just start-worker`, and **Build worker** runs `just build-worker`. The checked-in

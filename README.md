@@ -57,8 +57,8 @@ Start the worker on the machine that has your repos, `git`, `gh` and the agent C
 SINDRAL_SERVER_URL=http://localhost:8787 SINDRAL_WORKER_KEY=sk_sindral_... just
 ```
 
-`just` (or `just start-worker`) builds the shared package and worker before starting the daemon.
-Use `just build-worker` to build only. The Codex app exposes these commands as
+`just` (or `just start-worker`) installs the locked workspace dependencies, then builds the shared package and worker before starting the daemon.
+Use `just build-worker` to install and build without starting the daemon. The Codex app exposes these commands as
 **Start worker** and **Build worker** project actions. See the
 [worker README](apps/worker/README.md) for persistent configuration and other run options.
 
