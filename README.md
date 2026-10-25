@@ -21,6 +21,7 @@ The pre-existing remote Next.js application is preserved under [`archive/legacy-
 - Node 22+ and pnpm 10 (`corepack enable`)
 - [Supabase CLI](https://supabase.com/docs/guides/cli) (local dev) or a hosted Supabase project
 - On the worker machine: `git`, `gh` (GitHub CLI), and the `claude` and/or `codex` CLIs, authenticated
+- [`just`](https://just.systems/man/en/installation.html) for the worker commands and Codex app actions (`brew install just` on macOS)
 
 ## Quick start (local)
 
@@ -53,8 +54,13 @@ Sign up in the UI, then open **Settings**:
 Start the worker on the machine that has your repos, `git`, `gh` and the agent CLIs:
 
 ```bash
-SINDRAL_SERVER_URL=http://localhost:8787 SINDRAL_WORKER_KEY=sk_sindral_... pnpm dev:worker
+SINDRAL_SERVER_URL=http://localhost:8787 SINDRAL_WORKER_KEY=sk_sindral_... just start-worker
 ```
+
+`just start-worker` builds the shared package and worker before starting the daemon.
+Use `just build-worker` to build only. The Codex app exposes these commands as
+**Start worker** and **Build worker** project actions. See the
+[worker README](apps/worker/README.md) for persistent configuration and other run options.
 
 Create a task on the Home page (pick repositories and a workflow), click **Start Planning**, review the plan in the task's Chat/Summary tabs, approve it, and watch the implement → adversarial review → verify → in-review pipeline produce one PR per repository. **Accept & merge** dispatches an ordered merge job; the task reaches `done` only after GitHub confirms every PR is merged.
 

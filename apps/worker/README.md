@@ -8,9 +8,12 @@ Requirements: Node 22+, `git`, and the CLIs you want to use (`claude`, `codex`, 
 
 ```sh
 pnpm install            # from the monorepo root
-pnpm --filter @sindral/shared build
-pnpm --filter @sindral/worker build
+just build-worker       # builds shared first, then the worker
 ```
+
+Install [`just`](https://just.systems/man/en/installation.html) to use these
+commands (`brew install just` on macOS). To build without it, run
+`pnpm --filter @sindral/worker... build`.
 
 ## Configure
 
@@ -36,11 +39,19 @@ Create a worker key in the Sindral UI (Settings → Worker keys) and put it in t
 ## Run
 
 ```sh
+just start-worker                    # builds shared + worker, then starts the daemon
 pnpm --filter @sindral/worker dev      # tsx, pretty logs
 pnpm --filter @sindral/worker start    # node dist/cli.js start
 sindral-worker clean --dry-run         # preview inactive retained files eligible for cleanup
 sindral-worker clean                   # remove eligible files after server lease/worker checks
 ```
+
+The Codex app's project actions use the same recipes: **Start worker** runs
+`just start-worker`, and **Build worker** runs `just build-worker`. The checked-in
+`.codex/environments/environment.toml` also installs dependencies when creating a
+new worktree. Configure the worker using the environment variables or files above
+before starting it; use `~/.sindral/config.json` to share configuration across
+worktrees. Stop the foreground worker with Ctrl-C.
 
 If a CLI works over SSH but the portal reports it as missing, the worker daemon is
 usually running with a different PATH than your interactive shell. Set
