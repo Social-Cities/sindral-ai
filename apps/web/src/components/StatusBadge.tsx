@@ -10,6 +10,8 @@ interface StatusBadgeProps {
 
 export function StatusBadge({ state, step, size = 'sm' }: StatusBadgeProps) {
   const config = getStateStyle(state, step);
+  // Bright state colors need a darker text variant on light surfaces.
+  const color = `light-dark(color-mix(in srgb, ${config.color}, black 55%), ${config.color})`;
   return (
     <span
       data-testid="status-badge"
@@ -17,7 +19,7 @@ export function StatusBadge({ state, step, size = 'sm' }: StatusBadgeProps) {
       className={`inline-flex items-center gap-1.5 rounded font-mono font-medium shrink-0 whitespace-nowrap ${
         size === 'sm' ? 'px-1.5 py-0.5 text-[10px]' : 'px-2.5 py-1 text-xs'
       }`}
-      style={{ color: config.color, backgroundColor: config.bg }}
+      style={{ color, backgroundColor: config.bg }}
     >
       <span
         data-testid="status-dot"

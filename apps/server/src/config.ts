@@ -17,6 +17,8 @@ const booleanString = (defaultValue: 'true' | 'false') => z.enum(['true', 'false
 
 const envSchema = z.object({
   SINDRAL_ENV: z.enum(['development', 'production']).default('development'),
+  SINDRAL_RUNTIME: z.enum(['server', 'vercel']).default('server'),
+  CRON_SECRET: optionalString,
   SUPABASE_URL: z.string().url(),
   SUPABASE_ANON_KEY: z.string().min(1),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
@@ -50,6 +52,8 @@ export type LogLevel = z.infer<typeof envSchema>['LOG_LEVEL'];
 
 export interface AppConfig {
   environment: 'development' | 'production';
+  runtime: 'server' | 'vercel';
+  cronSecret: string | undefined;
   supabaseUrl: string;
   supabaseAnonKey: string;
   supabaseServiceRoleKey: string;
@@ -91,6 +95,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): AppConfig {
     throw new ConfigError(`Invalid environment configuration:\n${lines.join('\n')}\nSee .env.example at the repository root.`);
   }
   const e = result.data;
+  if (e.SINDRAL_RUNTIME === 'vercel' && (!e.CRON_SECRET || e.CRON_SECRET.length < 32)) {
+    throw new ConfigError('CRON_SECRET must contain at least 32 characters on Vercel');
+  }
   const webOrigins = parseWebOrigins(e.WEB_ORIGIN);
   if (e.SINDRAL_ENV === 'production') {
     if (new URL(e.SUPABASE_URL).protocol !== 'https:') throw new ConfigError('SUPABASE_URL must use HTTPS in production');
@@ -140,6 +147,8 @@ export function parseConfig(env: NodeJS.ProcessEnv): AppConfig {
   }
   return {
     environment: e.SINDRAL_ENV,
+    runtime: e.SINDRAL_RUNTIME,
+    cronSecret: e.CRON_SECRET,
     supabaseUrl: e.SUPABASE_URL,
     supabaseAnonKey: e.SUPABASE_ANON_KEY,
     supabaseServiceRoleKey: e.SUPABASE_SERVICE_ROLE_KEY,
@@ -189,7 +198,7 @@ function parseWebOrigins(raw: string): string[] {
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   for (const dir of [REPO_ROOT, process.cwd()]) {
     const file = path.join(dir, '.env');
-    if (existsSync(file)) dotenv.config({ path: file, override: false, quiet: true });
+    if (existsSync(file)) dotenv.config({ path: file, processEnv: env, override: false, quiet: true });
   }
   return parseConfig(env);
 }

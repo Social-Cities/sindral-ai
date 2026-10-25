@@ -19,6 +19,12 @@ export function useServerEvents(enabled: boolean): LiveStatus {
     const controller = new AbortController();
     const onEvent = (event: ServerEvent) => {
       switch (event.type) {
+        case 'sync':
+          // Worker requests and SSE subscriptions can land on different functions.
+          void qc.invalidateQueries({
+            predicate: (query) => ['tasks', 'task', 'job', 'workers', 'projects', 'project', 'workflows'].includes(String(query.queryKey[0])),
+          }, { cancelRefetch: false });
+          break;
         case 'task.created':
         case 'task.updated':
         case 'task.deleted':

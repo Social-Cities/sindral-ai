@@ -13,6 +13,7 @@ import { Metrics } from './metrics.js';
 import { eventRoutes } from './routes/events.js';
 import { healthRoutes } from './routes/health.js';
 import { metricsRoutes } from './routes/metrics.js';
+import { maintenanceRoutes } from './routes/maintenance.js';
 import { projectRoutes } from './routes/projects.js';
 import { settingsRoutes } from './routes/settings.js';
 import { jsonNotFound, registerStatic, spaNotFound, webDistExists } from './routes/static.js';
@@ -46,6 +47,9 @@ export interface AppOptions {
   /** 0 disables the stale-job sweeper (tests). */
   sweeperIntervalMs?: number;
   ssePingMs?: number;
+  /** Vercel streams end before the function deadline and refresh from durable state. */
+  sseMaxDurationMs?: number;
+  sseRefreshMs?: number;
   /** Set false to skip serving `apps/web/dist` even when present. */
   serveWeb?: boolean;
 }
@@ -70,7 +74,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const metrics = options.metrics ?? new Metrics();
   const app = Fastify({
     logger: options.logger ?? { level: config.logLevel, redact: { paths: REDACT_PATHS, censor: '[redacted]' } },
-    bodyLimit: 16 * 1024 * 1024,
+    bodyLimit: (config.runtime === 'vercel' ? 4 : 16) * 1024 * 1024,
   });
 
   const supabaseOrigin = new URL(config.supabaseUrl).origin;
@@ -79,7 +83,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       directives: {
         'default-src': ["'self'"],
         'script-src': ["'self'"],
-        'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+        'style-src': ["'self'", 'https://fonts.googleapis.com'],
         'font-src': ['https://fonts.gstatic.com'],
         'img-src': ["'self'", 'data:'],
         'connect-src': ["'self'", supabaseOrigin],
@@ -92,7 +96,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   await app.register(cors, {
     origin: config.webOrigins,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Authorization', 'Content-Type'],
+    allowedHeaders: ['Authorization', 'Content-Type', 'Idempotency-Key'],
     maxAge: 600,
   });
   await app.register(rateLimit, { global: true, max: 300, timeWindow: '1 minute' });
@@ -153,11 +157,14 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     orchestrator,
     claim: options.claim ?? { waitMs: 20_000, pollMs: 2_000 },
     ssePingMs: options.ssePingMs ?? 25_000,
+    sseMaxDurationMs: options.sseMaxDurationMs ?? (config.runtime === 'vercel' ? 55_000 : 0),
+    sseRefreshMs: options.sseRefreshMs ?? (config.runtime === 'vercel' ? 5_000 : 0),
   };
   app.decorate('ctx', ctx);
 
   await app.register(healthRoutes);
   await app.register(metricsRoutes, { ctx });
+  await app.register(maintenanceRoutes, { ctx });
   await app.register(projectRoutes, { ctx });
   await app.register(taskRoutes, { ctx });
   await app.register(workflowRoutes, { ctx });
@@ -169,7 +176,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   await app.register(webhookRoutes, { ctx });
   await app.register(workerRoutes, { ctx });
 
-  if (options.serveWeb !== false && webDistExists(config.webDistDir)) {
+  if (config.runtime !== 'vercel' && options.serveWeb !== false && webDistExists(config.webDistDir)) {
     await registerStatic(app, config.webDistDir);
     app.setNotFoundHandler(spaNotFound);
     app.log.info({ dir: config.webDistDir }, 'serving web UI');
@@ -177,7 +184,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     app.setNotFoundHandler(jsonNotFound);
   }
 
-  const sweeperInterval = options.sweeperIntervalMs ?? 60_000;
+  const sweeperInterval = config.runtime === 'vercel' ? 0 : (options.sweeperIntervalMs ?? 60_000);
   if (sweeperInterval > 0) {
     let timer: NodeJS.Timeout | null = null;
     app.addHook('onReady', async () => {

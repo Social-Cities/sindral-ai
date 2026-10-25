@@ -7,7 +7,7 @@ describe('StatusBadge', () => {
     render(<StatusBadge state="planning" />);
     expect(screen.getByText('Planning')).toBeInTheDocument();
     expect(screen.getByTestId('status-dot')).toHaveClass('animate-pulse');
-    expect(screen.getByTestId('status-badge')).toHaveStyle({ color: '#fbbf24' });
+    expect(screen.getByTestId('status-dot')).toHaveStyle({ backgroundColor: '#fbbf24' });
   });
 
   it('does not pulse for human-wait states', () => {

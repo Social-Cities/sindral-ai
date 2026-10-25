@@ -808,6 +808,24 @@ describe('job claiming', () => {
 });
 
 describe('stale job sweeper', () => {
+  it.each(['renewed', 'completed'] as const)('does not overwrite a job %s after the recovery snapshot', async (change) => {
+    const task = await newTask();
+    await orch().applyUserEvent(userId, task.id, 'start');
+    const job = await claimNext(ctx, userId);
+    const expired = new Date(Date.now() - 10_000).toISOString();
+    await ctx.repo.updateJob(userId, job!.id, { leaseExpiresAt: expired });
+    const list = ctx.repo.listActiveJobs.bind(ctx.repo);
+    vi.spyOn(ctx.repo, 'listActiveJobs').mockImplementationOnce(async () => {
+      const snapshot = await list();
+      await ctx.repo.updateJob(userId, job!.id, change === 'renewed'
+        ? { leaseExpiresAt: new Date(Date.now() + 90_000).toISOString() }
+        : { status: 'completed' });
+      return snapshot;
+    });
+    expect(await orch().sweepStaleJobs()).toEqual({ requeued: 0, failed: 0 });
+    expect(await ctx.repo.getJob(userId, job!.id)).toMatchObject({ status: change === 'renewed' ? 'claimed' : 'completed', attempt: 1 });
+  });
+
   it('resumes an abandoned durable outcome instead of rerunning the worker job', async () => {
     const task = await newTask();
     await orch().applyUserEvent(userId, task.id, 'start');

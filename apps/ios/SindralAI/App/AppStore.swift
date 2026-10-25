@@ -69,8 +69,12 @@ final class AppStore {
                     for try await line in bytes.lines where line.hasPrefix("data: ") {
                         guard !Task.isCancelled, let data = String(line.dropFirst(6)).data(using: .utf8),
                               let event = try? JSONDecoder().decode(ServerEvent.self, from: data) else { continue }
-                        if event.type.hasPrefix("task.") { await refreshTasks() }
-                        if event.type == "worker.updated" { await refreshWorkers() }
+                        if event.type.hasPrefix("task.") || event.type == "sync" { await refreshTasks() }
+                        if event.type == "worker.updated" || event.type == "sync" { await refreshWorkers() }
+                        if event.type == "sync" {
+                            await refreshProjects()
+                            await refreshWorkflows()
+                        }
                     }
                 } catch is CancellationError { return }
                 catch {

@@ -64,6 +64,10 @@ Point a GitHub webhook (`issue_comment`, `pull_request_review_comment`, `pull_re
 
 ## Production
 
+For a combined frontend and API deployment on Vercel, use the checked-in
+`vercel.json` and follow [the Vercel deployment guide](docs/operations/vercel.md).
+Agent workers continue running on your own machines.
+
 ```bash
 pnpm build            # builds shared, server, web (dist served by the server) and worker
 cd apps/server && node dist/index.js

@@ -903,6 +903,8 @@ describe('server-sent events', () => {
     const denied = await ctx.app.inject({ method: 'GET', url: '/api/health', headers: { origin: 'https://evil.example' } });
     expect(denied.headers['access-control-allow-origin']).toBeUndefined();
     expect(denied.headers['content-security-policy']).toContain("default-src 'self'");
+    expect(denied.headers['content-security-policy']).toContain("style-src 'self' https://fonts.googleapis.com");
+    expect(denied.headers['content-security-policy']).not.toContain("'unsafe-inline'");
   });
 });
 

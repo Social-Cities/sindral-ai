@@ -37,6 +37,8 @@ export interface AppContext {
   orchestrator: Orchestrator;
   claim: ClaimOptions;
   ssePingMs: number;
+  sseMaxDurationMs: number;
+  sseRefreshMs: number;
 }
 
 export interface RouteOptions {
