@@ -8,7 +8,7 @@ import { step } from '../test/fixtures.js';
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ query: vi.fn() }));
 
 function options(): EngineRunOptions {
-  return { cwd: '/worker/design/SIN-1', prompt: '/design A dashboard', step: step({ output: 'design' }), env: { PATH: '/bin', CLAUDE_CONFIG_DIR: '/worker/claude' }, timeoutMs: 1000,
+  return { cwd: '/worker/design/SIN-1', prompt: 'Design a dashboard', step: step({ output: 'design' }), env: { PATH: '/bin', CLAUDE_CONFIG_DIR: '/worker/claude' }, timeoutMs: 1000,
     onOutput: vi.fn(), portableSession: { projectKey: 'sindral-task-id', store: { append: vi.fn(), load: vi.fn() }, onCheckpoint: vi.fn() } };
 }
 
@@ -22,18 +22,19 @@ function messages(items: unknown[]) {
 describe('portable Claude runner', () => {
   it('uses the stable project key, eager mirroring, and the authenticated config directory', async () => {
     const opts = options();
-    messages([{ type: 'system', subtype: 'init', slash_commands: ['design'], session_id: 'session-1' }, { type: 'result', subtype: 'success', result: 'Design complete' }]);
+    messages([{ type: 'system', subtype: 'init', slash_commands: [], session_id: 'session-1' }, { type: 'result', subtype: 'success', result: 'Design complete' }]);
     expect(await runPortableClaude(opts, parseClaudeLine)).toMatchObject({ exitCode: 0, sessionId: 'session-1', finalText: 'Design complete' });
     expect(query).toHaveBeenCalledWith(expect.objectContaining({ options: expect.objectContaining({
-      sessionStore: opts.portableSession!.store, sessionStoreFlush: 'eager', settings: { enableArtifact: true },
+      sessionStore: opts.portableSession!.store, sessionStoreFlush: 'eager',
       env: expect.objectContaining({ CLAUDE_CODE_PROJECT_DIR_NAME: 'sindral-task-id', CLAUDE_CONFIG_DIR: '/worker/claude' }),
     }) }));
+    expect(vi.mocked(query).mock.lastCall?.[0].options).not.toHaveProperty('settings.enableArtifact');
     expect(opts.portableSession!.onCheckpoint).toHaveBeenCalledWith('session-1');
   });
 
-  it('reports an unavailable Design command without treating a local artifact as success', async () => {
-    const close = messages([{ type: 'system', subtype: 'init', slash_commands: [], session_id: 'session-1' }]);
-    await expect(runPortableClaude(options(), parseClaudeLine)).rejects.toThrow('Claude Design is unavailable');
+  it('reports coding agent failures without requiring artifact access', async () => {
+    const close = messages([{ type: 'system', subtype: 'init', slash_commands: [], session_id: 'session-1' }, { type: 'result', subtype: 'error_during_execution', errors: ['Authentication failed'] }]);
+    await expect(runPortableClaude(options(), parseClaudeLine)).rejects.toThrow('Authentication failed');
     expect(close).toHaveBeenCalled();
   });
 

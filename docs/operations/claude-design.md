@@ -1,37 +1,40 @@
-# Claude Design workflows and portable sessions
+# App design with Claude Code and portable sessions
 
-Choose **Design an app** on Home to create a task using the **Claude Design** workflow. The Design tab pairs chat with exported previews, screen and viewport selection, revision history, approval, and implementation handoffs. Smaller screens switch between Design and Conversation panels.
+Choose **Design an app** on Home to create a task using the **App Design** workflow. Claude Code creates interactive UI prototypes as files; Sindral displays them in the Design tab beside the conversation. Screen and viewport selection, revision history, approval, and implementation handoffs work without a hosted Claude artifact. Smaller screens switch between Design and Conversation panels.
 
-## Deployment and account setup
+## Deployment and authentication
 
-Apply `20261025171114_portable_design_sessions.sql` and deploy the server, web app, shared package, and worker together. Worker **0.2.0** uses protocol **4**; older workers receive HTTP 426. Existing accounts receive the new bundled workflow through the migration; new accounts receive it during initial workflow seeding.
+Apply all migrations, including `20261025202507_claude_code_design_previews.sql`, and deploy the server, web app, shared package, and worker together. Worker **0.3.0** uses protocol **5**; older workers receive HTTP 426 because they require hosted Design artifacts and cannot collect previews without a URL.
 
-Design steps use the pinned `@anthropic-ai/claude-agent-sdk` and its bundled Claude executable. Other steps retain the configured CLI runner. On each machine:
+The migration updates the original bundled Design prompts in saved workflows, active task snapshots, and pending jobs, including leased jobs that may be requeued during the upgrade. Workflow IDs, models, appended context, lease fields, and graph structure are preserved. Modified prompts are left alone; update customized workflows manually if they still require `/design` or artifact publishing. Completed task snapshots, saved conversations, approved revisions, and frozen handoffs are preserved. Existing hosted revisions keep their optional **Open in Claude** link.
 
-1. Sign into Claude Code as the OS user running the worker. Refresh expired credentials. Artifact publishing requires a Claude account; API-key-only authentication is insufficient.
-2. In a current interactive Claude Code installation, verify `/design` is available and the account's Design template is enabled. When Claude requests `/design consent`, the user must enter it themselves. Sindral does not grant consent or copy credentials between hosts.
-3. If using `CLAUDE_CONFIG_DIR`, point it to the authenticated configuration. Keep SDK versions consistent across machines. The replacement machine needs the same account or an account with permission to edit the artifact.
-4. Start the worker normally. Sindral invokes `/design` and explicitly enables artifacts for that SDK session, subject to account and organization policy. Missing access or login produces an error rather than a substitute mockup.
+Design steps use the pinned `@anthropic-ai/claude-agent-sdk`, which runs Claude Code's coding agent through its bundled executable. Other steps retain the configured CLI runner. On each machine:
 
-The live acceptance check is to create a design on worker A, submit feedback, replace A with a worker with an empty work directory, and revise the **same remote artifact**. Automated tests use deterministic engine and API fixtures; they do not establish live Claude account eligibility or export behavior.
+1. Configure authentication supported by the Agent SDK for the OS user running the worker, such as `ANTHROPIC_API_KEY` in the worker process environment. Refresh expired credentials. There is no Design template, artifact publishing, or `/design` consent requirement.
+2. If using `CLAUDE_CONFIG_DIR`, point it to the intended Claude configuration. Keep SDK versions consistent across machines. Authenticate replacement workers independently; Sindral never copies credentials between hosts.
+3. Run `just start-worker` from the repository root. It installs the locked dependencies, builds, and starts the worker.
+
+The live acceptance check is to create a design on worker A, interact with its preview in Sindral, submit feedback, replace A with an authenticated worker with an empty work directory, and revise the same saved prototype. Automated tests use deterministic engine and API fixtures; they do not establish live model quality or account access.
 
 ## Portable conversation and files
 
 The SDK mirrors opaque transcript entries eagerly through authenticated worker endpoints. Every operation checks the tenant, job attempt, lease token, cancellation flag, and expiry under a database row lock. Entries are deduplicated and loaded in order, including sidecar/subagent transcripts. Browsers cannot access these tables or the worker persistence RPC.
 
-The stable project key is `sindral-task-<task UUID>`, independent of a machine's absolute paths. A replacement worker restores the transcript and exported workspace, then resumes the native session. Missing native history falls back explicitly to the saved conversation, specification, artifact link, and files. A workspace note supersedes old absolute paths in the transcript.
+The stable project key is `sindral-task-<task UUID>`, independent of a machine's absolute paths. A replacement worker restores the transcript and design workspace, then resumes the native session. Missing native history falls back explicitly to the saved conversation, specification, and files. A workspace note supersedes old absolute paths in the transcript.
 
 Files are checkpointed after tool-result messages, at most once per 15 seconds, and at turn completion. Recovery starts at the last saved checkpoint; an operation interrupted before it is saved may require reconciliation. Transcript or file persistence failures stop the design run. Local cleanup removes inactive cached designs and implementation inputs after the usual retention period without deleting the server copy.
 
-Feedback received during generation is queued for the next turn instead of cancelling the external operation. Task job leases serialize turns. External Claude operations are outside Sindral's database transaction: after a crash, the worker must reconcile the existing artifact before repeating an operation.
+Feedback received during generation is queued for the next turn instead of cancelling the operation. Task job leases serialize turns. After a crash, the worker inspects restored files before repeating work.
 
 ## Preview and export contract
 
-A completed revision contains the real Claude artifact URL, screen manifest, specification, questions, and exported files with SHA-256 hashes. Before creating a first artifact, a clarification turn can return questions without inventing a preview or URL.
+A completed revision contains a screen manifest, implementation specification, questions, and source/preview files with SHA-256 hashes. `designUrl` is normally null and is retained only for compatibility with earlier hosted revisions. A revision is identified by its preview screens, not an external URL.
 
-Supported previews are self-contained HTML or PNG/JPEG/WebP/SVG artboards. HTML must inline CSS, JavaScript, and images; network-backed prototypes and server processes are unsupported. Source files and nested assets remain available for implementation. Limits are 100 files, 1 MB per file, 2.5 MB decoded total, 3.5 MB serialized files, and 3.8 MB per complete result. Oversized exports fail explicitly. Dependency folders and hidden configuration files are excluded; symlinks are rejected.
+A clarification-only turn returns nonempty questions, no screens or result files, and a null URL. It does not replace the current revision. The workspace and conversation are still checkpointed, so existing preview files survive for the next turn.
 
-Previews use five-minute signed URLs scoped to one task, revision, and screen. The response has a separate CSP and sandbox with no parent-document access, forms, nested frames, or fetch/XHR/WebSocket access. The iframe omits `allow-same-origin`, sends no referrer, and is not cached. **Open in Claude** opens the external editor; Sindral does not embed native canvas editing.
+Supported previews are self-contained HTML or PNG/JPEG/WebP/SVG artboards. HTML must inline CSS, JavaScript, fonts, and images; network-backed prototypes, external scripts, relative asset requests, build steps, and server processes are unsupported. Interactions run inside each standalone screen; the Sindral screen picker switches preview files. Source files and nested assets remain available for implementation. Limits are 100 files, 1 MB per file, 2.5 MB decoded total, 3.5 MB serialized files, and 3.8 MB per complete result. Oversized exports fail explicitly. Dependency folders and hidden configuration files are excluded; symlinks are rejected.
+
+Previews use five-minute signed URLs scoped to one task, revision, and screen. The response has a separate CSP and sandbox with no parent-document access, forms, nested frames, or fetch/XHR/WebSocket access. The iframe omits `allow-same-origin`, sends no referrer, and is not cached. Give feedback in the conversation to change a design; Sindral does not provide direct canvas editing.
 
 ## Approval and implementation handoff
 
@@ -45,6 +48,6 @@ Job claims carry only the handoff reference. The worker downloads its input thro
 
 ## Verification
 
-Run `pnpm typecheck`, `pnpm test`, `pnpm db:test`, `pnpm lint`, `pnpm build`, and `pnpm test:e2e`. Coverage includes cross-worker restoration, tenant and lease fencing, queued feedback, preview isolation, revision approval, idempotent task creation, and retention after source deletion. Keep transcripts and files under the same private backup and retention controls as task data. Authenticate each worker independently; session restoration does not grant account access.
+Run `pnpm typecheck`, `pnpm test`, `pnpm db:test`, `pnpm lint`, `pnpm build`, and `pnpm test:e2e`. Coverage includes preview-only designs, legacy hosted links, clarification turns, cross-worker restoration, workflow migration, tenant and lease fencing, queued feedback, preview isolation, revision approval, idempotent task creation, and retention after source deletion. Keep transcripts and files under the same private backup and retention controls as task data. Authenticate each worker independently; session restoration does not grant account access.
 
-References: [session storage](https://code.claude.com/docs/en/agent-sdk/session-storage), [artifact availability](https://code.claude.com/docs/en/artifacts#availability), and [Design commands and consent](https://code.claude.com/docs/en/commands).
+References: [Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview), [SDK authentication](https://code.claude.com/docs/en/agent-sdk/quickstart), and [session storage](https://code.claude.com/docs/en/agent-sdk/session-storage).

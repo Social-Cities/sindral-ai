@@ -77,7 +77,7 @@ export function createSupabaseClient(url: string, serviceRoleKey: string): Supab
   });
 }
 
-export const EXPECTED_SCHEMA_VERSION = '20261025171114';
+export const EXPECTED_SCHEMA_VERSION = '20261025202507';
 
 interface DesignRevisionRow {
   id: string; task_id: string; job_id: string; result: DesignResult; created_at: string; approved_at: string | null;

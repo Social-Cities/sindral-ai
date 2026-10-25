@@ -9,7 +9,7 @@ test('reviews an interactive design, sends feedback, approves a revision, and cr
   const backend = await installMockBackend(page, { tasks: [task] });
   const html = '<!doctype html><html><head><style>body{margin:0;font:16px system-ui;background:#f4f5f8;color:#182334;padding:32px}h1{font-size:28px}button{border:0;border-radius:8px;padding:12px 20px;background:#314ccc;color:white}</style></head><body><h1>Project dashboard</h1><p>Keep your team moving.</p><button onclick="this.textContent=\'Project created\'">New project</button></body></html>';
   const revision: DesignRevision = { id: 'revision-1', taskId: task.id, jobId: 'job-1', approvedAt: null, createdAt: task.createdAt,
-    result: { kind: 'design', summary: 'Project dashboard with a primary create action.', designUrl: 'https://claude.ai/code/artifact/example', specification: '# Implementation specification\n\nBuild the dashboard with responsive navigation, loading states, and accessible controls.', questions: [], screens: [{ name: 'Dashboard', path: 'index.html' }], files: [{ path: 'index.html', contentType: 'text/html', content: html, encoding: 'utf8', sha256: createHash('sha256').update(html).digest('hex') }] } };
+    result: { kind: 'design', summary: 'Project dashboard with a primary create action.', designUrl: null, specification: '# Implementation specification\n\nBuild the dashboard with responsive navigation, loading states, and accessible controls.', questions: [], screens: [{ name: 'Dashboard', path: 'index.html' }], files: [{ path: 'index.html', contentType: 'text/html', content: html, encoding: 'utf8', sha256: createHash('sha256').update(html).digest('hex') }] } };
   await page.route('**/api/tasks/design-task/design**', async (route) => {
     if (route.request().method() === 'POST') { expect(route.request().postDataJSON()).toMatchObject({ revisionId: revision.id, expectedVersion: task.version }); revision.approvedAt = '2026-10-25T12:00:00Z'; return route.fulfill({ json: { revision } }); }
     if (new URL(route.request().url()).pathname.endsWith('revision-1')) return route.fulfill({ json: { revision, previewUrls: ['/api/design-previews/design-task?token=fixture'] } });
@@ -20,6 +20,7 @@ test('reviews an interactive design, sends feedback, approves a revision, and cr
   await page.goto(`/tasks/${task.id}`);
   const preview = page.frameLocator('iframe[title="Design preview: Dashboard"]');
   await expect(preview.getByRole('heading', { name: 'Project dashboard' })).toBeVisible();
+  await expect(page.getByRole('link', { name: /Open in Claude/ })).toHaveCount(0);
   await preview.getByRole('button', { name: 'New project' }).click();
   await expect(preview.getByRole('button', { name: 'Project created' })).toBeVisible();
   const iframe = page.frames().find((frame) => frame.url().includes('/api/design-previews/'))!;

@@ -15,7 +15,7 @@ export async function runPortableClaude(opts: EngineRunOptions, parse: (line: st
   if (opts.signal?.aborted) abort();
   if (opts.portableSession.signal?.aborted) persistenceAbort();
   let timedOut = false;
-  const timer = setTimeout(() => { timedOut = true; abortController.abort(new Error('Claude Design timed out')); }, opts.timeoutMs);
+  const timer = setTimeout(() => { timedOut = true; abortController.abort(new Error('Claude design session timed out')); }, opts.timeoutMs);
   const tail = new OutputTail();
   let sessionId: string | null = opts.resumeSessionId ?? null;
   let finalText: string | null = null;
@@ -29,8 +29,7 @@ export async function runPortableClaude(opts: EngineRunOptions, parse: (line: st
     permissionMode: 'bypassPermissions', allowDangerouslySkipPermissions: true,
     additionalDirectories: opts.writableDirs,
     settingSources: ['user', 'project'],
-    settings: { enableArtifact: true },
-    env: { ...opts.env, CLAUDE_CONFIG_DIR: opts.env['CLAUDE_CONFIG_DIR'] ?? path.join(os.homedir(), '.claude'), CLAUDE_CODE_PROJECT_DIR_NAME: opts.portableSession.projectKey, CLAUDE_CODE_ARTIFACT_AUTO_OPEN: '0' },
+    env: { ...opts.env, CLAUDE_CONFIG_DIR: opts.env['CLAUDE_CONFIG_DIR'] ?? path.join(os.homedir(), '.claude'), CLAUDE_CODE_PROJECT_DIR_NAME: opts.portableSession.projectKey },
     resume: opts.resumeSessionId ?? undefined,
     sessionStore: opts.portableSession.store, sessionStoreFlush: 'eager',
     abortController,
@@ -39,15 +38,12 @@ export async function runPortableClaude(opts: EngineRunOptions, parse: (line: st
   try {
     for await (const message of agent) {
       if (message.type === 'system' && message.subtype === 'mirror_error') throw new Error('Claude session could not be saved; stopping before further design changes');
-      if (message.type === 'system' && message.subtype === 'init' && !message.slash_commands.includes('design')) {
-        throw new Error('Claude Design is unavailable for this worker account. Enable the Design template and sign in with a Claude account.');
-      }
       const parsed = parse(JSON.stringify(message));
       sessionId = parsed.sessionId ?? sessionId;
       finalText = parsed.finalText ?? finalText;
       lastAssistant = parsed.assistantText ?? lastAssistant;
       for (const line of parsed.lines) { tail.push(line); opts.onOutput(line); }
-      if (message.type === 'result' && message.subtype !== 'success') throw new Error(`Claude Design failed: ${message.errors.join('; ')}`);
+      if (message.type === 'result' && message.subtype !== 'success') throw new Error(`Claude design session failed: ${message.errors.join('; ')}`);
       if (message.type === 'user' && Date.now() - lastCheckpoint >= 15_000) {
         await opts.portableSession.onCheckpoint(sessionId);
         lastCheckpoint = Date.now();

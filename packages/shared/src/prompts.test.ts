@@ -14,6 +14,14 @@ describe('interpolatePrompt', () => {
 });
 
 describe('protocolInstructions', () => {
+  it('asks for offline preview files without requiring a hosted design', () => {
+    const out = protocolInstructions('design', '/tmp/result.json');
+    expect(out).toContain('"designUrl": null');
+    expect(out).toContain('inline CSS/JS');
+    expect(out).toContain('no hosted artifact or /design command is required');
+    expect(out).toContain('clarification-only turn');
+  });
+
   it('includes the result path and shape for the output kind', () => {
     const out = protocolInstructions('verdict', '/tmp/result.json');
     expect(out).toContain('/tmp/result.json');

@@ -357,20 +357,22 @@ export const DOCUMENT_WORKFLOW: Workflow = {
   troubleshootStep: DEFAULT_TROUBLESHOOT_STEP,
 };
 
-const DESIGN_PROMPT = `Create or revise a real Claude Design artifact for this brief:
+const DESIGN_PROMPT = `Design and prototype an app for this brief:
 {{task_description}}
 
 Feedback to address:
 {{feedback}}
 
-Use Claude Design's built-in design capability. Work on the SAME external artifact across turns. Consult the restored conversation and exported files before changing anything. If retrying an interrupted operation, reconcile the existing artifact before publishing; never blindly create another design.
+Use your file editing and coding tools to create a polished, interactive UI prototype directly in the design workspace. Sindral renders the saved preview files. Do not invoke /design or require Claude artifact publishing, Design templates, or an external editor.
+Continue the SAME design across turns. Consult the restored conversation, specification, and workspace files before changing anything. If retrying an interrupted operation, reconcile the existing files before repeating work. Earlier instructions in the conversation requiring a remote Design artifact are obsolete.
 Ask focused questions in your result when requirements are unclear. Preserve the current design while explaining what input is needed.
-Export a complete preview and implementation source into the output directory. Explain the design intent, component and token choices, interactions, responsive behavior, empty/loading/error states, open questions, and implementation acceptance criteria.
+Write a complete, self-contained HTML preview with inline CSS and JavaScript for each screen into the output directory, alongside any implementation source and assets. Previews must work offline without package installation, external fonts, CDNs, network calls, a dev server, or a build step. Include realistic sample content, accessible controls, responsive layouts, and working navigation or interaction states. Reuse reference design tokens and components when available.
+Explain the design intent, component and token choices, interactions, responsive behavior, empty/loading/error states, open questions, and implementation acceptance criteria.
 Inspect reference repositories when available, but do not modify them, commit, push, or create a PR. Design source belongs only in the design workspace.
-If Design access, login, consent, or exports are unavailable, report the specific setup problem. Never invent a URL, claim success from a screenshot you did not export, or replace Claude Design with an independently generated local page.`;
+Return designUrl: null. Never invent a hosted URL or claim success without writing the preview files. Report authentication or tool failures clearly.`;
 
 export const DESIGN_WORKFLOW: Workflow = {
-  id: 'wf-design', name: 'Claude Design',
+  id: 'wf-design', name: 'App Design',
   description: 'Describe an app, review and revise its design, then approve a version for implementation.',
   entryStepId: 'todo',
   steps: [

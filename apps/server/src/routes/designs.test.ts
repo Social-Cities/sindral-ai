@@ -5,7 +5,7 @@ import { claimNext, createTestApp, type TestContext } from '../test/helpers.js';
 
 function result(): DesignResult {
   const content = '<!doctype html><html><body><button onclick="this.textContent=\'Clicked\'">Hello design</button></body></html>';
-  return { kind: 'design', summary: 'A dashboard design', designUrl: 'https://claude.ai/code/artifact/example', specification: 'Build the dashboard using the exported components. Support loading and empty states.',
+  return { kind: 'design', summary: 'A dashboard design', designUrl: null, specification: 'Build the dashboard using the exported components. Support loading and empty states.',
     outcome: 'A reviewed dashboard design', acceptanceCriteria: '- Dashboard is responsive', questions: [], screens: [{ name: 'Dashboard', path: 'index.html' }],
     files: [{ path: 'index.html', contentType: 'text/html', encoding: 'utf8', content, sha256: createHash('sha256').update(content).digest('hex') }] };
 }
@@ -21,6 +21,23 @@ describe('portable design workflow', () => {
     task = await ctx.app.ctx.orchestrator.applyUserEvent(ctx.userA, task.id, 'start');
   });
   afterEach(async () => { await ctx.app.close(); });
+
+  it('keeps the current preview during clarification and uses its specification for the next turn', async () => {
+    const first = (await claimNext(ctx, ctx.userA))!;
+    await ctx.app.ctx.orchestrator.completeJob(ctx.userA, first.id, result(), first.attempt, first.leaseToken);
+    const revision = (await ctx.repo.listDesignRevisions(ctx.userA, task.id))[0]!;
+    expect(revision.result.designUrl).toBeNull();
+    await ctx.app.ctx.orchestrator.postUserMessage(ctx.userA, task.id, 'Change the navigation', 'web');
+    const clarification = (await claimNext(ctx, ctx.userA))!;
+    expect(clarification.payload).toMatchObject({ step: { prompt: expect.stringContaining(`Continue the saved design files from revision ${revision.id}`) } });
+    await ctx.app.ctx.orchestrator.completeJob(ctx.userA, clarification.id,
+      { kind: 'design', summary: 'Which navigation style?', designUrl: null, specification: '', questions: ['Sidebar or top navigation?'], screens: [], files: [] },
+      clarification.attempt, clarification.leaseToken);
+    expect(await ctx.repo.listDesignRevisions(ctx.userA, task.id)).toHaveLength(1);
+    await ctx.app.ctx.orchestrator.postUserMessage(ctx.userA, task.id, 'Use a sidebar', 'web');
+    const next = (await claimNext(ctx, ctx.userA))!;
+    expect(next.payload).toMatchObject({ step: { prompt: expect.stringContaining(result().specification) } });
+  });
 
   it('restores the conversation on another worker and rejects stale or cross-tenant capabilities', async () => {
     const key = await ctx.workerKeyFor(ctx.userA);

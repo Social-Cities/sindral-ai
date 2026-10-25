@@ -598,7 +598,7 @@ export class Orchestrator {
     if (step.output === 'design') {
       const revisions = await this.repo.listDesignRevisions(userId, task.id);
       const latest = revisions.at(-1);
-      stepWithContract.prompt += `\n\n## Durable design context\n${latest ? `Continue the existing artifact ${latest.result.designUrl}.\n${latest.result.specification}` : 'No completed revision yet. Inspect the restored session before creating any artifact.'}\n\nConversation:\n${designMessages.map((message) => `${message.role}: ${message.content}`).join('\n\n').slice(-60_000)}`;
+      stepWithContract.prompt += `\n\n## Durable design context\n${latest ? `Continue the saved design files from revision ${latest.id}.\n${latest.result.specification}` : 'No completed revision yet. Inspect the restored session and workspace before creating preview files.'}\n\nConversation:\n${designMessages.map((message) => `${message.role}: ${message.content}`).join('\n\n').slice(-60_000)}`;
     }
     return {
       taskId: task.id,
@@ -987,7 +987,7 @@ export class Orchestrator {
         });
         return persistGeneratedContract();
       case 'design':
-        if (result.designUrl && this.isJobCurrent(task, job)) await this.repo.createDesignRevision(userId, task.id, job.id, result);
+        if (result.screens.length && this.isJobCurrent(task, job)) await this.repo.createDesignRevision(userId, task.id, job.id, result);
         return persistGeneratedContract();
       case 'document':
         for (const [index, artifact] of result.artifacts.entries()) {
