@@ -20,6 +20,11 @@ The entry point does not bind a port, install signal handlers, or exit the proce
 It initializes once per warm instance, checks the database schema, and retries
 initialization on a later request if a cold start fails.
 
+Vercel disables Node's experimental `require(ESM)` support. Static-file serving
+dependencies are loaded only by the standalone server, so the API does not depend
+on that feature. `pnpm check:vercel` imports the compiled function with the same
+restriction; both CI and `pnpm build:vercel` run this check after building.
+
 ## Environment and database
 
 Use separate hosted Supabase projects for production and staging/preview work.
