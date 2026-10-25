@@ -360,7 +360,7 @@ describe('workflows API', () => {
   it('seeds bundled workflows per user and validates updates', async () => {
     const list = await ctx.app.inject({ method: 'GET', url: '/api/workflows', headers: asA() });
     const workflows = list.json<{ workflows: WorkflowRecord[] }>().workflows;
-    expect(workflows.map((w) => w.name)).toEqual(['Full SDLC', 'Planning Only', 'Fast Track', 'Document (non-code)']);
+    expect(workflows.map((w) => w.name)).toEqual(['Full SDLC', 'Planning Only', 'Fast Track', 'Document (non-code)', 'Claude Design']);
     expect(workflows[0]!.isDefault).toBe(true);
     expect(workflows[0]!.userId).toBe(ctx.userA);
     const listB = await ctx.app.inject({ method: 'GET', url: '/api/workflows', headers: asB() });

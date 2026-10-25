@@ -25,6 +25,8 @@ import type {
   GitHubFeedbackReference,
 } from '@sindral/shared';
 import type { OperationalSnapshot } from '../metrics.js';
+import type { DesignCheckpoint, DesignHandoff, DesignResult, DesignRevision } from '@sindral/shared';
+import type { DesignSessionCommand, DesignSessionResponse, SessionAccess } from './design.js';
 
 /** Raised when a unique constraint is violated (task key, message external id, ...). Mapped to 409. */
 export class ConflictError extends Error {
@@ -290,6 +292,15 @@ export interface PushDeviceUpsert {
  * cross-user lookups are explicitly named so they stand out in review.
  */
 export interface Repository {
+  // Portable design conversations. All worker reads/writes are fenced atomically against their job lease.
+  designSessionCommand(userId: string, jobId: string, access: SessionAccess, command: DesignSessionCommand): Promise<DesignSessionResponse>;
+  getDesignCheckpoint(userId: string, taskId: string): Promise<DesignCheckpoint | null>;
+  createDesignRevision(userId: string, taskId: string, jobId: string, result: DesignResult): Promise<DesignRevision>;
+  listDesignRevisions(userId: string, taskId: string): Promise<DesignRevision[]>;
+  getDesignRevision(userId: string, revisionId: string): Promise<DesignRevision | null>;
+  approveDesignRevision(userId: string, taskId: string, revisionId: string, expectedVersion: number): Promise<DesignRevision>;
+  createTaskWithDesign(userId: string, input: TaskInsert, revisionId: string, idempotencyKey: string, requestHash: string): Promise<Task>;
+  getDesignHandoff(userId: string, taskId: string): Promise<DesignHandoff | null>;
   /** Cross-instance maintenance lock; expires if an invocation is terminated. */
   acquireMaintenanceLease(name: string, ttlSeconds: number): Promise<string | null>;
   releaseMaintenanceLease(name: string, token: string): Promise<void>;

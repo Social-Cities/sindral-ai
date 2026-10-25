@@ -272,14 +272,14 @@ export class WorkspaceManager {
       }
       if (!options.dryRun) await this.git(dir, gitAuth(null)).try(['worktree', 'prune']);
     }
-    for (const base of [this.paths.worktrees, this.paths.tmp]) {
+    for (const base of [this.paths.worktrees, this.paths.tmp, this.paths.designs]) {
       if (!(await safeRoot(base))) continue;
       for (const taskDir of await listDirs(base)) {
         if (await retain(taskDir, activeTasks.has(path.basename(taskDir)))) continue;
         await remove(taskDir);
       }
     }
-    for (const [base, kind] of [[this.paths.results, 'file'], [this.paths.logs, 'file'], [this.paths.outputs, 'directory']] as const) {
+    for (const [base, kind] of [[this.paths.results, 'file'], [this.paths.logs, 'file'], [this.paths.outputs, 'directory'], [this.paths.designInputs, 'directory']] as const) {
       if (!(await safeRoot(base))) continue;
       for (const entry of await listEntries(base)) {
         if ((kind === 'directory') !== entry.isDirectory()) continue;

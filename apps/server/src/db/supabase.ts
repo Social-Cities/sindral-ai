@@ -30,6 +30,8 @@ import type {
   GitHubFeedbackKind,
 } from '@sindral/shared';
 import { ARTIFACT_CONTENT_TYPES, MAX_ARTIFACT_BYTES } from '@sindral/shared';
+import type { DesignCheckpoint, DesignHandoff, DesignResult, DesignRevision } from '@sindral/shared';
+import type { DesignSessionCommand, DesignSessionResponse, SessionAccess } from './design.js';
 import type { OperationalSnapshot } from '../metrics.js';
 import {
   ConflictError,
@@ -75,7 +77,14 @@ export function createSupabaseClient(url: string, serviceRoleKey: string): Supab
   });
 }
 
-export const EXPECTED_SCHEMA_VERSION = '20261024173119';
+export const EXPECTED_SCHEMA_VERSION = '20261025171114';
+
+interface DesignRevisionRow {
+  id: string; task_id: string; job_id: string; result: DesignResult; created_at: string; approved_at: string | null;
+}
+function mapDesignRevision(row: DesignRevisionRow): DesignRevision {
+  return { id: row.id, taskId: row.task_id, jobId: row.job_id, result: row.result, createdAt: row.created_at, approvedAt: row.approved_at };
+}
 
 // ---- row shapes (snake_case, as stored) ----
 interface ProfileRow {
@@ -533,6 +542,53 @@ function workerPatchToRow(patch: WorkerPatch): Record<string, unknown> {
 
 /** Repository backed by Supabase Postgres via the service-role client. Every query is additionally scoped by user id. */
 export class SupabaseRepository implements Repository {
+  async designSessionCommand(userId: string, jobId: string, access: SessionAccess, command: DesignSessionCommand): Promise<DesignSessionResponse> {
+    return run<DesignSessionResponse>(this.client.rpc('design_session_command', {
+      p_user_id: userId, p_job_id: jobId, p_attempt: access.attempt, p_lease_token: access.leaseToken,
+      p_operation: command.operation, p_payload: command,
+    }));
+  }
+
+  async getDesignCheckpoint(userId: string, taskId: string): Promise<DesignCheckpoint | null> {
+    const row = await run<{ session_id: string | null; files: DesignCheckpoint['files']; updated_at: string } | null>(
+      this.client.from('design_sessions').select('session_id,files,updated_at').eq('user_id', userId).eq('task_id', taskId).maybeSingle(),
+    );
+    return row ? { sessionId: row.session_id, files: row.files, updatedAt: row.updated_at } : null;
+  }
+
+  async createDesignRevision(userId: string, taskId: string, jobId: string, result: DesignResult): Promise<DesignRevision> {
+    await run(this.client.from('design_revisions').upsert({ id: jobId, job_id: jobId, task_id: taskId, user_id: userId, result }, { onConflict: 'id', ignoreDuplicates: true }));
+    const revision = await this.getDesignRevision(userId, jobId);
+    if (!revision) throw new RepositoryError('Design revision could not be stored');
+    return revision;
+  }
+
+  async listDesignRevisions(userId: string, taskId: string): Promise<DesignRevision[]> {
+    const rows = await run<DesignRevisionRow[]>(this.client.from('design_revisions').select('*').eq('user_id', userId).eq('task_id', taskId).order('created_at', { ascending: true }));
+    return rows.map(mapDesignRevision);
+  }
+
+  async getDesignRevision(userId: string, revisionId: string): Promise<DesignRevision | null> {
+    const row = await run<DesignRevisionRow | null>(this.client.from('design_revisions').select('*').eq('user_id', userId).eq('id', revisionId).maybeSingle());
+    return row ? mapDesignRevision(row) : null;
+  }
+
+  async approveDesignRevision(userId: string, taskId: string, revisionId: string, expectedVersion: number): Promise<DesignRevision> {
+    return mapDesignRevision(await run<DesignRevisionRow>(this.client.rpc('approve_design_revision', {
+      p_user_id: userId, p_task_id: taskId, p_revision_id: revisionId, p_expected_version: expectedVersion,
+    })));
+  }
+
+  async createTaskWithDesign(userId: string, input: TaskInsert, revisionId: string, idempotencyKey: string, requestHash: string): Promise<Task> {
+    return mapTask(await run<TaskRow>(this.client.rpc('create_design_implementation_task', {
+      p_user_id: userId, p_task: input, p_revision_id: revisionId, p_idempotency_key: idempotencyKey, p_request_hash: requestHash,
+    })));
+  }
+
+  async getDesignHandoff(userId: string, taskId: string): Promise<DesignHandoff | null> {
+    const row = await run<{ snapshot: DesignHandoff } | null>(this.client.from('design_handoffs').select('snapshot').eq('user_id', userId).eq('task_id', taskId).maybeSingle());
+    return row?.snapshot ?? null;
+  }
   private artifactBucketReady: Promise<void> | null = null;
 
   constructor(private readonly client: SupabaseClient) {}

@@ -71,6 +71,9 @@ export function validateWorkflow(workflow: Workflow): WorkflowValidationIssue[] 
     if (!step.label?.trim()) issues.push({ path: `${p}.label`, message: 'Step label is required' });
     if (!step.state?.trim()) issues.push({ path: `${p}.state`, message: 'Step state is required' });
     if (step.type === 'agent') {
+      if (step.output === 'design' && (step.engine !== 'claude' || step.resumeSessionKey !== 'design')) {
+        issues.push({ path: `${p}.output`, message: 'Design steps require the Claude engine and the design resume session key' });
+      }
       if (!step.output) issues.push({ path: `${p}.output`, message: 'Agent steps need an output kind' });
       if (step.output !== 'merge') {
         if (!step.prompt?.trim()) issues.push({ path: `${p}.prompt`, message: 'Agent steps need a prompt' });

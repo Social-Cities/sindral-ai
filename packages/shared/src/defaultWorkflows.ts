@@ -357,7 +357,40 @@ export const DOCUMENT_WORKFLOW: Workflow = {
   troubleshootStep: DEFAULT_TROUBLESHOOT_STEP,
 };
 
-export const BUNDLED_WORKFLOWS: Workflow[] = [FULL_SDLC_WORKFLOW, PLANNING_ONLY_WORKFLOW, FAST_TRACK_WORKFLOW, DOCUMENT_WORKFLOW];
+const DESIGN_PROMPT = `Create or revise a real Claude Design artifact for this brief:
+{{task_description}}
+
+Feedback to address:
+{{feedback}}
+
+Use Claude Design's built-in design capability. Work on the SAME external artifact across turns. Consult the restored conversation and exported files before changing anything. If retrying an interrupted operation, reconcile the existing artifact before publishing; never blindly create another design.
+Ask focused questions in your result when requirements are unclear. Preserve the current design while explaining what input is needed.
+Export a complete preview and implementation source into the output directory. Explain the design intent, component and token choices, interactions, responsive behavior, empty/loading/error states, open questions, and implementation acceptance criteria.
+Inspect reference repositories when available, but do not modify them, commit, push, or create a PR. Design source belongs only in the design workspace.
+If Design access, login, consent, or exports are unavailable, report the specific setup problem. Never invent a URL, claim success from a screenshot you did not export, or replace Claude Design with an independently generated local page.`;
+
+export const DESIGN_WORKFLOW: Workflow = {
+  id: 'wf-design', name: 'Claude Design',
+  description: 'Describe an app, review and revise its design, then approve a version for implementation.',
+  entryStepId: 'todo',
+  steps: [
+    { id: 'todo', type: 'human', label: 'Design brief', state: 'todo', position: { x: 40, y: 150 } },
+    { id: 'design', type: 'agent', label: 'Create design', state: 'designing', engine: 'claude', model: 'claude-opus-5', mode: 'high', output: 'design', resumeSessionKey: 'design', prompt: DESIGN_PROMPT, tools: ['read_file', 'write_file', 'run_command'], permissions: ['read', 'write', 'execute'], position: { x: 220, y: 150 } },
+    { id: 'design-review', type: 'human', label: 'Review design', state: 'design-review', position: { x: 410, y: 150 } },
+    { id: 'design-revise', type: 'agent', label: 'Revise design', state: 'design-revising', engine: 'claude', model: 'claude-opus-5', mode: 'high', output: 'design', resumeSessionKey: 'design', prompt: DESIGN_PROMPT, tools: ['read_file', 'write_file', 'run_command'], permissions: ['read', 'write', 'execute'], position: { x: 220, y: 290 } },
+    { id: 'done', type: 'end', label: 'Approved design', state: 'done', position: { x: 600, y: 150 } },
+  ],
+  edges: [
+    { from: 'todo', to: 'design', event: 'start', label: 'Start designing' },
+    { from: 'design', to: 'design-review', event: 'complete' },
+    { from: 'design-review', to: 'design-revise', event: 'feedback', label: 'Revise' },
+    { from: 'design-revise', to: 'design-review', event: 'complete' },
+    { from: 'design-review', to: 'done', event: 'accept', label: 'Finish design' },
+  ],
+  troubleshootStep: DEFAULT_TROUBLESHOOT_STEP,
+};
+
+export const BUNDLED_WORKFLOWS: Workflow[] = [FULL_SDLC_WORKFLOW, PLANNING_ONLY_WORKFLOW, FAST_TRACK_WORKFLOW, DOCUMENT_WORKFLOW, DESIGN_WORKFLOW];
 
 /** Models offered in the workflow editor. Keep in sync with the worker's engine adapters. */
 export const MODEL_OPTIONS: Record<'claude' | 'codex', string[]> = {
@@ -367,4 +400,4 @@ export const MODEL_OPTIONS: Record<'claude' | 'codex', string[]> = {
 
 export const ALL_TOOLS = ['read_file', 'write_file', 'run_command', 'search_codebase', 'list_directory', 'create_pr', 'web_search'] as const;
 export const ALL_PERMISSIONS = ['read', 'write', 'execute'] as const;
-export const ALL_OUTPUT_KINDS = ['plan', 'implementation', 'pr', 'review-slice', 'review', 'verdict', 'document', 'troubleshoot', 'conflict-resolution', 'merge'] as const;
+export const ALL_OUTPUT_KINDS = ['plan', 'implementation', 'pr', 'review-slice', 'review', 'verdict', 'document', 'design', 'troubleshoot', 'conflict-resolution', 'merge'] as const;

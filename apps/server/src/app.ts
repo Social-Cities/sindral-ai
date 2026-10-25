@@ -24,6 +24,7 @@ import { workerRoutes } from './routes/worker.js';
 import { workerListRoutes } from './routes/workers.js';
 import { workflowRoutes } from './routes/workflows.js';
 import { githubRoutes } from './routes/github.js';
+import { designRoutes, designPreviewRoutes } from './routes/designs.js';
 import type { FetchLike } from './services/github.js';
 import { Orchestrator } from './services/orchestrator.js';
 import { SecretService } from './services/secrets.js';
@@ -88,6 +89,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         'img-src': ["'self'", 'data:'],
         'connect-src': ["'self'", supabaseOrigin],
         'object-src': ["'none'"],
+        'frame-src': ["'self'"],
         'frame-ancestors': ["'none'"],
       },
     },
@@ -170,6 +172,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   await app.register(maintenanceRoutes, { ctx });
   await app.register(projectRoutes, { ctx });
   await app.register(taskRoutes, { ctx });
+  await app.register(designRoutes, { ctx });
+  await app.register(designPreviewRoutes, { ctx });
   await app.register(workflowRoutes, { ctx });
   await app.register(workerListRoutes, { ctx });
   await app.register(settingsRoutes, { ctx });

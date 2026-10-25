@@ -23,8 +23,9 @@ import { PlanTab } from './taskDetail/PlanTab';
 import { ReviewTab } from './taskDetail/ReviewTab';
 import { StepsTab } from './taskDetail/StepsTab';
 import { SummaryTab } from './taskDetail/SummaryTab';
+import { DesignTab } from './taskDetail/DesignTab';
 
-type Tab = 'summary' | 'plan' | 'chat' | 'code' | 'review' | 'steps' | 'artifacts';
+type Tab = 'summary' | 'plan' | 'chat' | 'code' | 'review' | 'steps' | 'artifacts' | 'design';
 
 const TAB_LABELS: Record<Tab, string> = {
   summary: 'Summary',
@@ -34,6 +35,7 @@ const TAB_LABELS: Record<Tab, string> = {
   review: 'Review',
   steps: 'Steps',
   artifacts: 'Artifacts',
+  design: 'Design',
 };
 
 /** Button styling per workflow event, matching the prototype's colours. */
@@ -123,8 +125,9 @@ export function TaskDetail() {
     workflow?.steps.some((workflowStep) => workflowStep.output === 'review' || workflowStep.output === 'review-slice') ||
       task.artifacts.some((artifact) => artifact.name === 'adversarial-review.md' || artifact.name === 'review-slices.json'),
   );
-  const tabs: Tab[] = ['summary', 'plan', 'chat', 'code', ...(hasReviewStep ? (['review'] as Tab[]) : []), 'steps', 'artifacts'];
-  const defaultTab: Tab = 'summary';
+  const isDesign = Boolean(workflow?.steps.some((item) => item.output === 'design'));
+  const tabs: Tab[] = ['summary', ...(isDesign || task.designInput ? ['design' as const] : []), 'plan', 'chat', 'code', ...(hasReviewStep ? (['review'] as Tab[]) : []), 'steps', 'artifacts'];
+  const defaultTab: Tab = isDesign ? 'design' : 'summary';
   const requestedTab = searchParams.get('tab') as Tab | null;
   const tab: Tab = requestedTab && tabs.includes(requestedTab) ? requestedTab : defaultTab;
   const setTab = (next: Tab) => {
@@ -294,6 +297,7 @@ export function TaskDetail() {
           </div>
 
           <div className="flex-1 overflow-hidden" role="tabpanel">
+            {tab === 'design' && <DesignTab task={task} workflow={workflow} userInitial={userInitial} onSend={(content) => send.mutate(content)} sending={send.isPending} error={send.error ? errorMessage(send.error) : null} agentActive={agentActive} />}
             {tab === 'summary' && (
               <SummaryTab
                 task={task}

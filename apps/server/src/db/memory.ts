@@ -1,4 +1,6 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import type { DesignCheckpoint, DesignHandoff, DesignResult, DesignRevision, PortableSessionEntry } from '@sindral/shared';
+import type { DesignSessionCommand, DesignSessionResponse, SessionAccess } from './design.js';
 import { ARTIFACT_CONTENT_TYPES, MAX_ARTIFACT_BYTES } from '@sindral/shared';
 import type { AgentResult, Artifact, Job, JobKind, Message, Project, ProjectRepository, PullRequest, PushDevice, PushEnvironment, PushPlatform, SecretProvider, Task, TaskEvent, TaskRepository, Worker, WorkerKey, WorkflowRecord } from '@sindral/shared';
 import type { OperationalSnapshot } from '../metrics.js';
@@ -51,6 +53,103 @@ function clone<T>(value: T): T {
  * cannot mutate stored state by accident.
  */
 export class MemoryRepository implements Repository {
+  private readonly designCheckpoints = new Map<string, DesignCheckpoint>();
+  private readonly designEntries = new Map<string, PortableSessionEntry[]>();
+  private readonly designRevisions = new Map<string, Owned<DesignRevision>>();
+  private readonly designHandoffs = new Map<string, Owned<DesignHandoff>>();
+  private readonly designRequests = new Map<string, { taskId: string; hash: string }>();
+
+  async designSessionCommand(userId: string, jobId: string, access: SessionAccess, command: DesignSessionCommand): Promise<DesignSessionResponse> {
+    const job = this.jobs.get(jobId);
+    if (!job || job.userId !== userId || job.payload.kind !== 'agent' || job.payload.step.output !== 'design'
+      || job.attempt !== access.attempt || this.jobLeaseTokens.get(jobId) !== access.leaseToken
+      || !['claimed', 'running'].includes(job.status) || this.jobCancellationRequestTimes.has(jobId)
+      || !job.leaseExpiresAt || Date.parse(job.leaseExpiresAt) <= Date.parse(this.now())) throw new ConflictError('Design job lease has expired or been superseded');
+    job.status = 'running';
+    const stateKey = `${userId}:${job.taskId}`;
+    if (command.operation === 'read') return { checkpoint: clone(this.designCheckpoints.get(stateKey) ?? null) };
+    if (command.operation === 'checkpoint') {
+      const current = this.designCheckpoints.get(stateKey);
+      this.designCheckpoints.set(stateKey, { sessionId: command.sessionId ?? current?.sessionId ?? null, files: clone(command.files), updatedAt: this.now() });
+      return {};
+    }
+    if (command.key.projectKey !== `sindral-task-${job.taskId}`) throw new ConflictError('Session workspace does not match the assigned task');
+    const prefix = `${stateKey}:${command.key.projectKey}:${command.key.sessionId}:`;
+    const entryKey = `${prefix}${command.key.subpath ?? ''}`;
+    const entries = this.designEntries.get(entryKey) ?? [];
+    if (command.operation === 'load') {
+      return { entries: clone(entries.slice(command.after, command.after + 100)), nextAfter: entries.length > command.after + 100 ? command.after + 100 : null,
+        subkeys: [...this.designEntries.keys()].filter((key) => key.startsWith(prefix) && key !== prefix).map((key) => key.slice(prefix.length)) };
+    }
+    const seen = new Set(entries.map((entry) => typeof entry['uuid'] === 'string' ? entry['uuid'] : createHash('sha256').update(JSON.stringify(entry)).digest('hex')));
+    for (const entry of command.entries) {
+      const uuid = typeof entry['uuid'] === 'string' ? entry['uuid'] : createHash('sha256').update(JSON.stringify(entry)).digest('hex');
+      if (!seen.has(uuid)) { entries.push(clone(entry)); seen.add(uuid); }
+    }
+    this.designEntries.set(entryKey, entries);
+    if (!command.key.subpath) {
+      const current = this.designCheckpoints.get(stateKey);
+      this.designCheckpoints.set(stateKey, { sessionId: command.key.sessionId, files: current?.files ?? [], updatedAt: this.now() });
+    }
+    return {};
+  }
+
+  async getDesignCheckpoint(userId: string, taskId: string): Promise<DesignCheckpoint | null> {
+    return clone(this.designCheckpoints.get(`${userId}:${taskId}`) ?? null);
+  }
+
+  async createDesignRevision(userId: string, taskId: string, jobId: string, result: DesignResult): Promise<DesignRevision> {
+    const existing = this.designRevisions.get(jobId);
+    if (existing && existing.userId === userId) { const { userId: _u, ...revision } = existing; return clone(revision); }
+    const revision = { id: jobId, taskId, jobId, result: clone(result), createdAt: this.now(), approvedAt: null };
+    this.designRevisions.set(jobId, { ...revision, userId });
+    return revision;
+  }
+
+  async listDesignRevisions(userId: string, taskId: string): Promise<DesignRevision[]> {
+    return [...this.designRevisions.values()].filter((r) => r.userId === userId && r.taskId === taskId).map(({ userId: _u, ...r }) => clone(r));
+  }
+
+  async getDesignRevision(userId: string, revisionId: string): Promise<DesignRevision | null> {
+    const revision = this.designRevisions.get(revisionId);
+    if (!revision || revision.userId !== userId) return null;
+    const { userId: _u, ...result } = revision;
+    return clone(result);
+  }
+
+  async approveDesignRevision(userId: string, taskId: string, revisionId: string, expectedVersion: number): Promise<DesignRevision> {
+    const task = this.tasks.get(taskId);
+    const revision = this.designRevisions.get(revisionId);
+    if (!task || task.userId !== userId || !revision || revision.userId !== userId || revision.taskId !== taskId) throw new ConflictError('Design revision is unavailable');
+    if (task.version !== expectedVersion || task.state !== 'design-review') throw new ConflictError('Design changed; refresh before approving');
+    revision.approvedAt ??= this.now();
+    const { userId: _u, ...result } = revision;
+    return clone(result);
+  }
+
+  async createTaskWithDesign(userId: string, input: TaskInsert, revisionId: string, idempotencyKey: string, requestHash: string): Promise<Task> {
+    const key = `${userId}:${idempotencyKey}`;
+    const existing = this.designRequests.get(key);
+    if (existing) {
+      if (existing.hash !== requestHash) throw new ConflictError('Handoff request key was reused with different input');
+      const task = this.tasks.get(existing.taskId);
+      if (!task) throw new ConflictError('Implementation task has been deleted');
+      return clone(task);
+    }
+    const revision = await this.getDesignRevision(userId, revisionId);
+    if (!revision?.approvedAt) throw new ConflictError('Approve this design revision before creating an implementation task');
+    const task = await this.createTask(userId, input);
+    this.designHandoffs.set(task.id, { userId, sourceTaskId: revision.taskId, revisionId, approvedAt: revision.approvedAt, result: clone(revision.result) });
+    this.designRequests.set(key, { taskId: task.id, hash: requestHash });
+    return task;
+  }
+
+  async getDesignHandoff(userId: string, taskId: string): Promise<DesignHandoff | null> {
+    const handoff = this.designHandoffs.get(taskId);
+    if (!handoff || handoff.userId !== userId) return null;
+    const { userId: _u, ...result } = handoff;
+    return clone(result);
+  }
   private readonly maintenanceLeases = new Map<string, { token: string; expiresAt: number }>();
 
   async acquireMaintenanceLease(name: string, ttlSeconds: number): Promise<string | null> {
@@ -416,6 +515,10 @@ export class MemoryRepository implements Repository {
     if (!t || t.userId !== userId) return false;
     for (const child of [...this.tasks.values()].filter((c) => c.parentTaskId === id)) await this.deleteTask(userId, child.id);
     this.tasks.delete(id);
+    this.designCheckpoints.delete(`${userId}:${id}`);
+    for (const key of this.designEntries.keys()) if (key.startsWith(`${userId}:${id}:`)) this.designEntries.delete(key);
+    for (const [key, revision] of this.designRevisions) if (revision.taskId === id) this.designRevisions.delete(key);
+    this.designHandoffs.delete(id);
     for (const [k, record] of this.taskRepositories) if (record.taskId === id) this.taskRepositories.delete(k);
     for (const [k, record] of this.pullRequests) if (record.taskId === id) this.pullRequests.delete(k);
     for (const [k, m] of this.messages) if (m.taskId === id) this.messages.delete(k);

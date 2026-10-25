@@ -10,6 +10,10 @@ import {
   workerRegisterSchema,
   WORKER_PROTOCOL_HEADER,
   WORKER_PROTOCOL_VERSION,
+  sessionAccessSchema,
+  sessionAppendSchema,
+  sessionLoadSchema,
+  sessionCheckpointSchema,
   type JobDispatch,
   type JobKind,
 } from '@sindral/shared';
@@ -20,6 +24,7 @@ import { conflict, notFound, upgradeRequired } from '../errors.js';
 import { idParamsSchema, validate } from '../validate.js';
 import { hasGitHubAppCredentials, mintGitHubInstallationToken } from '../services/githubApp.js';
 import { withComputedStatus } from './workers.js';
+import { verifyDesignFiles } from '../services/designs.js';
 
 function repositoriesForJob(job: JobDispatch['job']): string[] {
   switch (job.payload.kind) {
@@ -49,6 +54,40 @@ export const workerRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx 
     }
   });
   const { repo, orchestrator, hub } = ctx;
+
+  app.post('/api/worker/jobs/:id/design-input', async (request) => {
+    const { id } = validate(idParamsSchema, request.params);
+    const access = validate(sessionAccessSchema, request.body);
+    const userId = request.worker!.userId;
+    const job = await repo.getJob(userId, id);
+    if (!job) throw notFound('Job');
+    if (!(await repo.activateJobLease(userId, id, access.attempt, access.leaseToken))) throw conflict('Job lease has expired or been superseded');
+    const input = await repo.getDesignHandoff(userId, job.taskId);
+    if (!input) throw notFound('Design handoff');
+    return { input };
+  });
+
+  app.post('/api/worker/jobs/:id/session', async (request) => {
+    const { id } = validate(idParamsSchema, request.params);
+    const access = validate(sessionAccessSchema, request.body);
+    return repo.designSessionCommand(request.worker!.userId, id, access, { operation: 'read' });
+  });
+  app.post('/api/worker/jobs/:id/session/load', async (request) => {
+    const { id } = validate(idParamsSchema, request.params);
+    const input = validate(sessionLoadSchema, request.body);
+    return repo.designSessionCommand(request.worker!.userId, id, input, { operation: 'load', key: input.key, after: input.after });
+  });
+  app.post('/api/worker/jobs/:id/session/append', async (request) => {
+    const { id } = validate(idParamsSchema, request.params);
+    const input = validate(sessionAppendSchema, request.body);
+    return repo.designSessionCommand(request.worker!.userId, id, input, { operation: 'append', key: input.key, entries: input.entries });
+  });
+  app.post('/api/worker/jobs/:id/session/checkpoint', async (request) => {
+    const { id } = validate(idParamsSchema, request.params);
+    const input = validate(sessionCheckpointSchema, request.body);
+    verifyDesignFiles(input.files);
+    return repo.designSessionCommand(request.worker!.userId, id, input, { operation: 'checkpoint', sessionId: input.sessionId, files: input.files });
+  });
 
   app.post('/api/worker/register', async (request) => {
     const { userId, workerKeyId } = request.worker!;

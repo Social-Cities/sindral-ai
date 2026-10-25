@@ -1,5 +1,6 @@
 import type { AgentMode, ToolName, WorkflowStep } from '@sindral/shared';
 import { run, stream } from '../proc.js';
+import { runPortableClaude } from './portableClaude.js';
 import { extractVersion, OutputTail, type Engine, type EngineCapabilities, type EngineRunOptions, type EngineRunResult } from './types.js';
 
 export const CLAUDE_TOOL_MAP: Record<ToolName, string[]> = {
@@ -142,6 +143,7 @@ export class ClaudeEngine implements Engine {
   }
 
   async run(opts: EngineRunOptions): Promise<EngineRunResult> {
+    if (opts.portableSession) return runPortableClaude(opts, parseClaudeLine);
     const caps = await this.probe();
     if (!caps.available) return { exitCode: null, tail: [], finalText: null, sessionId: null, timedOut: false, cancelled: false, missing: true };
     const tail = new OutputTail();

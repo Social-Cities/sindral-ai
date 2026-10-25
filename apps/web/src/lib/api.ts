@@ -10,6 +10,7 @@ import type {
   UpdateWorkflowInput,
 } from '@sindral/shared';
 import { getAccessToken, supabase } from './supabase';
+import type { DesignOverview, DesignRevision, DesignRevisionView } from '@sindral/shared';
 
 export class ApiError extends Error {
   constructor(
@@ -103,6 +104,16 @@ export function listTasks(params: ListTasksParams = {}) {
 
 export function getTask(id: string) {
   return apiFetch<ResponseOf<'GET /api/tasks/:id'>>(`/api/tasks/${encodeURIComponent(id)}`);
+}
+
+export function getTaskDesign(id: string) {
+  return apiFetch<DesignOverview>(`/api/tasks/${encodeURIComponent(id)}/design`);
+}
+export function getDesignRevision(taskId: string, revisionId: string) {
+  return apiFetch<DesignRevisionView>(`/api/tasks/${encodeURIComponent(taskId)}/design/revisions/${encodeURIComponent(revisionId)}`);
+}
+export function approveDesign(taskId: string, revisionId: string, expectedVersion: number) {
+  return apiFetch<{ revision: DesignRevision }>(`/api/tasks/${encodeURIComponent(taskId)}/design/approve`, { method: 'POST', json: { revisionId, expectedVersion } });
 }
 
 export function createTask(input: CreateTaskInput) {
