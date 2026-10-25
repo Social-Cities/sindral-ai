@@ -1,7 +1,7 @@
 // Public client configuration for the hosted Vercel deployment.
 SINDRAL_API_URL = https:/$()/sindral-ai.vercel.app
 SUPABASE_URL = https:/$()/xixnyviobybjvrgfgjun.supabase.co
-SUPABASE_ANON_KEY = sb_publishable_Ix59CPIhLfoybKVySQNL7g_0Dyozz7F
+SUPABASE_ANON_KEY = sb_publishable_lelovfyY0MoQuMUpXQ4AWw_IB3qbFgm
 APS_ENVIRONMENT = production
 PUSH_ENVIRONMENT = production
 #include? "Release.local.xcconfig"

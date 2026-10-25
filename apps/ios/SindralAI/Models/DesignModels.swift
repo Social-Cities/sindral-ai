@@ -24,6 +24,9 @@ struct DesignResult: Codable, Hashable, Sendable {
     let files: [DesignFile]
     let outcome: String?
     let acceptanceCriteria: String?
+
+    /// Current designs are rendered from exported screens; hosted URLs are optional legacy metadata.
+    var hasPreview: Bool { !screens.isEmpty && !specification.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 }
 
 struct DesignRevision: Codable, Hashable, Sendable, Identifiable {
@@ -33,6 +36,10 @@ struct DesignRevision: Codable, Hashable, Sendable, Identifiable {
     let result: DesignResult
     let createdAt: String
     let approvedAt: String?
+
+    func canApprove(taskState: String, agentActive: Bool) -> Bool {
+        approvedAt == nil && taskState == "design-review" && !agentActive && result.hasPreview
+    }
 }
 
 struct DesignRevisionSummary: Codable, Hashable, Sendable, Identifiable {

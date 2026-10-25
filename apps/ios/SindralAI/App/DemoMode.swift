@@ -218,7 +218,7 @@ enum DemoFixtures {
         ]
     }
 
-    static let designWorkflow = Workflow(id: "wf-design", name: "Claude Design", description: "Design, review and approve an app.", entryStepId: "todo",
+    static let designWorkflow = Workflow(id: "wf-design", name: "App Design", description: "Design, review and approve an app.", entryStepId: "todo",
         steps: [
             .init(id: "todo", type: "human", label: "Design brief", state: "todo"),
             .init(id: "design", type: "agent", label: "Create design", state: "designing", engine: "claude", model: "claude-opus-5", mode: "high", prompt: "Design {{task_description}}", output: "design", resumeSessionKey: "design"),
@@ -239,7 +239,7 @@ enum DemoFixtures {
     static var designRevision: DesignRevision {
         .init(id: "demo-revision", taskId: "d1", jobId: "demo-job", result: .init(kind: "design",
             summary: "A quieter command center with a clear daily focus, concise task cards, and a dedicated review queue.",
-            designUrl: "https://claude.ai/design/demo", specification: "## Workspace\nUse a warm neutral canvas, violet accents, and generous spacing.\n\n## Screens and flows\n- Home highlights the current focus and the next review.\n- Tasks show state, owner, and a concise description.\n- Review surfaces the approved design and implementation scope.\n\n## Responsive behavior\nUse a single column on iPhone and a sidebar on iPad.\n\n## Interaction states\nProvide loading, empty, error, and offline states for every data view.",
+            designUrl: nil, specification: "## Workspace\nUse a warm neutral canvas, violet accents, and generous spacing.\n\n## Screens and flows\n- Home highlights the current focus and the next review.\n- Tasks show state, owner, and a concise description.\n- Review surfaces the approved design and implementation scope.\n\n## Responsive behavior\nUse a single column on iPhone and a sidebar on iPad.\n\n## Interaction states\nProvide loading, empty, error, and offline states for every data view.",
             questions: [], screens: [.init(name: "Workspace", path: "index.html")],
             files: [.init(path: "index.html", contentType: "text/html", encoding: "utf8", content: designHTML, sha256: "demo")],
             outcome: nil, acceptanceCriteria: nil), createdAt: ago(minutes: 2),

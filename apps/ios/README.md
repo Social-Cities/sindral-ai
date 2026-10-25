@@ -42,9 +42,11 @@ xcodebuild -project SindralAI.xcodeproj -scheme 'SindralAI Staging' \
 
 ## Design workflow
 
-Choose **Design an app** on Home, describe the app and select an optional project. The server must provide a workflow with `output: design`. Open the task and start designing from its actions. The Design tab shows revisions, screen previews, the specification and source files. Conversation & feedback opens task chat to answer questions and request revisions.
+Choose **Design an app** on Home, describe the app and select an optional project. The server provides the **App Design** workflow with `output: design`. Claude Code creates self-contained interactive previews directly in the design workspace. Open the task and start designing from its actions. The Design tab shows revisions, screen previews, the specification and source files. Conversation & feedback opens task chat to answer questions and request revisions.
 
 Approve a revision while the task is in Design Review, then choose **Create implementation task**. Select an implementation workflow, repositories/project and scope. The new task receives a frozen snapshot of the approved design. Implementation tasks also expose their approved input in the Design tab. Export handoff saves the complete revision as JSON.
+
+Approval requires preview screens and an implementation specification; no hosted artifact URL is needed. Earlier hosted revisions retain their optional **Open in Claude** link. Clarification turns appear in Conversation and preserve the existing preview. Each exported screen works offline, with inline assets and interactions; use the screen picker to switch screens.
 
 Previews use short-lived signed server URLs in an isolated web view without the app's auth header or cookies. Preview grants refresh while the view is active. Live updates reconnect to Vercel's rotating SSE stream and refresh authenticated state on `sync` signals.
 

@@ -26,8 +26,11 @@ final class DesignAPITests: XCTestCase {
         let api = try await client()
         let overview = try await api.design(taskId: "design-task")
         XCTAssertEqual(overview.revisions.map(\.id), ["revision-1"])
+        XCTAssertNil(overview.revisions.first?.designUrl)
         let view = try await api.designRevision(taskId: "design-task", revisionId: "revision-1")
         XCTAssertEqual(view.revision.result.screens.first?.path, "index.html")
+        XCTAssertNil(view.revision.result.designUrl)
+        XCTAssertTrue(view.revision.canApprove(taskState: "design-review", agentActive: false))
         XCTAssertEqual(view.previewUrls, ["/api/design-previews/design-task?token=signed"])
         let approved = try await api.approveDesign(taskId: "design-task", revisionId: "revision-1", expectedVersion: 7)
         XCTAssertNotNil(approved.approvedAt)
@@ -56,7 +59,7 @@ final class DesignAPITests: XCTestCase {
     }
 
     func testWorkflowRoundTripPreservesDesignSessionContinuity() throws {
-        let json = #"{"id":"wf-design","name":"Claude Design","entryStepId":"design","steps":[{"id":"design","type":"agent","label":"Design","state":"designing","engine":"claude","output":"design","resumeSessionKey":"design"}],"edges":[]}"#
+        let json = #"{"id":"wf-design","name":"App Design","entryStepId":"design","steps":[{"id":"design","type":"agent","label":"Design","state":"designing","engine":"claude","output":"design","resumeSessionKey":"design"}],"edges":[]}"#
         let workflow = try JSONDecoder().decode(Workflow.self, from: Data(json.utf8))
         let roundTrip = try JSONDecoder().decode(Workflow.self, from: JSONEncoder().encode(workflow))
         XCTAssertTrue(roundTrip.isDesign)
@@ -77,6 +80,52 @@ final class DesignAPITests: XCTestCase {
         XCTAssertEqual(object["kind"] as? String, "design")
         let result = try JSONDecoder().decode(DesignResult.self, from: document.data)
         XCTAssertEqual(result.files, input.result.files)
+        XCTAssertNil(result.designUrl)
+    }
+
+    func testPreviewRemainsApprovableWhenOptionalURLIsOmitted() throws {
+        let original = previewRevision()
+        let data = try JSONEncoder().encode(original)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var result = try XCTUnwrap(object["result"] as? [String: Any])
+        result.removeValue(forKey: "designUrl")
+        object["result"] = result
+        let decoded = try JSONDecoder().decode(DesignRevision.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertNil(decoded.result.designUrl)
+        XCTAssertTrue(decoded.canApprove(taskState: "design-review", agentActive: false))
+    }
+
+    func testLegacyHostedRevisionStillSupportsApprovalAndExport() throws {
+        let revision = previewRevision(designURL: "https://claude.ai/code/artifact/existing")
+        XCTAssertTrue(revision.canApprove(taskState: "design-review", agentActive: false))
+        let document = DesignBundleDocument(result: revision.result, revisionID: revision.id, approvedAt: nil)
+        let exported = try JSONDecoder().decode(DesignResult.self, from: document.data)
+        XCTAssertEqual(exported.designUrl, "https://claude.ai/code/artifact/existing")
+        XCTAssertEqual(exported.screens, revision.result.screens)
+    }
+
+    func testClarificationWithoutScreensCannotBeApproved() {
+        let revision = previewRevision(screens: [], specification: "", questions: ["Who will use the app?"])
+        XCTAssertFalse(revision.result.hasPreview)
+        XCTAssertFalse(revision.canApprove(taskState: "design-review", agentActive: false))
+        XCTAssertEqual(revision.result.questions, ["Who will use the app?"])
+    }
+
+    func testApprovalWaitsForFinishedGenerationAndSpecification() {
+        let revision = previewRevision()
+        XCTAssertFalse(revision.canApprove(taskState: "designing", agentActive: true))
+        XCTAssertFalse(revision.canApprove(taskState: "design-review", agentActive: true))
+        XCTAssertFalse(revision.canApprove(taskState: "done", agentActive: false))
+        XCTAssertFalse(previewRevision(specification: " \n ").canApprove(taskState: "design-review", agentActive: false))
+        XCTAssertFalse(previewRevision(approvedAt: "2026-10-25T20:00:00Z").canApprove(taskState: "design-review", agentActive: false))
+    }
+
+    private func previewRevision(designURL: String? = nil, screens: [DesignScreen] = [.init(name: "Home", path: "index.html")],
+                                 specification: String = "Build the app.", questions: [String] = [], approvedAt: String? = nil) -> DesignRevision {
+        .init(id: "revision-1", taskId: "design-task", jobId: "job-1",
+              result: .init(kind: "design", summary: "App design", designUrl: designURL, specification: specification,
+                            questions: questions, screens: screens, files: [], outcome: nil, acceptanceCriteria: nil),
+              createdAt: "2026-10-25T20:00:00Z", approvedAt: approvedAt)
     }
 
     func testImplementationTaskExposesDesignTabWithoutDesignWorkflow() throws {
@@ -154,7 +203,7 @@ private final class DesignURLProtocol: URLProtocol, @unchecked Sendable {
     }
 
     private static var result: [String: Any] {
-        ["kind": "design", "summary": "App design", "designUrl": "https://claude.ai/design/app", "specification": "Build the approved app.", "questions": [],
+        ["kind": "design", "summary": "App design", "designUrl": NSNull(), "specification": "Build the approved app.", "questions": [],
          "screens": [["name": "Home", "path": "index.html"]],
          "files": [["path": "index.html", "contentType": "text/html", "encoding": "utf8", "content": "<h1>App</h1>", "sha256": String(repeating: "a", count: 64)]]]
     }

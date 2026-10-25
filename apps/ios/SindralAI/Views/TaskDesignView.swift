@@ -85,7 +85,7 @@ struct TaskDesignView: View {
             if let result {
                 resultContent(result)
             } else {
-                ContentUnavailableView(task.isAgentActive(store.workflows) ? "Claude is working on your design" : "Your app starts with a conversation",
+                ContentUnavailableView(task.isAgentActive(store.workflows) ? "Claude Code is working on your design" : "Your app starts with a conversation",
                     systemImage: "sparkles",
                     description: Text(loading ? "Loading designs…" : "Start designing from the task actions. Review screens here and send feedback in Conversation."))
                 if let lastError = task.lastError { Text(lastError).font(Theme.secondaryBody).foregroundStyle(Theme.dangerText) }
@@ -161,7 +161,7 @@ struct TaskDesignView: View {
                         HStack { if approving { ProgressView() }; Text("Approve revision") }
                     }
                     .buttonStyle(.sindral(.success, fullWidth: true))
-                    .disabled(approving || loading || task.state != "design-review" || task.isAgentActive(store.workflows) || result.designUrl == nil)
+                    .disabled(approving || loading || !revision.canApprove(taskState: task.state, agentActive: task.isAgentActive(store.workflows)))
                 }
             }
             ViewThatFits(in: .horizontal) {
@@ -238,7 +238,7 @@ struct TaskDesignView: View {
     }
 
     private func approve(_ revision: DesignRevision) async {
-        guard !approving else { return }
+        guard !approving, revision.canApprove(taskState: task.state, agentActive: task.isAgentActive(store.workflows)) else { return }
         approving = true; errorMessage = nil
         defer { approving = false }
         do {
