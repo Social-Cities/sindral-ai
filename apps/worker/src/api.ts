@@ -1,4 +1,5 @@
 import { WORKER_PROTOCOL_HEADER, WORKER_PROTOCOL_VERSION, type AgentResult, type JobDispatch } from '@sindral/shared';
+import type { DesignCheckpoint, DesignFile, DesignHandoff, PortableSessionEntry, PortableSessionKey } from '@sindral/shared';
 import type { Logger } from './logger.js';
 import { silentLogger } from './logger.js';
 
@@ -81,6 +82,26 @@ export class ApiClient {
 
   register(body: { name: string; hostname: string; version: string; workerId?: string }): Promise<{ workerId: string; protocolVersion: number }> {
     return this.post<{ workerId: string; protocolVersion: number }>('/api/worker/register', body);
+  }
+
+  readDesignSession(jobId: string, access: { attempt: number; leaseToken: string }): Promise<{ checkpoint: DesignCheckpoint | null }> {
+    return this.post(`/api/worker/jobs/${encodeURIComponent(jobId)}/session`, access);
+  }
+
+  readDesignInput(jobId: string, access: { attempt: number; leaseToken: string }): Promise<{ input: DesignHandoff }> {
+    return this.post(`/api/worker/jobs/${encodeURIComponent(jobId)}/design-input`, access);
+  }
+
+  appendSession(jobId: string, body: { attempt: number; leaseToken: string; key: PortableSessionKey; entries: PortableSessionEntry[] }): Promise<Record<string, never>> {
+    return this.post(`/api/worker/jobs/${encodeURIComponent(jobId)}/session/append`, body);
+  }
+
+  loadSession(jobId: string, body: { attempt: number; leaseToken: string; key: PortableSessionKey; after: number }): Promise<{ entries: PortableSessionEntry[]; nextAfter: number | null; subkeys: string[] }> {
+    return this.post(`/api/worker/jobs/${encodeURIComponent(jobId)}/session/load`, body);
+  }
+
+  checkpointDesignSession(jobId: string, body: { attempt: number; leaseToken: string; sessionId: string | null; files: DesignFile[] }): Promise<Record<string, never>> {
+    return this.post(`/api/worker/jobs/${encodeURIComponent(jobId)}/session/checkpoint`, body);
   }
 
   heartbeat(body: { workerId: string; runningJobs: { jobId: string; leaseToken: string }[] }): Promise<{ ok: true; cancelledJobIds: string[] }> {

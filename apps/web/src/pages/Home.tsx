@@ -18,7 +18,7 @@ import { currentStep } from '@/lib/taskWorkflow';
 
 const MAX_UPLOAD_BYTES = 1024 * 1024;
 
-type Mode = 'text' | 'url' | 'project';
+type Mode = 'text' | 'url' | 'project' | 'design';
 
 const PROVIDER_LABEL: Record<TicketImport['provider'], string> = { linear: 'Linear', jira: 'Jira', github: 'GitHub' };
 
@@ -48,6 +48,7 @@ export function Home() {
   const textRef = useRef<HTMLTextAreaElement>(null);
 
   const workflows = useMemo(() => workflowsQuery.data ?? [], [workflowsQuery.data]);
+  const designWorkflow = workflows.find((workflow) => workflow.steps.some((step) => step.output === 'design'));
   const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data]);
   const tasks = useMemo(() => tasksQuery.data ?? [], [tasksQuery.data]);
   const selectedProject = projects.find((project) => project.id === projectId) ?? null;
@@ -63,8 +64,8 @@ export function Home() {
   }, [workflows, workflowId]);
 
   useEffect(() => {
-    if (!projectId && projects.length > 0) setProjectId(projects[0]!.id);
-  }, [projectId, projects]);
+    if (mode !== 'design' && !projectId && projects.length > 0) setProjectId(projects[0]!.id);
+  }, [projectId, projects, mode]);
 
   const counts = useMemo(() => {
     const c = { todo: 0, 'in-progress': 0, 'in-review': 0, done: 0, failed: 0 };
@@ -89,7 +90,7 @@ export function Home() {
 
   const detected = mode === 'url' ? detectTicket(urlInput) : null;
   const title = mode === 'url' ? ticket?.title ?? '' : (textInput.trim().split('\n')[0] ?? '').slice(0, 200);
-  const canCreate = mode === 'text' ? !!textInput.trim() : mode === 'url' ? !!ticket : false;
+  const canCreate = mode === 'text' || mode === 'design' ? !!textInput.trim() && (mode !== 'design' || Boolean(designWorkflow)) : mode === 'url' ? !!ticket : false;
 
   function parseRepos(): string[] | null {
     const raw = reposInput
@@ -136,13 +137,13 @@ export function Home() {
       }
 
       let input: CreateTaskInput;
-      if (mode === 'text') {
+      if (mode === 'text' || mode === 'design') {
         input = {
           title,
           description: textInput.trim(),
           ...(resolvedProjectId ? { projectId: resolvedProjectId } : {}),
           repos: resolvedRepos,
-          workflowId: workflowId || undefined,
+          workflowId: mode === 'design' ? designWorkflow?.id : workflowId || undefined,
         };
       } else if (ticket) {
         const key = /^[A-Z][A-Z0-9]*-\d+$/.test(ticket.id) ? ticket.id : undefined;
@@ -158,13 +159,13 @@ export function Home() {
       } else {
         return;
       }
-      await createTask.mutateAsync(input);
+      const created = await createTask.mutateAsync(input);
       setTextInput('');
       setUrlInput('');
       setTicket(null);
       setReposInput('');
       setProjectId(resolvedProjectId ?? '');
-      navigate('/tasks');
+      navigate(mode === 'design' ? `/tasks/${created.task.id}` : '/tasks');
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Could not create task');
     }
@@ -217,7 +218,7 @@ export function Home() {
             {/* Task creation card */}
             <div className="rounded-lg overflow-hidden bg-card border border-border">
               <div className="flex border-b border-border" role="tablist" aria-label="Home action">
-                {(['text', 'url', 'project'] as const).map((m) => (
+                {(['text', 'design', 'url', 'project'] as const).map((m) => (
                   <button
                     key={m}
                     type="button"
@@ -228,7 +229,7 @@ export function Home() {
                       mode === m ? 'text-foreground' : 'text-muted-foreground hover:text-secondary-foreground'
                     }`}
                   >
-                    {m === 'text' ? 'New task' : m === 'url' ? 'Paste a URL' : 'New project'}
+                    {m === 'text' ? 'New task' : m === 'design' ? 'Design an app' : m === 'url' ? 'Paste a URL' : 'New project'}
                     {mode === m && <span className="absolute bottom-0 left-0 right-0 h-px bg-accent" />}
                   </button>
                 ))}
@@ -237,14 +238,14 @@ export function Home() {
               <div className="p-4">
                 {mode === 'project' ? (
                   <ProjectsSection />
-                ) : mode === 'text' ? (
+                ) : mode === 'text' || mode === 'design' ? (
                   <textarea
                     ref={textRef}
                     aria-label="Task description"
                     value={textInput}
                     onChange={(e) => setTextInput(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder="Describe the task in detail. Include the problem, expected behavior, and any relevant context..."
+                    placeholder={mode === 'design' ? 'We want to build an app that has… Describe its users, screens, flows, and visual direction.' : 'Describe the task in detail. Include the problem, expected behavior, and any relevant context...'}
                     className="w-full h-32 bg-transparent text-sm text-foreground placeholder:text-muted-foreground resize-none outline-none leading-relaxed"
                   />
                 ) : (
@@ -321,7 +322,7 @@ export function Home() {
                           }}
                           className="w-full rounded border border-border bg-input px-2 py-2 text-xs text-foreground outline-none focus:border-accent/40"
                         >
-                          {projects.length === 0 && <option value="">No project</option>}
+                          {(projects.length === 0 || mode === 'design') && <option value="">No project</option>}
                           {projects.map((project) => (
                             <option key={project.id} value={project.id}>
                               {project.name}
@@ -423,7 +424,8 @@ export function Home() {
                     </svg>
                     <select
                       aria-label="Workflow"
-                      value={workflowId}
+                      value={mode === 'design' ? designWorkflow?.id ?? '' : workflowId}
+                      disabled={mode === 'design'}
                       onChange={(e) => setWorkflowId(e.target.value)}
                       className="text-xs text-muted-foreground bg-transparent outline-none appearance-none cursor-pointer hover:text-secondary-foreground transition-colors"
                     >
@@ -436,7 +438,7 @@ export function Home() {
                     </select>
                   </div>
                   <Button onClick={handleCreate} disabled={!canCreate} loading={createTask.isPending} title="Cmd+Enter">
-                    Create task ↵
+                    {mode === 'design' ? 'Create design ↵' : 'Create task ↵'}
                   </Button>
                 </div>
               </div>

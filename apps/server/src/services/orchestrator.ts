@@ -38,6 +38,7 @@ import type { Metrics } from '../metrics.js';
 import { parsePrUrl } from './github.js';
 import type { NotificationSink, TaskNotification } from './notifications.js';
 import { toWorkflow, type WorkflowService } from './workflows.js';
+import { verifyDesignFiles } from './designs.js';
 
 export type Actor = 'user' | 'worker' | 'system';
 
@@ -160,7 +161,13 @@ export class Orchestrator {
       if (outsideProject) throw badRequest(`Repository ${outsideProject} is not part of the selected project`);
     }
     const importedContract = extractTaskContract(input.description);
-    const task = await this.repo.createTask(userId, {
+    if (input.designHandoff) {
+      const selectedWorkflow = workflowId ? await this.workflows.get(userId, workflowId) : null;
+      if (!repos.length || !selectedWorkflow?.steps.some((step) => ['implementation', 'pr', 'review-slice'].includes(step.output ?? ''))) {
+        throw badRequest('A design implementation task requires repositories and an implementation workflow');
+      }
+    }
+    const taskInput = {
       key,
       title: input.title,
       description: input.description,
@@ -177,9 +184,13 @@ export class Orchestrator {
       baseBranch: null,
       parentTaskId: null,
       sequence: null,
-    });
+    } satisfies Parameters<Repository['createTask']>[1];
+    const task = input.designHandoff
+      ? await this.repo.createTaskWithDesign(userId, taskInput, input.designHandoff.revisionId, input.designHandoff.idempotencyKey,
+        createHash('sha256').update(JSON.stringify(input)).digest('hex'))
+      : await this.repo.createTask(userId, taskInput);
     await this.syncTaskRepositories(userId, task);
-    await this.repo.createEvent(userId, { taskId: task.id, type: 'created', toState: task.state, detail: { actor: 'user' } });
+    await this.repo.createEvent(userId, { taskId: task.id, type: 'created', toState: task.state, detail: { actor: 'user' }, dedupeKey: input.designHandoff ? 'design-handoff-created' : undefined });
     this.hub.publish(userId, { type: 'task.created', taskId: task.id });
     return task;
   }
@@ -192,15 +203,17 @@ export class Orchestrator {
 
   async getTaskWithRelations(userId: string, id: string): Promise<TaskWithRelations> {
     const task = await this.getTask(userId, id);
-    const [messages, events, artifacts, subtasks, repositories, pullRequests] = await Promise.all([
+    const [messages, events, artifacts, subtasks, repositories, pullRequests, designHandoff] = await Promise.all([
       this.repo.listMessages(userId, id),
       this.repo.listEvents(userId, id),
       this.repo.listArtifacts(userId, id),
       this.repo.listSubtasks(userId, id),
       this.repo.listTaskRepositories(userId, id),
       this.repo.listPullRequests(userId, id),
+      this.repo.getDesignHandoff(userId, id),
     ]);
-    return { ...task, messages, events, artifacts, subtasks, repositories, pullRequests };
+    return { ...task, messages, events, artifacts, subtasks, repositories, pullRequests,
+      designInput: designHandoff ? { sourceTaskId: designHandoff.sourceTaskId, revisionId: designHandoff.revisionId, approvedAt: designHandoff.approvedAt } : null };
   }
 
   async updateTask(userId: string, id: string, patch: UpdateTaskInput): Promise<Task> {
@@ -349,6 +362,10 @@ export class Orchestrator {
       return replay.task;
     }
     if (task.version !== version) throw conflict(`Task version ${version} is stale; current version is ${task.version}`);
+    if (event === 'accept' && task.state === 'design-review') {
+      const revisions = await this.repo.listDesignRevisions(userId, task.id);
+      if (!revisions.at(-1)?.approvedAt) throw conflict('Approve the current design revision in the Design tab before finishing');
+    }
     return this.applyEvent(userId, task, event, {
       actor: 'user',
       expectedVersion: version,
@@ -397,7 +414,15 @@ export class Orchestrator {
         }
       }
     } else if (message && workflow !== null && isAgentActive(task, workflow)) {
-      task = await this.restartRunningAgentStep(userId, task, workflow, source);
+      if (getStep(workflow, task.currentStepId)?.output === 'design') {
+        const fresh = await this.getTask(userId, taskId);
+        if (chatTriggersFeedback(fresh, workflow)) {
+          try { task = await this.applyEvent(userId, fresh, 'feedback', { actor: 'user', feedbackOverride: content }); }
+          catch (error) { task = await this.getTask(userId, taskId); if (chatTriggersFeedback(task, workflow)) throw error; }
+        }
+        await this.repo.createMessage(userId, { taskId, role: 'system', source, content: 'Your feedback is queued for the next design turn.' });
+        this.hub.publish(userId, { type: 'task.updated', taskId });
+      } else task = await this.restartRunningAgentStep(userId, task, workflow, source);
     } else if (message) {
       this.hub.publish(userId, { type: 'task.updated', taskId });
     }
@@ -568,11 +593,19 @@ export class Orchestrator {
     const contractPrompt = step.output === 'plan' ? PLANNING_CONTRACT_PROMPT : TASK_CONTRACT_PROMPT;
     const stepWithContract = { ...step, prompt: `${step.prompt ?? ''}\n\n${contractPrompt}`.trim() };
     const resumeSessionId = await this.findResumeSessionId(userId, task.id, step);
+    const designHandoff = await this.repo.getDesignHandoff(userId, task.id);
+    const designMessages = step.output === 'design' ? await this.repo.listMessages(userId, task.id) : [];
+    if (step.output === 'design') {
+      const revisions = await this.repo.listDesignRevisions(userId, task.id);
+      const latest = revisions.at(-1);
+      stepWithContract.prompt += `\n\n## Durable design context\n${latest ? `Continue the existing artifact ${latest.result.designUrl}.\n${latest.result.specification}` : 'No completed revision yet. Inspect the restored session before creating any artifact.'}\n\nConversation:\n${designMessages.map((message) => `${message.role}: ${message.content}`).join('\n\n').slice(-60_000)}`;
+    }
     return {
       taskId: task.id,
       kind: 'agent',
       stepId: step.id,
-      payload: { kind: 'agent', step: stepWithContract, context, repos: task.repos, branch: task.branch, baseBranch: task.baseBranch, prUrl: task.prUrl, resumeSessionId },
+      payload: { kind: 'agent', step: stepWithContract, context, repos: task.repos, branch: task.branch, baseBranch: task.baseBranch, prUrl: task.prUrl, resumeSessionId,
+        ...(designHandoff ? { designHandoff: { sourceTaskId: designHandoff.sourceTaskId, revisionId: designHandoff.revisionId, approvedAt: designHandoff.approvedAt } } : {}), ...(step.output === 'design' ? { designMessageIds: designMessages.filter((message) => message.role === 'user').map((message) => message.id) } : {}) },
     };
   }
 
@@ -669,6 +702,7 @@ export class Orchestrator {
             ? job.payload.step.output
             : null;
     if (expectedKind !== result.kind) throw badRequest(`Job expects a "${expectedKind}" result, received "${result.kind}"`);
+    if (result.kind === 'design') verifyDesignFiles(result.files);
 
     const task = await this.repo.getTask(userId, job.taskId);
     if (!task) throw notFound('Task');
@@ -708,7 +742,7 @@ export class Orchestrator {
         await this.repo.createMessage(userId, {
           taskId: task.id,
           role: 'agent',
-          content: result.summary,
+          content: result.kind === 'design' && result.questions.length ? `${result.summary}\n\n${result.questions.map((question) => `- ${question}`).join('\n')}` : result.summary,
           source: 'worker',
           externalId: `job:${job.id}:summary`,
         });
@@ -734,6 +768,14 @@ export class Orchestrator {
             detail: { jobId: job.id },
             dedupeKey: `job:${job.id}:stale-result`,
           });
+        }
+        if (result.kind === 'design' && claim.job.payload.kind === 'agent') {
+          const included = new Set(claim.job.payload.designMessageIds ?? []);
+          const pending = (await this.repo.listMessages(userId, task.id)).filter((message) => message.role === 'user' && !included.has(message.id));
+          const fresh = await this.getTask(userId, task.id);
+          if (pending.length && fresh.state === 'design-review') {
+            current = await this.applyEvent(userId, fresh, 'feedback', { actor: 'system', feedbackOverride: pending.map((message) => message.content).join('\n\n'), idempotencyKey: `job:${job.id}:queued-design-feedback` });
+          }
         }
         this.hub.publish(userId, { type: 'task.updated', taskId: task.id });
       }
@@ -943,6 +985,9 @@ export class Orchestrator {
           content: result.report,
           dedupeKey: `job:${job.id}:artifact:${VERIFY_ARTIFACT}`,
         });
+        return persistGeneratedContract();
+      case 'design':
+        if (result.designUrl && this.isJobCurrent(task, job)) await this.repo.createDesignRevision(userId, task.id, job.id, result);
         return persistGeneratedContract();
       case 'document':
         for (const [index, artifact] of result.artifacts.entries()) {

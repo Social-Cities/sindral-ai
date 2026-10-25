@@ -99,7 +99,7 @@ export function ChatTab({ task, workflow, userInitial, onSend, sending, error }:
               Sending will trigger an agent revision{targetLabel ? ` (${targetLabel})` : ''}
             </>
           ) : (
-            <>Message is saved to the thread — no agent run will start</>
+            step?.output === 'design' ? <>Feedback is queued for the next design turn</> : <>Message is saved to the thread — no agent run will start</>
           )}
           <span className="text-muted-foreground/60">· Enter to send · Shift+Enter for new line</span>
         </p>

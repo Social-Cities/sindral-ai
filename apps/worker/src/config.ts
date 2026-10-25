@@ -170,6 +170,8 @@ export function workdirPaths(workdir: string) {
     tmp: path.join(workdir, 'tmp'),
     results: path.join(workdir, 'results'),
     outputs: path.join(workdir, 'outputs'),
+    designs: path.join(workdir, 'design'),
+    designInputs: path.join(workdir, 'design-inputs'),
     logs: path.join(workdir, 'logs'),
     workerFile: path.join(workdir, 'worker.json'),
     runningFile: path.join(workdir, 'running.json'),

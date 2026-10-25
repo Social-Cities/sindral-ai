@@ -133,7 +133,7 @@ async function start(config: WorkerConfig, logger: Logger): Promise<number> {
     version,
     hostname: os.hostname(),
     persistence: filePersistence(config),
-    runJob: (dispatch, signal) => runJob(dispatch, { config, api, engines, workspaces, logger }, signal),
+    runJob: (dispatch, signal) => runJob(dispatch, { config, api, sessionApi: api, designInputApi: api, engines, workspaces, logger }, signal),
   });
 
   let signalled = false;

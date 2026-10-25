@@ -1,3 +1,5 @@
+import type { DesignHandoff, DesignResult } from './design.js';
+
 /**
  * Core domain types shared by the server, web UI and worker.
  * Keep this file free of runtime dependencies.
@@ -44,6 +46,7 @@ export type Permission = 'read' | 'write' | 'execute';
  * the worker enforces and the server-side transition after completion.
  */
 export type StepOutputKind =
+  | 'design' // Claude Design artifact, portable workspace and implementation specification
   | 'plan' // markdown plan
   | 'implementation' // code change committed locally, before PR publication
   | 'pr' // code change pushed as a PR
@@ -263,6 +266,7 @@ export interface Task {
 }
 
 export interface TaskWithRelations extends Task {
+  designInput?: Pick<DesignHandoff, 'sourceTaskId' | 'revisionId' | 'approvedAt'> | null;
   messages: Message[];
   events: TaskEvent[];
   artifacts: Artifact[];
@@ -326,6 +330,10 @@ export interface AgentJobPayload {
   prUrl: string | null;
   /** Engine-native session to resume when dispatching a feedback/retry pass. */
   resumeSessionId?: string | null;
+  /** Pinned, self-contained input copied from an explicitly approved design revision. */
+  designHandoff?: Pick<DesignHandoff, 'sourceTaskId' | 'revisionId' | 'approvedAt'>;
+  /** User messages already included in this design turn; later messages are queued for the next turn. */
+  designMessageIds?: string[];
 }
 
 export interface RebaseStackJobPayload {
@@ -501,6 +509,7 @@ export interface MergeResult {
 }
 
 export type AgentResult =
+  | DesignResult
   | PlanResult
   | ImplementationResult
   | PrResult

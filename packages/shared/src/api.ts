@@ -20,6 +20,7 @@ import type {
   WorkerKey,
   WorkflowRecord,
 } from './types.js';
+import type { DesignCheckpoint, DesignHandoff, DesignOverview, DesignRevision, DesignRevisionView, PortableSessionEntry } from './design.js';
 
 export interface ApiError {
   error: { code: string; message: string; details?: unknown };
@@ -46,6 +47,9 @@ export interface ApiRoutes {
   'GET /api/tasks/:id/events': { response: { events: TaskEvent[] } };
   'GET /api/tasks/:id/artifacts': { response: { artifacts: Artifact[] } };
   'GET /api/tasks/:id/jobs': { response: { jobs: Job[] } };
+  'GET /api/tasks/:id/design': { response: DesignOverview };
+  'GET /api/tasks/:id/design/revisions/:revisionId': { response: DesignRevisionView };
+  'POST /api/tasks/:id/design/approve': { response: { revision: DesignRevision } };
   // workflows
   'GET /api/workflows': { response: { workflows: WorkflowRecord[] } };
   'POST /api/workflows': { response: { workflow: WorkflowRecord } };
@@ -79,6 +83,11 @@ export interface ApiRoutes {
   'POST /api/worker/jobs/:id/complete': { response: { ok: true } };
   'POST /api/worker/jobs/:id/fail': { response: { ok: true } };
   'POST /api/worker/jobs/:id/cancelled': { response: { ok: true } };
+  'POST /api/worker/jobs/:id/session': { response: { checkpoint: DesignCheckpoint | null } };
+  'POST /api/worker/jobs/:id/session/load': { response: { entries: PortableSessionEntry[]; nextAfter: number | null; subkeys: string[] } };
+  'POST /api/worker/jobs/:id/session/append': { response: Record<string, never> };
+  'POST /api/worker/jobs/:id/session/checkpoint': { response: Record<string, never> };
+  'POST /api/worker/jobs/:id/design-input': { response: { input: DesignHandoff } };
 }
 
 /** Server-sent event payloads pushed to the UI on `/api/events`. */

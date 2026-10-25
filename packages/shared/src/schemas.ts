@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ALL_OUTPUT_KINDS, ALL_PERMISSIONS, ALL_TOOLS } from './defaultWorkflows.js';
 import { ARTIFACT_CONTENT_TYPES, MAX_ARTIFACT_BYTES } from './types.js';
+import { designResultSchema } from './design.js';
 
 const id = z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9-_]*$/i);
 const shortText = z.string().trim().min(1).max(200);
@@ -88,6 +89,7 @@ export const createTaskSchema = z.object({
   workflowId: z.string().max(64).optional(),
   repos: z.array(repo).max(10).default([]),
   newRepository: createGitHubRepositorySchema.optional(),
+  designHandoff: z.object({ revisionId: z.string().uuid(), idempotencyKey: z.string().uuid() }).optional(),
 }).refine((input) => input.repos.length + (input.newRepository ? 1 : 0) <= 10, {
   message: 'Tasks support at most 10 repositories',
   path: ['repos'],
@@ -182,6 +184,7 @@ const taskContractResultFields = {
 };
 
 export const agentResultSchema = z.discriminatedUnion('kind', [
+  designResultSchema,
   z.object({
     kind: z.literal('plan'),
     summary: z.string().max(20_000),

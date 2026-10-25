@@ -4,10 +4,12 @@ import path from 'node:path';
 import { OUTPUT_DIR_ENV, protocolInstructions, RESULT_FILE_ENV, type AgentJobPayload, type AgentResult, type GitHubFeedbackReference, type JobContext, type JobDispatch, type PrResult, type StepOutputKind, type WorkflowStep } from '@sindral/shared';
 import type { ApiClient } from './api.js';
 import { collectOutputArtifacts, mergeArtifacts } from './artifacts.js';
+import { collectDesignFiles, restoreDesignFiles } from './designFiles.js';
+import { WorkerSessionStore } from './sessionStore.js';
 import { runConflictResolution } from './conflict.js';
 import { workdirPaths, type PublishCheck, type WorkerConfig } from './config.js';
 import { buildAgentEnv, type EngineRegistry } from './engines/index.js';
-import type { EngineRunResult } from './engines/types.js';
+import type { EngineRunOptions, EngineRunResult } from './engines/types.js';
 import { JobEventStream } from './events.js';
 import { gitAuth, gitIn } from './git.js';
 import { commitAndPush, ensurePr, ghRunner, type GhRunner } from './github.js';
@@ -18,7 +20,7 @@ import { runMergePullRequests } from './merge.js';
 import { run as runCommand, type RunResult, type run } from './proc.js';
 import { Redactor } from './redact.js';
 import { describeFailure, extractJsonCandidate, markdownPlanResult, parseRawResult, readResultFile, summaryOf, validateResult } from './result.js';
-import { assertPathContained, type GitFactory, type Workspace, type WorkspaceManager } from './workspace.js';
+import { assertPathContained, sanitizeTaskKey, type GitFactory, type Workspace, type WorkspaceManager } from './workspace.js';
 
 export const SHUTDOWN_REASON = 'worker shutting down';
 export const JOB_CANCELLED_REASON = 'job cancelled';
@@ -28,6 +30,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export interface JobDeps {
   config: WorkerConfig;
   api: Pick<ApiClient, 'postEvent' | 'complete' | 'fail' | 'cancel'>;
+  sessionApi?: Pick<ApiClient, 'readDesignSession' | 'appendSession' | 'loadSession' | 'checkpointDesignSession'>;
+  designInputApi?: Pick<ApiClient, 'readDesignInput'>;
   engines: EngineRegistry;
   workspaces: WorkspaceManager;
   logger: Logger;
@@ -164,7 +168,8 @@ async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx:
   if (!output) throw new Error(`Step "${step.label}" (${step.id}) has no output kind configured`);
   const engineName = step.engine ?? 'claude';
   const engine = ctx.engines[engineName];
-  const caps = await engine.probe();
+  // Design uses the SDK's bundled executable, independently of the optional local CLI.
+  const caps = output === 'design' ? { available: true } : await engine.probe();
   if (!caps.available) {
     const bin = engineName === 'claude' ? config.claudeBin : config.codexBin;
     const envVar = engineName === 'claude' ? 'SINDRAL_CLAUDE_BIN' : 'SINDRAL_CODEX_BIN';
@@ -176,7 +181,7 @@ async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx:
 
   const taskKey = payload.context.task_key || job.taskId;
   events.progress(`Preparing workspace for ${taskKey}`);
-  const workspace = await ctx.workspaces.prepare({
+  let workspace = await ctx.workspaces.prepare({
     taskKey,
     repos: payload.repos,
     branch: payload.branch,
@@ -187,16 +192,64 @@ async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx:
   const paths = workdirPaths(config.workdir);
   const jobId = assertJobId(job.id);
   const resultFile = path.join(paths.results, `${jobId}.json`);
-  const outputDir = path.join(paths.outputs, jobId);
+  const outputDir = output === 'design' ? path.join(paths.designs, sanitizeTaskKey(taskKey)) : path.join(paths.outputs, jobId);
   await fsp.mkdir(paths.results, { recursive: true });
   await fsp.mkdir(paths.outputs, { recursive: true });
   await assertPathContained(config.workdir, paths.results);
   await assertPathContained(config.workdir, paths.outputs);
   await fsp.mkdir(outputDir, { recursive: true });
   await assertPathContained(config.workdir, outputDir);
+  if (output === 'design') await fsp.utimes(outputDir, new Date(), new Date());
   await fsp.rm(resultFile, { force: true });
 
-  const prompt = buildPrompt({ step, output, context: payload.context, resultFile, outputDir, workspace });
+  let portableSession: EngineRunOptions['portableSession'];
+  let resumeSessionId = payload.resumeSessionId;
+  let flushSession: (() => Promise<void>) | undefined;
+  const inputDirs: string[] = [];
+  if (output === 'design') {
+    if (engineName !== 'claude') throw new Error('Claude Design steps require the Claude engine');
+    const api = ctx.sessionApi;
+    if (!api) throw new Error('This worker does not support portable design sessions. Upgrade the worker.');
+    const access = { attempt: job.attempt, leaseToken: dispatch.lease.token };
+    const { checkpoint } = await api.readDesignSession(job.id, access);
+    if (checkpoint) {
+      await fsp.rm(outputDir, { recursive: true, force: true });
+      await restoreDesignFiles(outputDir, checkpoint.files);
+      resumeSessionId = checkpoint.sessionId;
+    }
+    const references = workspace.repos.map((repo) => `${repo.repo.full}: ${repo.dir}`);
+    workspace = { ...workspace, cwd: outputDir, repos: [] };
+    const persistenceController = new AbortController();
+    const store = new WorkerSessionStore(api, job.id, access, (error) => { write(`Session persistence failed: ${error.message}`); persistenceController.abort(error); });
+    if (resumeSessionId && !(await store.load({ projectKey: `sindral-task-${job.taskId}`, sessionId: resumeSessionId }))) {
+      resumeSessionId = null;
+      events.progress('Native session history is unavailable; continuing from the saved design context and files');
+    }
+    flushSession = () => store.flush();
+    portableSession = {
+      store, projectKey: `sindral-task-${job.taskId}`, signal: persistenceController.signal,
+      onCheckpoint: async (sessionId) => {
+        await store.flush();
+        const files = await collectDesignFiles(outputDir);
+        await api.checkpointDesignSession(job.id, { ...access, sessionId, files });
+      },
+    };
+    step.prompt = `${step.prompt ?? ''}\n\nCurrent portable design workspace: ${outputDir}. All persistent design files belong here. Previous absolute worker paths may no longer exist. Reconcile the restored files and existing remote artifact before repeating interrupted operations.\nRead-only reference repositories:\n${references.join('\n') || '(none)'}`;
+  }
+
+  if (payload.designHandoff) {
+    if (!ctx.designInputApi) throw new Error('This worker cannot download design handoffs. Upgrade the worker.');
+    const { input } = await ctx.designInputApi.readDesignInput(job.id, { attempt: job.attempt, leaseToken: dispatch.lease.token });
+    if (input.revisionId !== payload.designHandoff.revisionId) throw new Error('Design handoff revision does not match the job');
+    const inputsDir = path.join(paths.designInputs, jobId);
+    await fsp.mkdir(inputsDir, { recursive: true });
+    await assertPathContained(config.workdir, inputsDir);
+    await restoreDesignFiles(inputsDir, input.result.files);
+    inputDirs.push(inputsDir);
+    step.prompt = `${step.prompt ?? ''}\n\n## Approved design handoff\nRevision: ${input.revisionId}\nApproved: ${input.approvedAt}\nDesign source and assets: ${inputsDir}\nUse this frozen revision as input. Do not alter the handoff files.\n${input.result.specification}\n\nOpen design questions:\n${input.result.questions.join('\n') || 'None.'}`;
+  }
+
+  const prompt = `${output === 'design' ? '/design ' : ''}${buildPrompt({ step, output, context: payload.context, resultFile, outputDir, workspace })}`;
   const env = buildAgentEnv(ctx.env ?? process.env, {
     [RESULT_FILE_ENV]: resultFile,
     [OUTPUT_DIR_ENV]: outputDir,
@@ -219,8 +272,9 @@ async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx:
       env,
       timeoutMs: config.jobTimeoutMs,
       signal,
-      writableDirs: [paths.results, outputDir],
-      resumeSessionId: payload.resumeSessionId,
+      writableDirs: [paths.results, outputDir, ...inputDirs],
+      resumeSessionId,
+      portableSession,
       onOutput: (line) => {
         lineCount++;
         events.line(line);
@@ -258,8 +312,9 @@ async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx:
       env,
       timeoutMs: config.jobTimeoutMs,
       signal,
-      writableDirs: [paths.results, outputDir],
+      writableDirs: [paths.results, outputDir, ...inputDirs],
       resumeSessionId: run.sessionId ?? payload.resumeSessionId,
+      portableSession,
       onOutput: (line) => {
         lineCount++;
         events.line(line);
@@ -311,7 +366,11 @@ async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx:
   } else if (raw.kind === 'document') {
     const collected = await collectOutputArtifacts(outputDir);
     candidate = { ...raw, artifacts: mergeArtifacts(raw['artifacts'], collected) };
+  } else if (raw.kind === 'design') {
+    candidate = { ...raw, files: raw['designUrl'] === null ? [] : await collectDesignFiles(outputDir) };
   }
+
+  await flushSession?.();
 
   const validated = validateResult(candidate);
   if (!validated.ok) throw new Error(describeFailure(`${validated.reason}${exitNote}`, run.tail, ctx.redactor));

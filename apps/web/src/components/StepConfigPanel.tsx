@@ -144,7 +144,7 @@ export function StepConfigPanel({ workflow, step, issues, onChange, onEdgesChang
                 </option>
               ))}
             </Select>
-            <Select label="Output" value={step.output ?? ''} onChange={(e) => onChange({ output: e.target.value as StepOutputKind })} error={issueFor('output')}>
+            <Select label="Output" value={step.output ?? ''} onChange={(e) => onChange({ output: e.target.value as StepOutputKind, ...(e.target.value === 'design' ? { engine: 'claude' as const, resumeSessionKey: 'design' } : {}) })} error={issueFor('output')}>
               <option value="" disabled>
                 Select…
               </option>

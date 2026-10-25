@@ -1,4 +1,5 @@
 import type { AgentEngine, WorkflowStep } from '@sindral/shared';
+import type { SessionStore } from '@anthropic-ai/claude-agent-sdk';
 
 export interface EngineRunOptions {
   cwd: string;
@@ -12,6 +13,7 @@ export interface EngineRunOptions {
   writableDirs?: string[];
   /** Engine-native session ID to continue instead of starting a fresh session. */
   resumeSessionId?: string | null;
+  portableSession?: { store: SessionStore; projectKey: string; signal?: AbortSignal; onCheckpoint: (sessionId: string | null) => Promise<void> };
   onOutput: (line: string) => void;
 }
 

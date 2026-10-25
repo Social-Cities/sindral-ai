@@ -42,7 +42,7 @@ describe('task creation', () => {
     expect(t1.state).toBe('todo');
     expect(t1.pinnedWorkflow).toBeNull();
     const workflows = await ctx.app.ctx.workflows.list(userId);
-    expect(workflows).toHaveLength(4);
+    expect(workflows).toHaveLength(5);
     expect(t1.workflowId).toBe(workflows.find((w) => w.isDefault)!.id);
   });
 
@@ -881,7 +881,7 @@ describe('workflows service', () => {
     const def = all.find((w) => w.isDefault)!;
     await svc.remove(userId, def.id);
     const after = await svc.list(userId);
-    expect(after).toHaveLength(3);
+    expect(after).toHaveLength(4);
     expect(after.filter((w) => w.isDefault)).toHaveLength(1);
     for (const w of after.slice(1)) await svc.remove(userId, w.id);
     await expect(svc.remove(userId, after[0]!.id)).rejects.toMatchObject({ statusCode: 409 });
