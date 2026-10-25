@@ -39,12 +39,15 @@ Create a worker key in the Sindral UI (Settings → Worker keys) and put it in t
 ## Run
 
 ```sh
-just start-worker                    # builds shared + worker, then starts the daemon
+just                                 # builds shared + worker, then starts the daemon
 pnpm --filter @sindral/worker dev      # tsx, pretty logs
 pnpm --filter @sindral/worker start    # node dist/cli.js start
 sindral-worker clean --dry-run         # preview inactive retained files eligible for cleanup
 sindral-worker clean                   # remove eligible files after server lease/worker checks
 ```
+
+`just start-worker` is an explicit alternative to `just`. Use `just --list` to
+list all commands.
 
 The Codex app's project actions use the same recipes: **Start worker** runs
 `just start-worker`, and **Build worker** runs `just build-worker`. The checked-in

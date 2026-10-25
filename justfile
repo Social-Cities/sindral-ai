@@ -1,6 +1,5 @@
-# List the available commands.
-default:
-    @just --list
+# Build shared and worker, then start the worker.
+default: start-worker
 
 # Build the worker and its shared package dependency.
 build-worker:
