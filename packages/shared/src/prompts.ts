@@ -17,7 +17,7 @@ const RESULT_SHAPES: Record<StepOutputKind, string> = {
   design: `{
   "kind": "design",
   "summary": "what changed and what the user should review",
-  "designUrl": "the real https://claude.ai/ artifact URL returned by Claude Design",
+  "designUrl": null,
   "specification": "markdown handoff: intent, screens and flows, responsive behavior, tokens and components, empty/loading/error states, decisions, open questions and testable implementation criteria",
   "questions": [],
   "screens": [{ "name": "Main screen", "path": "index.html" }],
@@ -25,7 +25,7 @@ const RESULT_SHAPES: Record<StepOutputKind, string> = {
   "acceptanceCriteria": "observable design acceptance criteria",
   "files": []
 }
-(Write the complete exported preview, source, and assets under $${OUTPUT_DIR_ENV}. The worker collects files and hashes them; leave files empty in your JSON. Preview HTML must be self-contained with inline CSS/JS and embedded images; it must work without network access. Artboard PNG/SVG exports are also supported. If you only need answers before creating a first design, return designUrl: null, specification: "", screens: [], files: [], and nonempty questions. Never invent a Design URL or substitute a local mockup when Claude Design is unavailable.)`,
+(Create the preview, source, and assets directly under $${OUTPUT_DIR_ENV} using your coding tools. The worker collects files and hashes them; leave files empty in your JSON. Preview HTML must be self-contained with inline CSS/JS and embedded images; it must work without network access, a dev server, or a build step. Separate source files may accompany the preview. PNG/SVG artboards are also supported. Leave designUrl null; no hosted artifact or /design command is required. A completed design requires at least one screen and an implementation specification. For a clarification-only turn, return designUrl: null, specification: "", screens: [], files: [], and nonempty questions. Existing workspace files remain saved for the next turn.)`,
   plan: `{
   "kind": "plan",
   "summary": "one paragraph for the user",

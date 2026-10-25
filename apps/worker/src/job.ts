@@ -207,7 +207,7 @@ async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx:
   let flushSession: (() => Promise<void>) | undefined;
   const inputDirs: string[] = [];
   if (output === 'design') {
-    if (engineName !== 'claude') throw new Error('Claude Design steps require the Claude engine');
+    if (engineName !== 'claude') throw new Error('Design steps require the Claude engine');
     const api = ctx.sessionApi;
     if (!api) throw new Error('This worker does not support portable design sessions. Upgrade the worker.');
     const access = { attempt: job.attempt, leaseToken: dispatch.lease.token };
@@ -234,7 +234,7 @@ async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx:
         await api.checkpointDesignSession(job.id, { ...access, sessionId, files });
       },
     };
-    step.prompt = `${step.prompt ?? ''}\n\nCurrent portable design workspace: ${outputDir}. All persistent design files belong here. Previous absolute worker paths may no longer exist. Reconcile the restored files and existing remote artifact before repeating interrupted operations.\nRead-only reference repositories:\n${references.join('\n') || '(none)'}`;
+    step.prompt = `${step.prompt ?? ''}\n\nCurrent portable design workspace: ${outputDir}. All persistent design files belong here. Previous absolute worker paths may no longer exist. Reconcile the restored files before repeating interrupted operations.\nRead-only reference repositories:\n${references.join('\n') || '(none)'}`;
   }
 
   if (payload.designHandoff) {
@@ -249,7 +249,7 @@ async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx:
     step.prompt = `${step.prompt ?? ''}\n\n## Approved design handoff\nRevision: ${input.revisionId}\nApproved: ${input.approvedAt}\nDesign source and assets: ${inputsDir}\nUse this frozen revision as input. Do not alter the handoff files.\n${input.result.specification}\n\nOpen design questions:\n${input.result.questions.join('\n') || 'None.'}`;
   }
 
-  const prompt = `${output === 'design' ? '/design ' : ''}${buildPrompt({ step, output, context: payload.context, resultFile, outputDir, workspace })}`;
+  const prompt = buildPrompt({ step, output, context: payload.context, resultFile, outputDir, workspace });
   const env = buildAgentEnv(ctx.env ?? process.env, {
     [RESULT_FILE_ENV]: resultFile,
     [OUTPUT_DIR_ENV]: outputDir,
@@ -367,7 +367,8 @@ async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx:
     const collected = await collectOutputArtifacts(outputDir);
     candidate = { ...raw, artifacts: mergeArtifacts(raw['artifacts'], collected) };
   } else if (raw.kind === 'design') {
-    candidate = { ...raw, files: raw['designUrl'] === null ? [] : await collectDesignFiles(outputDir) };
+    const clarification = Array.isArray(raw['screens']) && raw['screens'].length === 0;
+    candidate = { ...raw, files: clarification ? [] : await collectDesignFiles(outputDir) };
   }
 
   await flushSession?.();

@@ -46,7 +46,7 @@ export type Permission = 'read' | 'write' | 'execute';
  * the worker enforces and the server-side transition after completion.
  */
 export type StepOutputKind =
-  | 'design' // Claude Design artifact, portable workspace and implementation specification
+  | 'design' // UI prototype, portable workspace and implementation specification
   | 'plan' // markdown plan
   | 'implementation' // code change committed locally, before PR publication
   | 'pr' // code change pushed as a PR

@@ -42,12 +42,12 @@ export const claudeDesignUrlSchema = z.string().url().max(2000).refine((value) =
   const url = new URL(value);
   return url.protocol === 'https:' && url.hostname === 'claude.ai' && !url.username && !url.password
     && (url.pathname.startsWith('/code/artifact/') || url.pathname.startsWith('/artifacts/') || url.pathname.startsWith('/design/'));
-}, 'Expected a Claude Design artifact URL');
+}, 'Expected a Claude artifact URL');
 
 export const designResultSchema = z.object({
   kind: z.literal('design'),
   summary: z.string().trim().min(1).max(20_000),
-  designUrl: claudeDesignUrlSchema.nullable(),
+  designUrl: claudeDesignUrlSchema.nullable().default(null),
   specification: z.string().max(100_000),
   questions: z.array(z.string().min(1).max(2000)).max(20).default([]),
   screens: z.array(z.object({ name: z.string().min(1).max(200), path: z.string().refine(safeDesignPath) })).max(30),
@@ -56,9 +56,9 @@ export const designResultSchema = z.object({
   acceptanceCriteria: z.string().trim().min(1).max(50_000).optional(),
 }).superRefine((result, ctx) => {
   if (new TextEncoder().encode(JSON.stringify(result)).byteLength > 3_800_000) ctx.addIssue({ code: 'custom', message: 'Design result exceeds the transfer limit' });
-  if (!result.designUrl) {
-    if (!result.questions.length || result.screens.length || result.files.length) ctx.addIssue({ code: 'custom', message: 'A clarification turn requires questions and no design files or screens' });
-  } else if (!result.screens.length || !result.specification.trim()) ctx.addIssue({ code: 'custom', message: 'A design requires exported screens and an implementation specification' });
+  if (!result.screens.length) {
+    if (!result.questions.length || result.designUrl || result.files.length) ctx.addIssue({ code: 'custom', message: 'A clarification turn requires questions and no design URL, files, or screens' });
+  } else if (!result.specification.trim()) ctx.addIssue({ code: 'custom', message: 'A design requires exported screens and an implementation specification' });
   for (const screen of result.screens) {
     const file = result.files.find((item) => item.path === screen.path);
     if (!file || !['text/html', 'image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'].includes(file.contentType)) {

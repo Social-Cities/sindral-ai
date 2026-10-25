@@ -10,7 +10,7 @@ import { DesignTab } from './DesignTab';
 vi.mock('@/lib/api', async (original) => ({ ...await original<typeof api>(), getTaskDesign: vi.fn(), getDesignRevision: vi.fn(), approveDesign: vi.fn(), listProjects: vi.fn(), listWorkflows: vi.fn() }));
 
 const result: DesignResult = {
-  kind: 'design', summary: 'Dashboard ready', designUrl: 'https://claude.ai/code/artifact/test', specification: '# Dashboard specification\nUse the blue button.', questions: [],
+  kind: 'design', summary: 'Dashboard ready', designUrl: null, specification: '# Dashboard specification\nUse the blue button.', questions: [],
   screens: [{ name: 'Dashboard', path: 'index.html' }], files: [{ path: 'index.html', contentType: 'text/html', encoding: 'utf8', content: '<h1>Dashboard</h1>', sha256: 'a'.repeat(64) }],
 };
 const revision: DesignRevision = { id: 'revision-1', taskId: 'task-1', jobId: 'job-1', result, createdAt: '2026-10-25T12:00:00Z', approvedAt: null };
@@ -35,11 +35,18 @@ describe('DesignTab', () => {
     const preview = await screen.findByTitle('Design preview: Dashboard');
     expect(preview).toHaveAttribute('sandbox', 'allow-scripts');
     expect(preview).toHaveAttribute('referrerpolicy', 'no-referrer');
+    expect(screen.queryByRole('link', { name: /Open in Claude/ })).not.toBeInTheDocument();
     expect(screen.getByRole('log', { name: 'Conversation' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Approve revision' }));
     expect(api.approveDesign).toHaveBeenCalledWith(task.id, revision.id, 3);
     await user.click(screen.getByRole('button', { name: 'specification' }));
     expect(screen.getByRole('heading', { name: 'Dashboard specification' })).toBeInTheDocument();
+  });
+
+  it('keeps external editor links for earlier hosted revisions', async () => {
+    vi.mocked(api.getDesignRevision).mockResolvedValue({ revision: { ...revision, result: { ...result, designUrl: 'https://claude.ai/code/artifact/existing' } }, previewUrls: ['/api/design-previews/task-1?token=test'] });
+    setup();
+    expect(await screen.findByRole('link', { name: /Open in Claude/ })).toHaveAttribute('href', 'https://claude.ai/code/artifact/existing');
   });
 
   it('offers a frozen implementation input even after the original design was deleted', async () => {

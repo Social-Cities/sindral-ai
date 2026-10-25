@@ -93,7 +93,7 @@ describe('design file recovery', () => {
 });
 
 describe('portable design jobs', () => {
-  it('continues on a new machine using the saved transcript and exported files', async () => {
+  it('continues on new machines across a clarification turn using the saved transcript and preview files', async () => {
     let checkpoint: DesignCheckpoint | null = null;
     const transcripts = new Map<string, PortableSessionEntry[]>();
     const sessionId = randomUUID();
@@ -106,13 +106,13 @@ describe('portable design jobs', () => {
       checkpointDesignSession: vi.fn(async (_jobId: string, body: Omit<DesignCheckpoint, 'updatedAt'>) => { checkpoint = { ...body, updatedAt: new Date().toISOString() }; return {}; }),
     };
     const api = { postEvent: vi.fn(async () => ({ ok: true as const })), complete: vi.fn(async () => ({ ok: true as const })), fail: vi.fn(async () => ({ ok: true as const })), cancel: vi.fn(async () => ({ ok: true as const })) };
-    for (let turn = 0; turn < 2; turn++) {
+    for (let turn = 0; turn < 3; turn++) {
       const workdir = await directory();
       const engine: Engine = {
         name: 'claude', probe: async () => ({ available: false, version: null }),
         run: async (opts) => {
           expect(opts.portableSession?.projectKey).toBe(projectKey);
-          expect(opts.prompt).toMatch(/^\/design /);
+          expect(opts.prompt).not.toMatch(/^\/design\b/);
           if (turn === 0) {
             expect(opts.resumeSessionId).toBeUndefined();
             await fs.writeFile(path.join(opts.cwd, 'index.html'), '<h1>Original</h1>');
@@ -121,10 +121,11 @@ describe('portable design jobs', () => {
             expect(opts.resumeSessionId).toBe(sessionId);
             expect(await fs.readFile(path.join(opts.cwd, 'index.html'), 'utf8')).toBe('<h1>Original</h1>');
             expect((await opts.portableSession!.store.load({ projectKey, sessionId }))?.[0]).toMatchObject({ message: { content: 'Original design decisions' } });
-            await fs.writeFile(path.join(opts.cwd, 'index.html'), '<h1>Revised</h1>');
+            if (turn === 2) await fs.writeFile(path.join(opts.cwd, 'index.html'), '<h1>Revised</h1>');
           }
           await opts.portableSession!.onCheckpoint(sessionId);
-          await fs.writeFile(opts.env['SINDRAL_RESULT_FILE']!, JSON.stringify({ kind: 'design', summary: 'Design ready', designUrl: 'https://claude.ai/code/artifact/persistent-design', specification: 'Build this design.', screens: [{ name: 'Home', path: 'index.html' }], questions: [], files: [] }));
+          await fs.writeFile(opts.env['SINDRAL_RESULT_FILE']!, JSON.stringify({ kind: 'design', summary: 'Design ready', designUrl: null,
+            specification: turn === 1 ? '' : 'Build this design.', screens: turn === 1 ? [] : [{ name: 'Home', path: 'index.html' }], questions: turn === 1 ? ['Which navigation style?'] : [], files: [] }));
           return { exitCode: 0, tail: [], finalText: null, sessionId, timedOut: false, cancelled: false, missing: false };
         },
       };
@@ -134,6 +135,9 @@ describe('portable design jobs', () => {
       const outcome = await runJob(job, deps, new AbortController().signal);
       expect(outcome.status).toBe('completed');
       expect(api.fail).not.toHaveBeenCalled();
+      expect(api.complete).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({
+        designUrl: null, files: turn === 1 ? [] : expect.arrayContaining([expect.objectContaining({ path: 'index.html' })]),
+      }), expect.anything(), expect.anything(), sessionId);
     }
     expect(checkpoint!.files[0]!.content).toBe('<h1>Revised</h1>');
   });
@@ -151,7 +155,7 @@ describe('portable design jobs', () => {
     const source = await directory();
     await fs.writeFile(path.join(source, 'index.html'), '<h1>Approved design</h1>');
     const handoff: DesignHandoff = { sourceTaskId: randomUUID(), revisionId: randomUUID(), approvedAt: new Date().toISOString(), result: {
-      kind: 'design', summary: 'Approved design', designUrl: 'https://claude.ai/code/artifact/approved', specification: 'Use the approved header and responsive navigation.', questions: [], screens: [{ name: 'Home', path: 'index.html' }], files: await collectDesignFiles(source),
+      kind: 'design', summary: 'Approved design', designUrl: null, specification: 'Use the approved header and responsive navigation.', questions: [], screens: [{ name: 'Home', path: 'index.html' }], files: await collectDesignFiles(source),
     } };
     const job = dispatch({ payload: agentPayload({ repos: [], step: step({ engine: engineName, output: 'plan' }), designHandoff: { sourceTaskId: handoff.sourceTaskId, revisionId: handoff.revisionId, approvedAt: handoff.approvedAt } }) }, null);
     const engine: Engine = { name: engineName, probe: async () => ({ available: true, version: 'test' }), run: async (opts) => {
