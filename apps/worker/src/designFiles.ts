@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { constants } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { designFilesSchema, MAX_DESIGN_BYTES, MAX_DESIGN_FILES, MAX_DESIGN_FILE_BYTES, safeDesignPath, type DesignFile } from '@sindral/shared';
@@ -7,6 +8,33 @@ const TYPES: Record<string, DesignFile['contentType']> = {
   '.html': 'text/html', '.htm': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript',
   '.md': 'text/markdown', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp',
 };
+
+/** Check and read the same open file, even if its directory entry is replaced. */
+async function readDesignFile(file: string, relative: string, remainingBytes: number): Promise<Buffer> {
+  const flags = constants.O_RDONLY | (process.platform === 'win32' ? 0 : constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  const handle = await fs.open(file, flags);
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile()) throw new Error(`Unsupported design export: ${relative}`);
+    if (stat.size > MAX_DESIGN_FILE_BYTES) throw new Error(`Design export exceeds 1 MB: ${relative}`);
+    if (stat.size > remainingBytes) throw new Error('Design bundle exceeds 2.5 MB');
+    // A concurrent writer can grow an open file after fstat. Read at most the
+    // remaining allowance plus one byte, so growth cannot bypass the limits.
+    const limit = Math.min(MAX_DESIGN_FILE_BYTES, remainingBytes);
+    const buffer = Buffer.alloc(limit + 1);
+    let size = 0;
+    while (size < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, size, buffer.length - size, size);
+      if (!bytesRead) break;
+      size += bytesRead;
+    }
+    if (size > MAX_DESIGN_FILE_BYTES) throw new Error(`Design export exceeds 1 MB: ${relative}`);
+    if (size > remainingBytes) throw new Error('Design bundle exceeds 2.5 MB');
+    return Buffer.from(buffer.subarray(0, size));
+  } finally {
+    await handle.close();
+  }
+}
 
 export async function collectDesignFiles(root: string): Promise<DesignFile[]> {
   const files: DesignFile[] = [];
@@ -20,11 +48,9 @@ export async function collectDesignFiles(root: string): Promise<DesignFile[]> {
       if (entry.isSymbolicLink()) throw new Error(`Design exports cannot contain symlinks: ${relative}`);
       if (entry.isDirectory()) { await walk(full); continue; }
       if (!entry.isFile()) throw new Error(`Unsupported design export: ${relative}`);
-      const stat = await fs.stat(full);
-      if (stat.size > MAX_DESIGN_FILE_BYTES) throw new Error(`Design export exceeds 1 MB: ${relative}`);
-      totalBytes += stat.size;
-      if (totalBytes > MAX_DESIGN_BYTES || files.length >= MAX_DESIGN_FILES) throw new Error('Design bundle exceeds 2.5 MB or 100 files');
-      const bytes = await fs.readFile(full);
+      if (files.length >= MAX_DESIGN_FILES) throw new Error('Design bundle exceeds 100 files');
+      const bytes = await readDesignFile(full, relative, MAX_DESIGN_BYTES - totalBytes);
+      totalBytes += bytes.length;
       const contentType = TYPES[path.extname(entry.name).toLowerCase()] ?? 'text/plain';
       const binary = ['image/png', 'image/jpeg', 'image/webp'].includes(contentType);
       if (!binary && bytes.includes(0)) throw new Error(`Unsupported binary design export: ${relative}`);

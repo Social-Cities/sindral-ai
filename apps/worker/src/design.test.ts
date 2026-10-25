@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { DesignCheckpoint, DesignHandoff, PortableSessionEntry, PortableSessionKey } from '@sindral/shared';
+import { MAX_DESIGN_FILE_BYTES, type DesignCheckpoint, type DesignHandoff, type PortableSessionEntry, type PortableSessionKey } from '@sindral/shared';
 import { collectDesignFiles, restoreDesignFiles } from './designFiles.js';
 import { WorkerSessionStore } from './sessionStore.js';
 import { runJob, type JobDeps } from './job.js';
@@ -14,7 +14,7 @@ import type { WorkspaceManager } from './workspace.js';
 
 const directories: string[] = [];
 async function directory() { const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'sindral-design-')); directories.push(dir); return dir; }
-afterEach(async () => { await Promise.all(directories.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true }))); });
+afterEach(async () => { vi.restoreAllMocks(); await Promise.all(directories.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true }))); });
 
 describe('design file recovery', () => {
   it('round-trips nested source and binary assets without flattening their paths', async () => {
@@ -36,6 +36,59 @@ describe('design file recovery', () => {
     await expect(restoreDesignFiles(b, [{ ...files[0]!, content: 'corrupt' }])).rejects.toThrow('checksum');
     await fs.symlink(path.join(b, 'outside.html'), path.join(a, 'linked.html'));
     await expect(collectDesignFiles(a)).rejects.toThrow('symlink');
+  });
+
+  it('reads the original open file when its path is replaced after the size check', async () => {
+    const root = await directory(); const outside = await directory();
+    const file = path.join(root, 'index.html');
+    const secret = path.join(outside, 'secret.html');
+    await fs.writeFile(file, '<h1>Original</h1>');
+    await fs.writeFile(secret, 'Must not be exported');
+    const open = fs.open.bind(fs);
+    vi.spyOn(fs, 'open').mockImplementationOnce(async (...args) => {
+      const handle = await open(...args);
+      const stat = handle.stat.bind(handle);
+      vi.spyOn(handle, 'stat').mockImplementationOnce(async () => {
+        const checked = await stat();
+        await fs.rename(file, path.join(outside, 'original.html'));
+        await fs.symlink(secret, file);
+        return checked;
+      });
+      return handle;
+    });
+    expect((await collectDesignFiles(root))[0]?.content).toBe('<h1>Original</h1>');
+  });
+
+  it.skipIf(process.platform === 'win32')('rejects a symlink substituted between listing and opening the file', async () => {
+    const root = await directory(); const outside = await directory();
+    const file = path.join(root, 'index.html'); const secret = path.join(outside, 'secret.html');
+    await fs.writeFile(file, 'Original'); await fs.writeFile(secret, 'Must not be exported');
+    const open = fs.open.bind(fs);
+    vi.spyOn(fs, 'open').mockImplementationOnce(async (...args) => {
+      await fs.unlink(file); await fs.symlink(secret, file);
+      return open(...args);
+    });
+    await expect(collectDesignFiles(root)).rejects.toMatchObject({ code: 'ELOOP' });
+  });
+
+  it('bounds reads and closes the handle when a file grows after the size check', async () => {
+    const root = await directory(); const file = path.join(root, 'index.html');
+    await fs.writeFile(file, 'Original');
+    const open = fs.open.bind(fs);
+    let closed = vi.fn();
+    vi.spyOn(fs, 'open').mockImplementationOnce(async (...args) => {
+      const handle = await open(...args);
+      const stat = handle.stat.bind(handle);
+      closed = vi.spyOn(handle, 'close');
+      vi.spyOn(handle, 'stat').mockImplementationOnce(async () => {
+        const checked = await stat();
+        await fs.appendFile(file, Buffer.alloc(MAX_DESIGN_FILE_BYTES + 1));
+        return checked;
+      });
+      return handle;
+    });
+    await expect(collectDesignFiles(root)).rejects.toThrow('exceeds 1 MB');
+    expect(closed).toHaveBeenCalledOnce();
   });
 });
 
