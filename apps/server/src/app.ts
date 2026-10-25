@@ -91,7 +91,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         'frame-ancestors': ["'none'"],
       },
     },
-    crossOriginEmbedderPolicy: false,
+    crossOriginEmbedderPolicy: true,
+  });
+  app.addHook('onRequest', async (_request, reply) => {
+    reply.header('permissions-policy', 'camera=(), microphone=(), geolocation=()');
   });
   await app.register(cors, {
     origin: config.webOrigins,

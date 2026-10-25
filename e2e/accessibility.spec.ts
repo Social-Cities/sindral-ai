@@ -21,7 +21,12 @@ for (const theme of ['dark', 'light'] as const) {
     await page.route('**/*', async (route) => {
       if (route.request().resourceType() !== 'document') return route.fallback();
       const response = await route.fetch();
-      await route.fulfill({ response, headers: { ...response.headers(), 'content-security-policy': policy } });
+      await route.fulfill({ response, headers: {
+        ...response.headers(),
+        'content-security-policy': policy,
+        'cross-origin-embedder-policy': String(health.headers['cross-origin-embedder-policy']),
+        'permissions-policy': String(health.headers['permissions-policy']),
+      } });
     });
     const task = makeTask({
       state: 'in-review',

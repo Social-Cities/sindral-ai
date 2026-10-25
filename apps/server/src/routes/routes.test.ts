@@ -905,6 +905,8 @@ describe('server-sent events', () => {
     expect(denied.headers['content-security-policy']).toContain("default-src 'self'");
     expect(denied.headers['content-security-policy']).toContain("style-src 'self' https://fonts.googleapis.com");
     expect(denied.headers['content-security-policy']).not.toContain("'unsafe-inline'");
+    expect(denied.headers['cross-origin-embedder-policy']).toBe('require-corp');
+    expect(denied.headers['permissions-policy']).toBe('camera=(), microphone=(), geolocation=()');
   });
 });
 

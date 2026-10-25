@@ -56,6 +56,11 @@ Set these Vercel environment variables for each intended deployment environment:
 | `SINDRAL_JOB_DISPATCH_ENABLED` | `true` when ready to lease jobs |
 | `SINDRAL_AUTO_MERGE_ENABLED` | `false` initially |
 
+Set a nonempty `WEB_ORIGIN` separately for Production and Preview: use the
+production frontend origin for Production and the preview's origin for Preview.
+Environment-variable edits take effect on the next deployment. An empty value
+causes a configuration error even if the frontend itself loads successfully.
+
 Configure the optional GitHub OAuth/App and APNs settings from `.env.example` as
 needed. Set `GITHUB_OAUTH_CALLBACK_URL` and the GitHub OAuth App callback to
 `https://<your-domain>/api/github/callback`. Set GitHub's webhook target to
