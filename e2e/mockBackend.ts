@@ -126,6 +126,8 @@ export function makeProject(overrides: Partial<Project> = {}): Project {
     userId: USER_ID,
     name: 'Sindral AI',
     description: 'Primary product repository.',
+    projectType: 'standard',
+    platforms: [],
     repositories: [
       {
         id: `${id}-repo-1`,

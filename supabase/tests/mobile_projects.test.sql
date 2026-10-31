@@ -1,0 +1,14 @@
+begin;
+select plan(8);
+insert into auth.users (id, email) values ('91000000-0000-4000-8000-000000000091', 'mobile-projects@example.test');
+insert into public.projects (id, user_id, name) values ('92000000-0000-4000-8000-000000000092', '91000000-0000-4000-8000-000000000091', 'Standard');
+select is((select project_type from public.projects where id = '92000000-0000-4000-8000-000000000092'), 'standard', 'existing project semantics default to standard');
+select is((select cardinality(platforms) from public.projects where id = '92000000-0000-4000-8000-000000000092'), 0, 'standard projects have no platform scope');
+select lives_ok($$insert into public.projects(user_id, name, project_type, platforms) values ('91000000-0000-4000-8000-000000000091', 'Native app', 'mobile-app', array['ios','android'])$$, 'native mobile platforms persist');
+select lives_ok($$insert into public.projects(user_id, name, project_type, platforms) values ('91000000-0000-4000-8000-000000000091', 'Web only', 'mobile-app', array['web'])$$, 'web-only projects are supported');
+select throws_ok($$insert into public.projects(user_id, name, project_type, platforms) values ('91000000-0000-4000-8000-000000000091', 'Empty', 'mobile-app', '{}')$$, '23514', null, 'mobile apps need a platform');
+select throws_ok($$insert into public.projects(user_id, name, project_type, platforms) values ('91000000-0000-4000-8000-000000000091', 'Duplicate', 'mobile-app', array['ios','ios'])$$, '23514', null, 'duplicate platforms are rejected');
+select throws_ok($$insert into public.projects(user_id, name, project_type, platforms) values ('91000000-0000-4000-8000-000000000091', 'Invalid', 'mobile-app', array['windows'])$$, '23514', null, 'unknown platforms are rejected');
+select throws_ok($$insert into public.projects(user_id, name, project_type, platforms) values ('91000000-0000-4000-8000-000000000091', 'Null', 'mobile-app', array[null]::text[])$$, '23514', null, 'null platforms are rejected');
+select * from finish();
+rollback;

@@ -320,6 +320,8 @@ ${payload.conflictedPaths.map((file) => `- ${file}`).join('\n')}
 
 Resolve only those files. Preserve the intent of both the approved task plan and the earlier stacked changes. Do not run git commands, stage files, continue/abort the rebase, commit, push, or edit any other path; the worker performs and validates those operations.
 
+Preserve Domain Driven Design boundaries while resolving conflicts: keep business invariants and domain vocabulary intact, keep domain dependencies independent of UI and infrastructure SDKs, and preserve use-case/port/adapter contracts from both changes. Do not introduce unrelated refactors; if the conflict cannot preserve these boundaries within the allowed paths, report resolved: false for human review.
+
 Task description:
 ${payload.context.task_description}
 

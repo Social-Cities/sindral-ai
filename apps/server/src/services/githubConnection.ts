@@ -1,4 +1,4 @@
-import type { CreateGitHubRepositoryInput, GitHubCatalog, GitHubOwner, GitHubRepository } from '@sindral/shared';
+import type { AppPlatform, CreateGitHubRepositoryInput, GitHubCatalog, GitHubOwner, GitHubRepository } from '@sindral/shared';
 import { HttpError, badRequest, conflict, forbidden, serviceUnavailable } from '../errors.js';
 import type { GitHubOAuthService } from './githubOAuth.js';
 
@@ -77,7 +77,7 @@ export class GitHubConnectionService {
     return mapRepository(repository);
   }
 
-  async setRepositoryReadme(userId: string, fullName: string, input: { title: string; description: string }): Promise<void> {
+  async setRepositoryReadme(userId: string, fullName: string, input: { title: string; description: string; mobilePlatforms?: AppPlatform[] }): Promise<void> {
     const secret = await this.githubOAuth.credential(userId);
     if (!secret) throw badRequest('Connect GitHub before updating a repository');
 
@@ -93,7 +93,8 @@ export class GitHubConnectionService {
       if (!(error instanceof HttpError) || error.statusCode !== 404) throw error;
     }
 
-    const content = [`# ${input.title}`, input.description.trim()].filter(Boolean).join('\n\n') + '\n';
+    const architecture = input.mobilePlatforms ? `## App architecture\n\nSupported platforms: ${input.mobilePlatforms.join(', ')}.\n\n- ios/: SwiftUI\n- android/: Kotlin / Jetpack Compose\n- web/: React\n- supabase/: one shared Supabase backend\n\nImplement selected clients in order: iOS, Android, Web. Review both BDD and implementation plans before implementation. All code follows Domain Driven Design: bounded contexts, shared domain vocabulary, framework-independent business rules and invariants, application use cases, and infrastructure adapters for Supabase and other integrations. Keep UI and persistence models separate from domain models and test the domain in isolation. Every selected platform must pass the approved BDD scenarios and DDD architecture checks before release.` : '';
+    const content = [`# ${input.title}`, input.description.trim(), architecture].filter(Boolean).join('\n\n') + '\n';
     await this.requestObject(secret.token, path, {
       method: 'PUT',
       body: {
@@ -103,6 +104,14 @@ export class GitHubConnectionService {
         ...(sha ? { sha } : {}),
       },
     });
+    if (input.mobilePlatforms) {
+      for (const folder of ['ios', 'android', 'web', 'supabase']) {
+        await this.requestObject(secret.token, `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/contents/${folder}/.gitkeep`, {
+          method: 'PUT',
+          body: { message: `Initialize ${folder} folder`, content: '', branch: 'main' },
+        });
+      }
+    }
   }
 
   private async listRepositories(token: string): Promise<GitHubRepository[]> {

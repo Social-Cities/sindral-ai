@@ -9,6 +9,8 @@ import type {
   MessageSource,
   MergeMethod,
   Project,
+  ProjectType,
+  AppPlatform,
   PullRequest,
   PullRequestStatus,
   PushDevice,
@@ -118,12 +120,16 @@ export interface ProjectInsert {
   name: string;
   description: string;
   repositories: string[];
+  projectType?: ProjectType;
+  platforms?: AppPlatform[];
 }
 
 export interface ProjectPatch {
   name?: string;
   description?: string;
   repositories?: string[];
+  projectType?: ProjectType;
+  platforms?: AppPlatform[];
 }
 
 export interface TaskRepositoryUpsert {

@@ -163,8 +163,10 @@ export function useSendMessage(taskId: string, workflow: Workflow | null) {
   const qc = useQueryClient();
   const key = queryKeys.task(taskId);
   return useMutation({
-    mutationFn: (content: string) => sendMessage(taskId, content),
-    onMutate: async (content) => {
+    mutationFn: (input: string | { content: string; feedbackTarget: 'bdd' | 'implementation' }) => typeof input === 'string' ? sendMessage(taskId, input) : sendMessage(taskId, input.content, input.feedbackTarget),
+    onMutate: async (input) => {
+      const content = typeof input === 'string' ? input : input.content;
+      const feedbackEvent = typeof input !== 'string' && input.feedbackTarget === 'bdd' ? 'bdd-feedback' : 'feedback';
       await qc.cancelQueries({ queryKey: key });
       const previous = qc.getQueryData<TaskWithRelations>(key);
       const optimisticId = `optimistic-${Date.now()}`;
@@ -178,7 +180,7 @@ export function useSendMessage(taskId: string, workflow: Workflow | null) {
           createdAt: new Date().toISOString(),
         };
         const triggersFeedback = chatTriggersFeedback(previous, workflow);
-        const patch = triggersFeedback ? predictTransition(previous, workflow, 'feedback') : null;
+        const patch = triggersFeedback ? predictTransition(previous, workflow, feedbackEvent) : null;
         const acknowledgement: Message | null = triggersFeedback
           ? {
               id: `${optimisticId}-ack`,

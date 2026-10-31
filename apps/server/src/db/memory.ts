@@ -289,6 +289,8 @@ export class MemoryRepository implements Repository {
       userId,
       name: input.name,
       description: input.description,
+      projectType: input.projectType ?? 'standard',
+      platforms: input.platforms ?? (input.projectType === 'mobile-app' ? ['ios', 'android'] : []),
       createdAt: ts,
       updatedAt: ts,
     };
@@ -315,6 +317,8 @@ export class MemoryRepository implements Repository {
     Object.assign(project, {
       ...(patch.name !== undefined ? { name: patch.name } : {}),
       ...(patch.description !== undefined ? { description: patch.description } : {}),
+      ...(patch.projectType !== undefined ? { projectType: patch.projectType } : {}),
+      ...(patch.platforms !== undefined ? { platforms: patch.platforms } : {}),
       updatedAt: this.now(),
     });
     if (patch.repositories !== undefined) this.replaceProjectRepositories(userId, id, patch.repositories);

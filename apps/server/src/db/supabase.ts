@@ -77,7 +77,7 @@ export function createSupabaseClient(url: string, serviceRoleKey: string): Supab
   });
 }
 
-export const EXPECTED_SCHEMA_VERSION = '20261025202507';
+export const EXPECTED_SCHEMA_VERSION = '20261031171422';
 
 interface DesignRevisionRow {
   id: string; task_id: string; job_id: string; result: DesignResult; created_at: string; approved_at: string | null;
@@ -133,6 +133,8 @@ interface ProjectRow {
   user_id: string;
   name: string;
   description: string;
+  project_type: Project['projectType'];
+  platforms: Project['platforms'];
   created_at: string;
   updated_at: string;
 }
@@ -348,6 +350,8 @@ const mapProject = (r: ProjectRow, repositories: ProjectRepository[] = []): Proj
   userId: r.user_id,
   name: r.name,
   description: r.description,
+  projectType: r.project_type ?? 'standard',
+  platforms: r.platforms ?? [],
   createdAt: r.created_at,
   updatedAt: r.updated_at,
   repositories,
@@ -770,7 +774,7 @@ export class SupabaseRepository implements Repository {
 
   async createProject(userId: string, input: ProjectInsert): Promise<Project> {
     const row = await run<ProjectRow>(
-      this.client.from('projects').insert({ user_id: userId, name: input.name, description: input.description }).select('*').single(),
+      this.client.from('projects').insert({ user_id: userId, name: input.name, description: input.description, project_type: input.projectType ?? 'standard', platforms: input.platforms ?? (input.projectType === 'mobile-app' ? ['ios', 'android'] : []) }).select('*').single(),
     );
     await this.replaceProjectRepositories(userId, row.id, input.repositories);
     const repositories = (await this.repositoriesForProjects(userId, [row.id])).get(row.id) ?? [];
@@ -794,6 +798,8 @@ export class SupabaseRepository implements Repository {
     const update: Record<string, unknown> = {};
     if (patch.name !== undefined) update.name = patch.name;
     if (patch.description !== undefined) update.description = patch.description;
+    if (patch.projectType !== undefined) update.project_type = patch.projectType;
+    if (patch.platforms !== undefined) update.platforms = patch.platforms;
     let row: ProjectRow | null;
     if (Object.keys(update).length > 0) {
       row = await run<ProjectRow | null>(this.client.from('projects').update(update).eq('user_id', userId).eq('id', id).select('*').maybeSingle());

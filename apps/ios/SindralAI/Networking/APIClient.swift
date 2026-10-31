@@ -95,9 +95,9 @@ final class APIClient {
         let response: TaskResponse<SindralTask> = try await request("api/tasks/\(taskId)/agent/stop", method: "POST")
         return response.task
     }
-    func sendMessage(taskId: String, content: String) async throws -> MessageResponse {
-        struct Body: Encodable { let content: String }
-        return try await request("api/tasks/\(taskId)/messages", method: "POST", body: Body(content: content))
+    func sendMessage(taskId: String, content: String, feedbackTarget: String? = nil) async throws -> MessageResponse {
+        struct Body: Encodable { let content: String; let feedbackTarget: String? }
+        return try await request("api/tasks/\(taskId)/messages", method: "POST", body: Body(content: content, feedbackTarget: feedbackTarget))
     }
     func jobs(taskId: String) async throws -> [Job] { let response: JobsResponse = try await request("api/tasks/\(taskId)/jobs"); return response.jobs }
     func logs(jobId: String) async throws -> [JobLog] { let response: LogsResponse = try await request("api/jobs/\(jobId)/logs"); return response.logs }
@@ -106,9 +106,9 @@ final class APIClient {
         let response: DiffResponse = try await request("api/tasks/\(taskId)/diff\(query)"); return response.files
     }
     func projects() async throws -> [Project] { let response: ProjectsResponse = try await request("api/projects"); return response.projects }
-    func createProject(name: String, description: String, repository: NewGitHubRepository) async throws -> Project {
-        struct Body: Encodable { let name: String; let description: String; let repository: NewGitHubRepository }
-        let response: ProjectResponse = try await request("api/projects", method: "POST", body: Body(name: name, description: description, repository: repository)); return response.project
+    func createProject(name: String, description: String, repository: NewGitHubRepository, projectType: String? = nil, platforms: [String]? = nil) async throws -> Project {
+        struct Body: Encodable { let name: String; let description: String; let repository: NewGitHubRepository; let projectType: String?; let platforms: [String]? }
+        let response: ProjectResponse = try await request("api/projects", method: "POST", body: Body(name: name, description: description, repository: repository, projectType: projectType, platforms: platforms)); return response.project
     }
     func workflows() async throws -> [Workflow] { let response: WorkflowsResponse = try await request("api/workflows"); return response.workflows }
     func createWorkflow(name: String, cloneFrom: String?) async throws -> Workflow {
@@ -116,8 +116,8 @@ final class APIClient {
         let response: WorkflowResponse = try await request("api/workflows", method: "POST", body: Body(name: name, cloneFrom: cloneFrom)); return response.workflow
     }
     func saveWorkflow(_ workflow: Workflow) async throws -> Workflow {
-        struct Body: Encodable { let name: String; let description: String?; let entryStepId: String; let steps: [WorkflowStep]; let edges: [WorkflowEdge]; let troubleshootStep: WorkflowStep? }
-        let body = Body(name: workflow.name, description: workflow.description, entryStepId: workflow.entryStepId, steps: workflow.steps, edges: workflow.edges, troubleshootStep: workflow.troubleshootStep)
+        struct Body: Encodable { let name: String; let description: String?; let entryStepId: String; let steps: [WorkflowStep]; let edges: [WorkflowEdge]; let troubleshootStep: WorkflowStep?; let mobilePlatforms: [String]? }
+        let body = Body(name: workflow.name, description: workflow.description, entryStepId: workflow.entryStepId, steps: workflow.steps, edges: workflow.edges, troubleshootStep: workflow.troubleshootStep, mobilePlatforms: workflow.mobilePlatforms)
         let response: WorkflowResponse = try await request("api/workflows/\(workflow.id)", method: "PUT", body: body); return response.workflow
     }
     func deleteWorkflow(_ id: String) async throws { let _: EmptyResponse = try await request("api/workflows/\(id)", method: "DELETE") }

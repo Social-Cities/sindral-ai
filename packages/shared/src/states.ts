@@ -40,7 +40,7 @@ function humanize(state: string): string {
 /** Resolve a style for any state, including custom ones from user-defined workflows. */
 export function getStateStyle(state: TaskState, step?: Pick<WorkflowStep, 'type' | 'label'> | null): StateStyle {
   const known = STATE_CONFIG[state];
-  if (known) return known;
+  if (known) return state === 'in-review' && step?.label === 'Ready for Release' ? { ...known, label: step.label } : known;
   const base = step?.type === 'agent' ? AGENT_FALLBACK : HUMAN_FALLBACK;
   return { ...base, label: step?.label ?? humanize(state) };
 }

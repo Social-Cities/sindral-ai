@@ -5,3 +5,8 @@ a267a7b2d8699a5730c4a20a36d784ad016b2c06:apps/server/src/config.test.ts:private-
 c02e034ccdac8eb3c64eca158c1cc73f9cfe6561:apps/server/src/routes/routes.test.ts:generic-api-key:481
 5e307ac6231788743b43faba86dd6f7b619dad01:apps/ios/Config/Staging.xcconfig:generic-api-key:4
 406b47f47ac3e7d5aa6b20c982cacc71c796f2da:apps/ios/SindralAI/App/DemoMode.swift:generic-api-key:87
+# Public Supabase publishable client keys, intentionally shipped in iOS apps.
+# https://supabase.com/docs/guides/getting-started/api-keys
+4e2feb75707e02db7bc12f6f83fc4b99b8765c27:apps/ios/Config/Release.xcconfig:generic-api-key:4
+42fa8f9de4b7384fdcd544f005620d999526de0a:apps/ios/Config/Staging.xcconfig:generic-api-key:4
+b98a914a47ffed518da79946a3686cae243ea4db:apps/ios/Config/Release.xcconfig:generic-api-key:4

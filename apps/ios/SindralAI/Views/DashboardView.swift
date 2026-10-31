@@ -248,6 +248,11 @@ struct CreateTaskCard: View {
         .onAppear { pickDefaultWorkflow(); pickDefaultProject() }
         .onChange(of: store.workflows) { pickDefaultWorkflow() }
         .onChange(of: store.projects) { pickDefaultProject() }
+        .onChange(of: projectID) {
+            workflowID = (selectedProject?.projectType == "mobile-app"
+                ? store.workflows.first { $0.mobilePlatforms != nil }
+                : store.workflows.first { $0.isDefault == true })?.id ?? ""
+        }
         .onChange(of: mode) { _, mode in
             formError = nil
             if mode == .design { projectID = ""; reposInput = "" }

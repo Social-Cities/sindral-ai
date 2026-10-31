@@ -26,6 +26,14 @@ const RESULT_SHAPES: Record<StepOutputKind, string> = {
   "files": []
 }
 (Create the preview, source, and assets directly under $${OUTPUT_DIR_ENV} using your coding tools. The worker collects files and hashes them; leave files empty in your JSON. Preview HTML must be self-contained with inline CSS/JS and embedded images; it must work without network access, a dev server, or a build step. Separate source files may accompany the preview. PNG/SVG artboards are also supported. Leave designUrl null; no hosted artifact or /design command is required. A completed design requires at least one screen and an implementation specification. For a clarification-only turn, return designUrl: null, specification: "", screens: [], files: [], and nonempty questions. Existing workspace files remain saved for the next turn.)`,
+  'bdd-plan': `{
+  "kind": "bdd-plan",
+  "summary": "BDD behavior and test design summary",
+  "plan": "full markdown BDD test plan with stable scenario IDs, Given/When/Then, test files, fixtures and executable commands for every selected platform",
+  "scenarios": [{ "id": "BDD-1", "given": "initial conditions", "when": "user action", "then": "observable assertions" }],
+  "outcome": "user-visible result",
+  "acceptanceCriteria": "observable testable conditions"
+}`,
   plan: `{
   "kind": "plan",
   "summary": "one paragraph for the user",
@@ -88,6 +96,8 @@ const RESULT_SHAPES: Record<StepOutputKind, string> = {
   "report": "full markdown readiness report",
   "verdict": "GO" | "NO_GO",
   "feedback": "if NO_GO: precise, actionable changes the implementer must make",
+  "bddChecks": [{ "scenarioId": "BDD-1", "platform": "ios", "command": "exact executed test command", "status": "passed", "evidence": "observed test output and assertions" }],
+  "dddChecks": [{ "scope": "each required DDD verification scope from the prompt", "criterion": "bounded-contexts", "status": "passed", "evidence": "concrete source paths, observed dependencies and executed test commands/outcomes" }],
   "outcome": "required only when the current task outcome is empty",
   "acceptanceCriteria": "required only when the current task acceptance criteria are empty"
 }`,
@@ -127,6 +137,8 @@ const RESULT_SHAPES: Record<StepOutputKind, string> = {
 
 const OUTPUT_RULES: Partial<Record<StepOutputKind, string[]>> = {
   verdict: [
+    '- For code workflows, include dddChecks for all five criteria (bounded-contexts, domain-isolation, invariants, dependency-direction, domain-tests) in every required scope from the prompt. Use actual scope names, cite inspected source and executed test evidence, and return NO_GO if a required check failed or is blocked. Omit dddChecks for non-code tasks.',
+    '- For mobile workflows, include one bddChecks entry per approved scenario and selected platform with executed command and observed evidence. Use the actual scenario IDs. Omit bddChecks for other workflows.',
     '- For a verdict result, `verdict` must be exactly `GO` or `NO_GO`.',
     '- Do not copy review verdict values such as `MATERIAL_FINDINGS`, `NO_MATERIAL_FINDINGS`, `REVIEW_BLOCKED`, `VERIFIED`, or `BLOCKED` into the final `verdict` field.',
   ],

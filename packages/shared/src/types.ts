@@ -40,6 +40,16 @@ export type ToolName =
   | 'create_pr'
   | 'web_search';
 export type Permission = 'read' | 'write' | 'execute';
+export const APP_PLATFORMS = ['ios', 'android', 'web'] as const;
+export type AppPlatform = (typeof APP_PLATFORMS)[number];
+export type ProjectType = 'standard' | 'mobile-app';
+export const DDD_CRITERIA = ['bounded-contexts', 'domain-isolation', 'invariants', 'dependency-direction', 'domain-tests'] as const;
+export interface DomainDrivenDesignCheck {
+  scope: string;
+  criterion: (typeof DDD_CRITERIA)[number];
+  status: 'passed' | 'failed' | 'blocked';
+  evidence: string;
+}
 
 /**
  * What an agent step is expected to produce. Drives the result-file contract
@@ -48,6 +58,7 @@ export type Permission = 'read' | 'write' | 'execute';
 export type StepOutputKind =
   | 'design' // UI prototype, portable workspace and implementation specification
   | 'plan' // markdown plan
+  | 'bdd-plan' // independently reviewable behavior scenarios
   | 'implementation' // code change committed locally, before PR publication
   | 'pr' // code change pushed as a PR
   | 'review-slice' // reviewer-friendly commit slices pushed as a PR
@@ -77,6 +88,8 @@ export interface WorkflowStep {
    * underlying Claude/Codex session, which is useful for feedback loops.
    */
   resumeSessionKey?: string;
+  /** Platform ownership also isolates implementation sessions. */
+  platform?: AppPlatform;
   /** Optional canvas position for the workflow editor. */
   position?: { x: number; y: number };
 }
@@ -105,6 +118,8 @@ export interface Workflow {
   entryStepId: string;
   steps: WorkflowStep[];
   edges: WorkflowEdge[];
+  /** Present on mobile engineering workflows; pinned with the workflow. */
+  mobilePlatforms?: AppPlatform[];
   /** Optional per-workflow troubleshoot agent. Falls back to the built-in default. */
   troubleshootStep?: WorkflowStep;
 }
@@ -195,6 +210,8 @@ export interface Project {
   userId: string;
   name: string;
   description: string;
+  projectType: ProjectType;
+  platforms: AppPlatform[];
   createdAt: string;
   updatedAt: string;
   repositories: ProjectRepository[];
@@ -266,6 +283,7 @@ export interface Task {
 }
 
 export interface TaskWithRelations extends Task {
+  bddPlan?: BddPlanResult | null;
   designInput?: Pick<DesignHandoff, 'sourceTaskId' | 'revisionId' | 'approvedAt'> | null;
   messages: Message[];
   events: TaskEvent[];
@@ -286,6 +304,10 @@ export interface JobContext {
   task_outcome: string;
   acceptance_criteria: string;
   plan: string;
+  bdd_plan?: string;
+  platform_implementations?: string;
+  mobile_platforms?: string;
+  ddd_scopes?: string;
   feedback: string;
   pr_url: string;
   parent_plan: string;
@@ -405,6 +427,19 @@ export interface PlanResult extends TaskContractResult {
   summary: string;
   plan: string;
 }
+export interface BddPlanResult extends TaskContractResult {
+  kind: 'bdd-plan';
+  summary: string;
+  plan: string;
+  scenarios: { id: string; given: string; when: string; then: string }[];
+}
+export interface BddCheck {
+  scenarioId: string;
+  platform: AppPlatform;
+  command: string;
+  status: 'passed' | 'failed' | 'blocked';
+  evidence: string;
+}
 export interface PrResult extends TaskContractResult {
   kind: 'pr';
   summary: string;
@@ -450,6 +485,8 @@ export interface VerdictResult extends TaskContractResult {
   report: string;
   verdict: 'GO' | 'NO_GO';
   feedback?: string;
+  bddChecks?: BddCheck[];
+  dddChecks?: DomainDrivenDesignCheck[];
 }
 export interface DocumentResult extends TaskContractResult {
   kind: 'document';
@@ -511,6 +548,7 @@ export interface MergeResult {
 export type AgentResult =
   | DesignResult
   | PlanResult
+  | BddPlanResult
   | ImplementationResult
   | PrResult
   | ReviewSliceResult

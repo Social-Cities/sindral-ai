@@ -271,7 +271,7 @@ struct TaskDetailView: View {
                             onRequestChanges: { selectedTab = .chat })
         case .chat:
             TaskChatView(task: task, userInitial: String(store.displayName(fallbackEmail: session.user?.email).prefix(1)).uppercased()) { await load() }
-        case .plan: TaskPlanView(task: task, canApprove: canApprove, approving: isActing) { Task { await run("approve") } }
+        case .plan: TaskPlanView(task: task, canApprove: canApprove, approving: isActing, onFeedbackSent: { await load(); await store.refreshTasks() }) { Task { await run("approve") } }
         case .code: TaskCodeView(task: task)
         case .review: TaskReviewView(task: task)
         case .steps: TaskStepsView(task: task)
@@ -289,7 +289,7 @@ struct TaskDetailView: View {
                             onRequestChanges: { selectedTab = .chat })
         case .chat:
             TaskChatView(task: task, userInitial: String(store.displayName(fallbackEmail: session.user?.email).prefix(1)).uppercased(), scrolls: false) { await load() }
-        case .plan: TaskPlanView(task: task, canApprove: canApprove, approving: isActing, scrolls: false) { Task { await run("approve") } }
+        case .plan: TaskPlanView(task: task, canApprove: canApprove, approving: isActing, scrolls: false, onFeedbackSent: { await load(); await store.refreshTasks() }) { Task { await run("approve") } }
         case .code: TaskCodeView(task: task, scrolls: false)
         case .review: TaskReviewView(task: task, scrolls: false)
         case .steps: TaskStepsView(task: task, scrolls: false)
@@ -559,7 +559,7 @@ private struct TaskSummaryView: View {
                     contractBox("Summary", overview.summary, empty: "No summary section.")
                     contractBox("Assumptions", overview.assumptions, empty: "No assumptions section.")
                     if canApprove {
-                        HStack { Spacer(); Button("Approve Plan", action: onApprove).buttonStyle(.sindral(.success)).disabled(approving) }
+                        HStack { Spacer(); Button(task.bddPlan != nil ? "Approve Both Plans" : "Approve Plan", action: onApprove).buttonStyle(.sindral(.success)).disabled(approving) }
                     }
                 }
             }
@@ -821,7 +821,16 @@ private struct ChatMessageView: View {
 // MARK: - Other tabs
 
 private struct TaskPlanView: View {
-    let task: TaskDetail; let canApprove: Bool; let approving: Bool; var scrolls = true; let onApprove: () -> Void
+    @Environment(APIClient.self) private var api
+    let task: TaskDetail; let canApprove: Bool; let approving: Bool; var scrolls = true
+    var onFeedbackSent: (() async -> Void)? = nil
+    let onApprove: () -> Void
+    @State private var selectedPlan = "implementation"
+    @State private var feedbackTarget = "implementation"
+    @State private var feedback = ""
+    @State private var sending = false
+    @State private var feedbackError: String?
+    private var isMobile: Bool { task.bddPlan != nil || task.pinnedWorkflow?.mobilePlatforms != nil }
     var body: some View {
         Group {
             if scrolls { ScrollView { content } }
@@ -831,12 +840,46 @@ private struct TaskPlanView: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if canApprove { HStack { Spacer(); Button("Approve Plan", action: onApprove).buttonStyle(.sindral(.success)).disabled(approving) } }
-            if let plan = task.plan, !plan.isEmpty { MarkdownText(source: plan) }
+            if isMobile {
+                Text("Review both plans before approving implementation.").font(Theme.secondaryBody)
+                Picker("Plan", selection: $selectedPlan) {
+                    Text("Implementation plan").tag("implementation")
+                    Text("BDD test plan").tag("bdd")
+                }.pickerStyle(.segmented)
+            }
+            if canApprove { HStack { Spacer(); Button(isMobile ? "Approve Both Plans" : "Approve Plan", action: onApprove).buttonStyle(.sindral(.success)).disabled(approving || (isMobile && task.bddPlan == nil)) } }
+            if selectedPlan == "bdd", let bdd = task.bddPlan {
+                MarkdownText(source: bdd.plan)
+                ForEach(bdd.scenarios) { scenario in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(scenario.id).font(Theme.bodyMedium)
+                        Text("Given \(scenario.given)\nWhen \(scenario.when)\nThen \(scenario.then)").font(Theme.secondaryBody)
+                    }.padding(12).surface(Theme.muted)
+                }
+            } else if let plan = task.plan, !plan.isEmpty { MarkdownText(source: plan) }
             else { EmptyPane(title: "No plan yet", systemImage: "doc.text", message: "The planning agent writes the plan here.").padding(.top, 60) }
+            if isMobile && canApprove {
+                Picker("Feedback for", selection: $feedbackTarget) {
+                    Text("Implementation plan").tag("implementation")
+                    Text("BDD test plan").tag("bdd")
+                }
+                TextField("Plan feedback", text: $feedback, axis: .vertical).lineLimit(3...6).fieldChrome(height: 80)
+                if let feedbackError { Text(feedbackError).foregroundStyle(Theme.dangerText) }
+                Button("Request plan changes") { Task { await requestChanges() } }
+                    .buttonStyle(.sindral(.primary)).disabled(sending || feedback.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
         }
         .padding(24).frame(maxWidth: 980, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func requestChanges() async {
+        sending = true; feedbackError = nil; defer { sending = false }
+        do {
+            _ = try await api.sendMessage(taskId: task.id, content: feedback, feedbackTarget: feedbackTarget)
+            feedback = ""
+            await onFeedbackSent?()
+        } catch { feedbackError = error.localizedDescription }
     }
 }
 

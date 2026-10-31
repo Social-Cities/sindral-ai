@@ -42,7 +42,7 @@ describe('task creation', () => {
     expect(t1.state).toBe('todo');
     expect(t1.pinnedWorkflow).toBeNull();
     const workflows = await ctx.app.ctx.workflows.list(userId);
-    expect(workflows).toHaveLength(5);
+    expect(workflows).toHaveLength(6);
     expect(t1.workflowId).toBe(workflows.find((w) => w.isDefault)!.id);
   });
 
@@ -208,7 +208,7 @@ describe('full SDLC happy path', () => {
       ],
     });
     await completeNext(ctx, userId, review());
-    await completeNext(ctx, userId, verdict(true));
+    await completeNext(ctx, userId, verdict(true, undefined, ['acme/app', 'acme/api']));
     task = await orch().applyUserEvent(userId, task.id, 'accept');
     expect(task.state).toBe('merge');
 
@@ -881,7 +881,7 @@ describe('workflows service', () => {
     const def = all.find((w) => w.isDefault)!;
     await svc.remove(userId, def.id);
     const after = await svc.list(userId);
-    expect(after).toHaveLength(4);
+    expect(after).toHaveLength(5);
     expect(after.filter((w) => w.isDefault)).toHaveLength(1);
     for (const w of after.slice(1)) await svc.remove(userId, w.id);
     await expect(svc.remove(userId, after[0]!.id)).rejects.toMatchObject({ statusCode: 409 });

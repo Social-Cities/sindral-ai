@@ -12,6 +12,15 @@ final class TaskLogicTests: XCTestCase {
         XCTAssertEqual(task.availableActions(workflows: []).map(\.event), ["approve"])
     }
 
+    func testMobileWorkflowMetadataSurvivesRoundTrip() throws {
+        let json = #"{"id":"mobile","name":"Mobile App SDLC","entryStepId":"todo","mobilePlatforms":["ios","android"],"steps":[{"id":"ios","type":"agent","label":"Implement iOS","state":"implement-ios","platform":"ios","resumeSessionKey":"implementation-ios"}],"edges":[]}"#
+        let workflow = try JSONDecoder().decode(Workflow.self, from: Data(json.utf8))
+        let saved = try JSONDecoder().decode(Workflow.self, from: JSONEncoder().encode(workflow))
+        XCTAssertEqual(saved.mobilePlatforms, ["ios", "android"])
+        XCTAssertEqual(saved.steps.first?.platform, "ios")
+        XCTAssertEqual(saved.steps.first?.resumeSessionKey, "implementation-ios")
+    }
+
     func testFailureAlwaysOffersRecoveryActions() {
         let task = fixtureTask(state: "failure", currentStepID: nil, workflow: nil)
         XCTAssertEqual(task.availableActions(workflows: []).map(\.event), ["troubleshoot", "retry"])

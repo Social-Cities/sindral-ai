@@ -374,7 +374,7 @@ private struct StepConfigPanel: View {
 
     static let engines = ["claude", "codex"]
     static let modes = ["high", "normal", "low"]
-    static let outputs = ["plan", "implementation", "pr", "review-slice", "review", "verdict", "document", "design", "troubleshoot", "conflict-resolution", "merge"]
+    static let outputs = ["plan", "bdd-plan", "implementation", "pr", "review-slice", "review", "verdict", "document", "design", "troubleshoot", "conflict-resolution", "merge"]
     static let tools = ["read_file", "write_file", "run_command", "search_codebase", "list_directory", "create_pr", "web_search"]
     static let permissions = ["read", "write", "execute"]
     static let models = ["claude": ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5", "claude-fable-5-1"], "codex": ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol"]]
