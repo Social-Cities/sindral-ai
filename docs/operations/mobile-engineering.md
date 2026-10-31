@@ -4,6 +4,8 @@ Create a **Mobile app** project and choose its supported platforms. iOS and Andr
 
 Use SwiftUI for iOS, Kotlin with Jetpack Compose for Android, and React for Web. All selected clients share one standard Supabase backend, migrations and API contracts. Android follows Google's [architecture recommendations](https://developer.android.com/topic/architecture/recommendations), including layered architecture, repositories, ViewModels, unidirectional data flow, coroutines and Flow.
 
+All code follows [Domain Driven Design](domain-driven-design.md), including iOS, Android, Web, and the shared Supabase backend. Plans define bounded contexts, domain vocabulary and invariants; UI and persistence adapters remain separate from framework-independent domain logic. Verification requires passing DDD evidence for each selected platform and the shared backend, in addition to BDD tests.
+
 Tasks created under mobile projects default to **Mobile App SDLC**. It retains Full SDLC's review slicing, adversarial review, verification, human release approval and merge, and adds BDD creation and revision:
 
 1. Behavior Driven Design defines stable Given/When/Then scenario IDs, fixtures, assertions, test files and commands for every selected platform.
@@ -20,4 +22,4 @@ The first start pins platform scope with the workflow. Later project-setting cha
 
 Apply `20261031171422_mobile_app_engineering.sql`, then deploy the server, shared package, web and worker together. Existing accounts receive an additive Mobile App SDLC template; edited workflows and the existing default remain unchanged. New accounts receive the template with the other bundled workflows.
 
-Worker **0.4.0** uses protocol **6** because `bdd-plan` results and per-platform verification evidence require the new worker contract. Older workers receive HTTP 426. The server checks database schema version `20261031171422` at startup. Supabase provisioning and credentials remain part of each app project's setup; creating a Sindral project does not provision a hosted backend or publish the app.
+Worker **0.4.0** uses protocol **6** because `bdd-plan` results and BDD/DDD verification evidence require the new worker contract. Older workers receive HTTP 426. The server checks database schema version `20261031171422` at startup. Supabase provisioning and credentials remain part of each app project's setup; creating a Sindral project does not provision a hosted backend or publish the app.

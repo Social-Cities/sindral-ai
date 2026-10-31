@@ -208,7 +208,7 @@ describe('full SDLC happy path', () => {
       ],
     });
     await completeNext(ctx, userId, review());
-    await completeNext(ctx, userId, verdict(true));
+    await completeNext(ctx, userId, verdict(true, undefined, ['acme/app', 'acme/api']));
     task = await orch().applyUserEvent(userId, task.id, 'accept');
     expect(task.state).toBe('merge');
 

@@ -16,6 +16,9 @@ import {
   mobileBddGate,
   BDD_PLAN_ARTIFACT,
   BDD_PLAN_MARKDOWN,
+  DOMAIN_DRIVEN_DESIGN_CONTRACT,
+  domainDrivenDesignScopes,
+  domainDrivenDesignGate,
   type BddPlanResult,
   transition,
   type AgentResult,
@@ -618,6 +621,9 @@ export class Orchestrator {
     const context = await this.buildJobContext(userId, task, feedbackOverride);
     const contractPrompt = step.output === 'plan' || step.output === 'bdd-plan' ? PLANNING_CONTRACT_PROMPT : TASK_CONTRACT_PROMPT;
     const stepWithContract = { ...step, prompt: `${step.prompt ?? ''}\n\n${contractPrompt}`.trim() };
+    if (task.repos.length && !['design', 'document'].includes(step.output ?? '') && !stepWithContract.prompt.includes(DOMAIN_DRIVEN_DESIGN_CONTRACT)) {
+      stepWithContract.prompt += `\n\n${DOMAIN_DRIVEN_DESIGN_CONTRACT}`;
+    }
     const resumeSessionId = await this.findResumeSessionId(userId, task.id, step);
     const designHandoff = await this.repo.getDesignHandoff(userId, task.id);
     const designMessages = step.output === 'design' ? await this.repo.listMessages(userId, task.id) : [];
@@ -703,6 +709,7 @@ export class Orchestrator {
       plan: task.plan ?? '',
       bdd_plan: bdd?.kind === 'bdd-plan' ? JSON.stringify({ plan: bdd.plan, scenarios: bdd.scenarios }) : '',
       mobile_platforms: workflow?.mobilePlatforms?.join(', ') ?? '',
+      ddd_scopes: domainDrivenDesignScopes(task.repos, workflow?.mobilePlatforms).join(', '),
       platform_implementations: jobs.filter((job) => job.payload.kind === 'agent' && job.payload.step.platform && job.result?.kind === 'implementation' && ['applying', 'completed'].includes(job.status)).map((job) => `${job.stepId}: ${job.result?.summary}`).join('\n\n'),
       feedback,
       pr_url: task.prUrl ?? '',
@@ -747,6 +754,14 @@ export class Orchestrator {
       const bdd = await this.latestBddPlan(userId, task.id);
       const failure = bdd ? mobileBddGate(bdd, task.pinnedWorkflow.mobilePlatforms, result) : 'Missing approved BDD plan';
       if (failure) throw badRequest(failure);
+    }
+    if (result.kind === 'verdict' && result.verdict === 'GO' && task.repos.length) {
+      const workflow = await this.resolveWorkflow(userId, task);
+      const isCodeWorkflow = workflow?.steps.some((step) => ['implementation', 'pr', 'review-slice'].includes(step.output ?? ''));
+      if (isCodeWorkflow) {
+        const failure = domainDrivenDesignGate(result, domainDrivenDesignScopes(task.repos, workflow?.mobilePlatforms));
+        if (failure) throw badRequest(failure);
+      }
     }
     const attempt = expectedAttempt;
     const outcomeHash = this.jobOutcomeHash({ result });

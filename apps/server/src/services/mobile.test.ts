@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AgentJobPayload, AppPlatform, BddPlanResult, Task } from '@sindral/shared';
-import { claimNext, completeNext, createTestApp, implementation, plan, reload, review, reviewSlice, type TestContext } from '../test/helpers.js';
+import { claimNext, completeNext, createTestApp, dddChecks, implementation, plan, reload, review, reviewSlice, type TestContext } from '../test/helpers.js';
 
 let ctx: TestContext;
 const bdd: BddPlanResult = { kind: 'bdd-plan', summary: 'BDD designed', plan: '# BDD plan', scenarios: [{ id: 'BDD-1', given: 'Signed out', when: 'User signs in', then: 'Session is created' }], outcome: 'Users sign in.', acceptanceCriteria: '- Sign in works.' };
@@ -67,7 +67,9 @@ describe('mobile engineering orchestration', () => {
     const go = { kind: 'verdict' as const, summary: 'Ready', report: 'BDD passed', verdict: 'GO' as const };
     await expect(orch().completeJob(ctx.userA, verifier!.id, go, verifier!.attempt, verifier!.leaseToken)).rejects.toThrow(/BDD scenario/);
     expect((await reload(ctx, ctx.userA, task)).state).toBe('verify');
-    await orch().completeJob(ctx.userA, verifier!.id, { ...go, bddChecks: (['ios', 'android', 'web'] as const).map((platform) => ({ scenarioId: 'BDD-1', platform, status: 'passed', command: `${platform} test`, evidence: '1 scenario passed' })) }, verifier!.attempt, verifier!.leaseToken);
+    const bddChecks = (['ios', 'android', 'web'] as const).map((platform) => ({ scenarioId: 'BDD-1', platform, status: 'passed' as const, command: `${platform} test`, evidence: '1 scenario passed' }));
+    await expect(orch().completeJob(ctx.userA, verifier!.id, { ...go, bddChecks }, verifier!.attempt, verifier!.leaseToken)).rejects.toThrow(/DDD criterion/);
+    await orch().completeJob(ctx.userA, verifier!.id, { ...go, bddChecks, dddChecks: dddChecks(['ios', 'android', 'web', 'supabase']) }, verifier!.attempt, verifier!.leaseToken);
     expect((await reload(ctx, ctx.userA, task)).state).toBe('in-review');
     expect((await reload(ctx, ctx.userA, task)).pinnedWorkflow!.steps.find((step) => step.id === 'in-review')!.label).toBe('Ready for Release');
     await orch().postUserMessage(ctx.userA, task.id, 'Handle expired sessions', 'web');

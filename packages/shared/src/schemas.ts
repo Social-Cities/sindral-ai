@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ALL_OUTPUT_KINDS, ALL_PERMISSIONS, ALL_TOOLS } from './defaultWorkflows.js';
-import { APP_PLATFORMS, ARTIFACT_CONTENT_TYPES, MAX_ARTIFACT_BYTES } from './types.js';
+import { APP_PLATFORMS, ARTIFACT_CONTENT_TYPES, DDD_CRITERIA, MAX_ARTIFACT_BYTES } from './types.js';
 import { designResultSchema } from './design.js';
 
 const id = z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9-_]*$/i);
@@ -293,6 +293,12 @@ export const agentResultSchema = z.discriminatedUnion('kind', [
       status: z.enum(['passed', 'failed', 'blocked']),
       evidence: z.string().trim().min(1).max(20_000),
     })).max(600).optional(),
+    dddChecks: z.array(z.object({
+      scope: z.string().trim().min(1).max(200),
+      criterion: z.enum(DDD_CRITERIA),
+      status: z.enum(['passed', 'failed', 'blocked']),
+      evidence: z.string().trim().min(1).max(20_000),
+    })).max(100).optional(),
     ...taskContractResultFields,
   }),
   z.object({ kind: z.literal('document'), summary: z.string().max(20_000), artifacts: z.array(artifactSchema).max(50), ...taskContractResultFields }),

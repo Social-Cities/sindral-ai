@@ -1,10 +1,13 @@
 import type { AppPlatform, Workflow, WorkflowStep } from './types.js';
 import { buildMobileWorkflow } from './mobile.js';
+import { DOMAIN_DRIVEN_DESIGN_CONTRACT } from './domainDrivenDesign.js';
 
 const READ_TOOLS = ['read_file', 'search_codebase', 'list_directory'] as const;
 const WRITE_TOOLS = ['read_file', 'write_file', 'run_command', 'search_codebase', 'list_directory'] as const;
 
-const PLANNING_PROMPT = `You are a senior software engineer and technical lead working on task {{task_key}}: "{{task_title}}".
+const PLANNING_PROMPT = `${DOMAIN_DRIVEN_DESIGN_CONTRACT}
+
+You are a senior software engineer and technical lead working on task {{task_key}}: "{{task_title}}".
 
 Follow the \`investigate-task\` and \`plan-change\` skills if they are available; otherwise follow their contracts directly.
 
@@ -30,7 +33,9 @@ User feedback to address (empty if none):
 
 `;
 
-const IMPLEMENT_PROMPT = `You are a senior software engineer implementing task {{task_key}}: "{{task_title}}".
+const IMPLEMENT_PROMPT = `${DOMAIN_DRIVEN_DESIGN_CONTRACT}
+
+You are a senior software engineer implementing task {{task_key}}: "{{task_title}}".
 
 Follow the \`design-tests\` and \`implement-change\` skills if available; otherwise follow their contracts directly.
 
@@ -54,7 +59,9 @@ Approved plan:
 Feedback to address (empty on the first implementation pass; on later passes this contains reviewer comments from the user, GitHub or the verification agent):
 {{feedback}}`;
 
-const REVIEW_SLICE_PROMPT = `You are a senior engineer preparing task {{task_key}}: "{{task_title}}" for human code review.
+const REVIEW_SLICE_PROMPT = `${DOMAIN_DRIVEN_DESIGN_CONTRACT}
+
+You are a senior engineer preparing task {{task_key}}: "{{task_title}}" for human code review.
 
 The implementation is complete on the current branch. Your job is to make the final PR easy to review as one change by arranging the branch into ordered, logical commits and writing a commit-by-commit review guide.
 
@@ -81,7 +88,9 @@ Approved plan:
 Implementation / reviewer feedback to preserve (may be empty):
 {{feedback}}`;
 
-const REVIEW_PROMPT = `You are an independent reviewer for task {{task_key}}: "{{task_title}}". You did not write this change.
+const REVIEW_PROMPT = `${DOMAIN_DRIVEN_DESIGN_CONTRACT}
+
+You are an independent reviewer for task {{task_key}}: "{{task_title}}". You did not write this change.
 
 Follow the \`adversarial-review\` skill (https://github.com/thelimeburner/ai-engineering-skills/blob/main/skills/adversarial-review/SKILL.md) if available; otherwise apply its contract directly:
 - Try to prove the implementation wrong across requirements, authorization, input/data, concurrency, reliability, compatibility, security/privacy, performance, operations, tests and maintainability.
@@ -111,7 +120,9 @@ Approved plan:
 Review slice guide:
 {{review_slices}}`;
 
-const VERIFY_PROMPT = `You are the final technical gate for task {{task_key}}: "{{task_title}}".
+const VERIFY_PROMPT = `${DOMAIN_DRIVEN_DESIGN_CONTRACT}
+
+You are the final technical gate for task {{task_key}}: "{{task_title}}".
 
 Follow the \`verify-change\` and \`production-readiness\` skills if available; otherwise apply their contracts directly:
 1. Run the repository's real compiler, typechecker, linters and tests. Never claim a check passed unless you executed it.

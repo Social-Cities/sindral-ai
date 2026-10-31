@@ -1,5 +1,6 @@
 import type { AppPlatform, BddPlanResult, VerdictResult, Workflow, WorkflowStep } from './types.js';
 import { APP_PLATFORMS } from './types.js';
+import { DOMAIN_DRIVEN_DESIGN_CONTRACT } from './domainDrivenDesign.js';
 
 export const BDD_PLAN_ARTIFACT = 'bdd-plan.json';
 export const BDD_PLAN_MARKDOWN = 'bdd-plan.md';
@@ -17,7 +18,9 @@ BDD plan (mandatory behavior contract; do not silently weaken scenarios):
 Prior platform handoff summaries (reference the committed source as well):
 {{platform_implementations}}`;
 
-const BDD_PROMPT = `Create or revise the Behavior Driven Design plan for {{task_key}}: {{task_title}}.
+const BDD_PROMPT = `${DOMAIN_DRIVEN_DESIGN_CONTRACT}
+
+Create or revise the Behavior Driven Design plan for {{task_key}}: {{task_title}}.
 Investigate the existing code before designing tests. Define stable scenario IDs with explicit Given/When/Then, including happy paths, errors, authorization, loading, offline and edge cases relevant to the feature. Every scenario applies to every selected platform. Generate complete Gherkin .feature file contents and concrete native test cases/step definitions in the BDD plan, with executable test files, fixtures, commands, and expected assertions for each selected platform (XCTest/Swift Testing and UI tests for iOS, Kotlin/Compose tests for Android, React tests for Web) and Supabase integration tests where relevant. The implementation planner and implementers must follow these tests. This step generates reviewable test source in the plan without modifying repository files; implementation agents materialize those generated tests in each platform's test suite. Return both the full readable BDD plan and structured scenarios. Preserve scenario IDs when revising existing behavior.
 
 Task description:

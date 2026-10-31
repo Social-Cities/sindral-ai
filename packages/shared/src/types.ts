@@ -43,6 +43,13 @@ export type Permission = 'read' | 'write' | 'execute';
 export const APP_PLATFORMS = ['ios', 'android', 'web'] as const;
 export type AppPlatform = (typeof APP_PLATFORMS)[number];
 export type ProjectType = 'standard' | 'mobile-app';
+export const DDD_CRITERIA = ['bounded-contexts', 'domain-isolation', 'invariants', 'dependency-direction', 'domain-tests'] as const;
+export interface DomainDrivenDesignCheck {
+  scope: string;
+  criterion: (typeof DDD_CRITERIA)[number];
+  status: 'passed' | 'failed' | 'blocked';
+  evidence: string;
+}
 
 /**
  * What an agent step is expected to produce. Drives the result-file contract
@@ -300,6 +307,7 @@ export interface JobContext {
   bdd_plan?: string;
   platform_implementations?: string;
   mobile_platforms?: string;
+  ddd_scopes?: string;
   feedback: string;
   pr_url: string;
   parent_plan: string;
@@ -478,6 +486,7 @@ export interface VerdictResult extends TaskContractResult {
   verdict: 'GO' | 'NO_GO';
   feedback?: string;
   bddChecks?: BddCheck[];
+  dddChecks?: DomainDrivenDesignCheck[];
 }
 export interface DocumentResult extends TaskContractResult {
   kind: 'document';

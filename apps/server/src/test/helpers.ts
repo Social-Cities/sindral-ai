@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { SignJWT } from 'jose';
-import type { AgentResult, Job, Task } from '@sindral/shared';
+import { DDD_CRITERIA, type DomainDrivenDesignCheck, type AgentResult, type Job, type Task } from '@sindral/shared';
 import type { FastifyInstance } from 'fastify';
 import { buildApp, type AppOptions } from '../app.js';
 import type { AppConfig } from '../config.js';
@@ -196,5 +196,8 @@ export const reviewSlice = (n = 1, branch = 'sindral/sin-1'): AgentResult => ({
   ],
 });
 export const review = (): AgentResult => ({ kind: 'review', summary: 'reviewed', report: '# Review', verdict: 'NO_MATERIAL_FINDINGS' });
-export const verdict = (go: boolean, feedback?: string): AgentResult =>
-  go ? { kind: 'verdict', summary: 'GO', report: '# Verify', verdict: 'GO' } : { kind: 'verdict', summary: 'NO_GO', report: '# Verify', verdict: 'NO_GO', feedback };
+export const dddChecks = (scopes: string[] = ['acme/app']): DomainDrivenDesignCheck[] => scopes.flatMap((scope) => DDD_CRITERIA.map((criterion) => ({
+  scope, criterion, status: 'passed' as const, evidence: `Inspected ${scope}/domain and application dependencies; domain and adapter tests passed.`,
+})));
+export const verdict = (go: boolean, feedback?: string, scopes?: string[]): AgentResult =>
+  go ? { kind: 'verdict', summary: 'GO', report: '# Verify', verdict: 'GO', dddChecks: dddChecks(scopes) } : { kind: 'verdict', summary: 'NO_GO', report: '# Verify', verdict: 'NO_GO', feedback };

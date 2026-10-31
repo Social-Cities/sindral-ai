@@ -12,3 +12,4 @@ export * from './api.js';
 export * from './workerProtocol.js';
 export * from './design.js';
 export * from './mobile.js';
+export * from './domainDrivenDesign.js';

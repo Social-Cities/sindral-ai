@@ -93,7 +93,7 @@ export class GitHubConnectionService {
       if (!(error instanceof HttpError) || error.statusCode !== 404) throw error;
     }
 
-    const architecture = input.mobilePlatforms ? `## App architecture\n\nSupported platforms: ${input.mobilePlatforms.join(', ')}.\n\n- ios/: SwiftUI\n- android/: Kotlin / Jetpack Compose\n- web/: React\n- supabase/: one shared Supabase backend\n\nImplement selected clients in order: iOS, Android, Web. Review both BDD and implementation plans before implementation. Every selected platform must pass the approved BDD scenarios before release.` : '';
+    const architecture = input.mobilePlatforms ? `## App architecture\n\nSupported platforms: ${input.mobilePlatforms.join(', ')}.\n\n- ios/: SwiftUI\n- android/: Kotlin / Jetpack Compose\n- web/: React\n- supabase/: one shared Supabase backend\n\nImplement selected clients in order: iOS, Android, Web. Review both BDD and implementation plans before implementation. All code follows Domain Driven Design: bounded contexts, shared domain vocabulary, framework-independent business rules and invariants, application use cases, and infrastructure adapters for Supabase and other integrations. Keep UI and persistence models separate from domain models and test the domain in isolation. Every selected platform must pass the approved BDD scenarios and DDD architecture checks before release.` : '';
     const content = [`# ${input.title}`, input.description.trim(), architecture].filter(Boolean).join('\n\n') + '\n';
     await this.requestObject(secret.token, path, {
       method: 'PUT',
