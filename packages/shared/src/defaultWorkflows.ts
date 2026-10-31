@@ -1,4 +1,5 @@
-import type { Workflow, WorkflowStep } from './types.js';
+import type { AppPlatform, Workflow, WorkflowStep } from './types.js';
+import { buildMobileWorkflow } from './mobile.js';
 
 const READ_TOOLS = ['read_file', 'search_codebase', 'list_directory'] as const;
 const WRITE_TOOLS = ['read_file', 'write_file', 'run_command', 'search_codebase', 'list_directory'] as const;
@@ -392,7 +393,13 @@ export const DESIGN_WORKFLOW: Workflow = {
   troubleshootStep: DEFAULT_TROUBLESHOOT_STEP,
 };
 
-export const BUNDLED_WORKFLOWS: Workflow[] = [FULL_SDLC_WORKFLOW, PLANNING_ONLY_WORKFLOW, FAST_TRACK_WORKFLOW, DOCUMENT_WORKFLOW, DESIGN_WORKFLOW];
+export function createMobileWorkflow(platforms?: AppPlatform[]): Workflow {
+  return buildMobileWorkflow(FULL_SDLC_WORKFLOW, platforms);
+}
+
+export const MOBILE_APP_WORKFLOW: Workflow = { ...createMobileWorkflow(['ios', 'android', 'web']), mobilePlatforms: ['ios', 'android'] };
+
+export const BUNDLED_WORKFLOWS: Workflow[] = [FULL_SDLC_WORKFLOW, PLANNING_ONLY_WORKFLOW, FAST_TRACK_WORKFLOW, DOCUMENT_WORKFLOW, DESIGN_WORKFLOW, MOBILE_APP_WORKFLOW];
 
 /** Models offered in the workflow editor. Keep in sync with the worker's engine adapters. */
 export const MODEL_OPTIONS: Record<'claude' | 'codex', string[]> = {
@@ -402,4 +409,4 @@ export const MODEL_OPTIONS: Record<'claude' | 'codex', string[]> = {
 
 export const ALL_TOOLS = ['read_file', 'write_file', 'run_command', 'search_codebase', 'list_directory', 'create_pr', 'web_search'] as const;
 export const ALL_PERMISSIONS = ['read', 'write', 'execute'] as const;
-export const ALL_OUTPUT_KINDS = ['plan', 'implementation', 'pr', 'review-slice', 'review', 'verdict', 'document', 'design', 'troubleshoot', 'conflict-resolution', 'merge'] as const;
+export const ALL_OUTPUT_KINDS = ['plan', 'bdd-plan', 'implementation', 'pr', 'review-slice', 'review', 'verdict', 'document', 'design', 'troubleshoot', 'conflict-resolution', 'merge'] as const;

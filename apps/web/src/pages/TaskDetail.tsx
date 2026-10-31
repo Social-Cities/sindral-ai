@@ -308,7 +308,7 @@ export function TaskDetail() {
                 onViewPlan={() => setTab('plan')}
               />
             )}
-            {tab === 'plan' && <PlanTab task={task} canApprove={canApprovePlan} approving={action.isPending} onApprove={approvePlan} />}
+            {tab === 'plan' && <PlanTab task={task} canApprove={canApprovePlan} approving={action.isPending} onApprove={approvePlan} sendingFeedback={send.isPending} onFeedback={(content, feedbackTarget) => send.mutateAsync({ content, feedbackTarget })} />}
             {tab === 'chat' && (
               <ChatTab
                 task={task}

@@ -46,15 +46,31 @@ export function Home() {
   const [uploadNote, setUploadNote] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
+  const workflowProjectRef = useRef<string | null>(null);
 
   const workflows = useMemo(() => workflowsQuery.data ?? [], [workflowsQuery.data]);
   const designWorkflow = workflows.find((workflow) => workflow.steps.some((step) => step.output === 'design'));
   const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data]);
   const tasks = useMemo(() => tasksQuery.data ?? [], [tasksQuery.data]);
   const selectedProject = projects.find((project) => project.id === projectId) ?? null;
+  const selectedProjectType = selectedProject?.projectType;
   const repositoryChoices = selectedProject
     ? selectedProject.repositories.map((repository) => repository.repository)
     : (githubCatalog.data?.repositories.map((repository) => repository.fullName) ?? []);
+
+  useEffect(() => {
+    const selectionKey = `${projectId}:${selectedProjectType ?? 'standard'}`;
+    if (workflowProjectRef.current === selectionKey || !workflows.length) return;
+    if (selectedProjectType === 'mobile-app') {
+      const mobile = workflows.find((workflow) => workflow.mobilePlatforms);
+      if (!mobile) return;
+      setWorkflowId(mobile.id);
+    } else {
+      const preferred = workflows.find((workflow) => workflow.isDefault) ?? workflows[0];
+      if (preferred) setWorkflowId(preferred.id);
+    }
+    workflowProjectRef.current = selectionKey;
+  }, [projectId, selectedProjectType, workflows]);
 
   useEffect(() => {
     if (!workflowId && workflows.length > 0) {

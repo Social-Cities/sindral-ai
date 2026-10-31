@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
-import type { CreateGitHubRepositoryInput } from '@sindral/shared';
+import { APP_PLATFORMS, type AppPlatform, type ProjectType, type CreateGitHubRepositoryInput } from '@sindral/shared';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { useCreateProject, useProjects } from '@/hooks/useProjects';
@@ -27,6 +27,8 @@ export function ProjectsSection() {
   const createProject = useCreateProject();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [projectType, setProjectType] = useState<ProjectType>('standard');
+  const [platforms, setPlatforms] = useState<AppPlatform[]>(['ios', 'android']);
   const [repositoryMode, setRepositoryMode] = useState<RepositoryMode>('new');
   const [owner, setOwner] = useState('');
   const [repoName, setRepoName] = useState('');
@@ -63,7 +65,7 @@ export function ProjectsSection() {
     setExistingRepos((current) =>
       current.includes(repository)
         ? current.filter((item) => item !== repository)
-        : [...current, repository],
+        : projectType === 'mobile-app' ? [repository] : [...current, repository],
     );
     setError(null);
     setCreated(null);
@@ -79,6 +81,10 @@ export function ProjectsSection() {
       setError('Enter a project title.');
       return;
     }
+    if (projectType === 'mobile-app' && platforms.length === 0) {
+      setError('Select at least one platform.');
+      return;
+    }
     if (repositoryMode === 'new' && (!owner || !trimmedRepoName)) {
       setError('Enter a project title, owner and repository name.');
       return;
@@ -89,14 +95,17 @@ export function ProjectsSection() {
     }
     try {
       const trimmedDescription = description.trim();
+      const mobileConfig = projectType === 'mobile-app' ? { projectType, platforms } : {};
       const result = await createProject.mutateAsync(repositoryMode === 'existing'
         ? {
             name: trimmedName,
+            ...mobileConfig,
             description: trimmedDescription,
             repos: existingRepos,
           }
         : {
             name: trimmedName,
+            ...mobileConfig,
             description: trimmedDescription,
             repository: {
               owner,
@@ -124,6 +133,22 @@ export function ProjectsSection() {
   return (
     <div className="space-y-5">
       <form onSubmit={submit} className="space-y-3">
+        <label className="block text-xs text-muted-foreground">
+          Project type
+          <select aria-label="Project type" className="block w-full rounded border border-border bg-input px-3 py-2 text-sm text-foreground" value={projectType} onChange={(event) => { setProjectType(event.target.value as ProjectType); setExistingRepos((current) => current.slice(0, 1)); }}>
+            <option value="standard">Standard</option>
+            <option value="mobile-app">Mobile app</option>
+          </select>
+        </label>
+        {projectType === 'mobile-app' && (
+          <fieldset className="space-y-2">
+            <legend className="label-caps">Supported platforms</legend>
+            <div className="flex gap-4">
+              {APP_PLATFORMS.map((platform) => <label key={platform} className="flex gap-2 text-xs"><input type="checkbox" checked={platforms.includes(platform)} onChange={() => setPlatforms((current) => current.includes(platform) ? current.filter((item) => item !== platform) : [...current, platform])} />{platform === 'ios' ? 'iOS' : platform === 'android' ? 'Android' : 'Web'}</label>)}
+            </div>
+            <p className="text-xs text-muted-foreground">One monorepo with ios/, android/, and web/ folders and a shared Supabase backend. Selected apps are implemented in that order using SwiftUI, Kotlin / Jetpack Compose, and React.</p>
+          </fieldset>
+        )}
         <div className="inline-flex rounded-md border border-border bg-input p-1" aria-label="Repository source">
           {(['new', 'existing'] as const).map((mode) => (
             <button
@@ -231,6 +256,7 @@ export function ProjectsSection() {
             {(projects.data ?? []).map((project) => (
               <li key={project.id} className="px-3 py-2.5 bg-input/40">
                 <p className="text-xs font-medium text-foreground">{project.name}</p>
+                {project.projectType === 'mobile-app' && <p className="text-[10px] text-muted-foreground">Mobile app · {project.platforms.map((platform) => platform === 'ios' ? 'iOS' : platform === 'android' ? 'Android' : 'Web').join(' → ')} · Supabase</p>}
                 <p className="text-[10px] font-mono text-muted-foreground mt-0.5">
                   {project.repositories.map((repository) => repository.repository).join(', ')}
                 </p>

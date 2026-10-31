@@ -12,6 +12,11 @@ import {
   isAgentActive,
   removeMarkdownSection,
   snapshotWorkflow,
+  selectMobilePlatforms,
+  mobileBddGate,
+  BDD_PLAN_ARTIFACT,
+  BDD_PLAN_MARKDOWN,
+  type BddPlanResult,
   transition,
   type AgentResult,
   type AgentEngine,
@@ -142,17 +147,19 @@ export class Orchestrator {
   // ---------------------------------------------------------------- tasks
 
   async createTask(userId: string, input: CreateTaskInput): Promise<Task> {
+    const project = input.projectId ? await this.repo.getProject(userId, input.projectId) : null;
+    if (input.projectId && !project) throw badRequest('Unknown project');
     let workflowId: string | null;
     if (input.workflowId) {
       const wf = await this.workflows.get(userId, input.workflowId);
       if (!wf) throw badRequest('Unknown workflow');
       workflowId = wf.id;
     } else {
-      workflowId = (await this.workflows.getDefault(userId))?.id ?? null;
+      workflowId = project?.projectType === 'mobile-app'
+        ? (await this.workflows.list(userId)).find((workflow) => workflow.mobilePlatforms)?.id ?? null
+        : (await this.workflows.getDefault(userId))?.id ?? null;
     }
     const key = input.key ?? `SIN-${await this.repo.nextTaskNumber(userId)}`;
-    const project = input.projectId ? await this.repo.getProject(userId, input.projectId) : null;
-    if (input.projectId && !project) throw badRequest('Unknown project');
     const projectRepos = project?.repositories.map((repo) => repo.repository) ?? [];
     const repos = project ? (input.repos.length > 0 ? input.repos : projectRepos) : input.repos;
     if (project) {
@@ -212,7 +219,7 @@ export class Orchestrator {
       this.repo.listPullRequests(userId, id),
       this.repo.getDesignHandoff(userId, id),
     ]);
-    return { ...task, messages, events, artifacts, subtasks, repositories, pullRequests,
+    return { ...task, messages, events, artifacts, subtasks, repositories, pullRequests, bddPlan: await this.latestBddPlan(userId, task.id),
       designInput: designHandoff ? { sourceTaskId: designHandoff.sourceTaskId, revisionId: designHandoff.revisionId, approvedAt: designHandoff.approvedAt } : null };
   }
 
@@ -304,7 +311,21 @@ export class Orchestrator {
     if (task.pinnedWorkflow) return task.pinnedWorkflow;
     if (!task.workflowId) return null;
     const live = await this.workflows.get(userId, task.workflowId);
-    return live ? toWorkflow(live) : null;
+    return live ? this.specializeWorkflow(userId, task, toWorkflow(live)) : null;
+  }
+
+  private async specializeWorkflow(userId: string, task: Task, workflow: Workflow): Promise<Workflow> {
+    if (!workflow.mobilePlatforms) return workflow;
+    if (task.repos.length !== 1) throw badRequest('Mobile App SDLC requires one monorepo repository');
+    const project = task.projectId ? await this.repo.getProject(userId, task.projectId) : null;
+    const platforms = task.pinnedWorkflow?.mobilePlatforms ?? (project?.projectType === 'mobile-app' ? project.platforms : workflow.mobilePlatforms);
+    return selectMobilePlatforms(workflow, platforms);
+  }
+
+  private async latestBddPlan(userId: string, taskId: string): Promise<BddPlanResult | null> {
+    const jobs = await this.repo.listJobsForTask(userId, taskId);
+    const result = [...jobs].reverse().find((job) => ['applying', 'completed'].includes(job.status) && job.result?.kind === 'bdd-plan')?.result;
+    return result?.kind === 'bdd-plan' ? result : null;
   }
 
   async repinWorkflow(userId: string, taskId: string, expectedVersion: number, idempotencyKey: string): Promise<Task> {
@@ -316,7 +337,7 @@ export class Orchestrator {
     if (activeJob) throw conflict('Task has active work; wait for it to finish before updating its pinned workflow');
     const live = await this.workflows.get(userId, task.workflowId);
     if (!live) throw conflict('The live workflow for this task no longer exists');
-    const pinnedWorkflow = snapshotWorkflow(toWorkflow(live));
+    const pinnedWorkflow = snapshotWorkflow(await this.specializeWorkflow(userId, task, toWorkflow(live)));
     const detail = { actor: 'user', workflowId: live.id, workflowName: live.name };
     const requestHash = transitionRequestHash(userId, task.id, expectedVersion, 'workflow-repinned', 'user', detail);
     const replay = await this.repo.getTaskTransitionReplay(userId, idempotencyKey, requestHash);
@@ -381,9 +402,11 @@ export class Orchestrator {
     source: MessageSource,
     externalId?: string,
     githubFeedback?: GitHubFeedbackReference,
+    feedbackTarget?: 'bdd' | 'implementation',
   ): Promise<{ message: Message | null; task: Task }> {
     let task = await this.getTask(userId, taskId);
     const workflow = await this.resolveWorkflow(userId, task);
+    if (feedbackTarget && (task.currentStepId !== 'plan-review' || !workflow?.mobilePlatforms)) throw badRequest('Targeted plan feedback requires a mobile plan review');
     const triggersFeedback = workflow !== null && chatTriggersFeedback(task, workflow);
     const message = await this.repo.createMessage(userId, {
       taskId,
@@ -394,7 +417,7 @@ export class Orchestrator {
       githubFeedback: githubFeedback ?? null,
     });
     if (triggersFeedback) {
-      task = await this.applyEvent(userId, task, 'feedback', {
+      task = await this.applyEvent(userId, task, feedbackTarget === 'bdd' ? 'bdd-feedback' : 'feedback', {
         actor: 'user',
         detail: { source },
         ...(externalId ? { idempotencyKey: `message:${source}:${task.id}:${externalId}:feedback` } : {}),
@@ -494,6 +517,9 @@ export class Orchestrator {
     }
 
     const t: Transition = transition(task, workflow, event);
+    if (workflow?.mobilePlatforms && task.currentStepId === 'plan-review' && event === 'approve') {
+      if (!task.plan?.trim() || !await this.latestBddPlan(userId, task.id)) throw conflict('Both BDD and implementation plans are required before approval');
+    }
     const manuallyClosing = event === UNIVERSAL_EVENTS.MARK_DONE || event === UNIVERSAL_EVENTS.MARK_WONT_DO;
     if (!manuallyClosing && task.plan && (!task.outcome.trim() || !task.acceptanceCriteria.trim())) {
       const dispatchesNonPlanningAgent = t.effects.some((effect) => {
@@ -590,7 +616,7 @@ export class Orchestrator {
     feedbackOverride?: string,
   ): Promise<Parameters<Repository['createJob']>[1]> {
     const context = await this.buildJobContext(userId, task, feedbackOverride);
-    const contractPrompt = step.output === 'plan' ? PLANNING_CONTRACT_PROMPT : TASK_CONTRACT_PROMPT;
+    const contractPrompt = step.output === 'plan' || step.output === 'bdd-plan' ? PLANNING_CONTRACT_PROMPT : TASK_CONTRACT_PROMPT;
     const stepWithContract = { ...step, prompt: `${step.prompt ?? ''}\n\n${contractPrompt}`.trim() };
     const resumeSessionId = await this.findResumeSessionId(userId, task.id, step);
     const designHandoff = await this.repo.getDesignHandoff(userId, task.id);
@@ -655,7 +681,9 @@ export class Orchestrator {
   }
 
   async buildJobContext(userId: string, task: Task, feedbackOverride?: string): Promise<JobContext> {
-    const [messages, artifacts] = await Promise.all([this.repo.listMessages(userId, task.id), this.repo.listArtifacts(userId, task.id)]);
+    const [messages, artifacts, jobs] = await Promise.all([this.repo.listMessages(userId, task.id), this.repo.listArtifacts(userId, task.id), this.repo.listJobsForTask(userId, task.id)]);
+    const bdd = [...jobs].reverse().find((job) => ['applying', 'completed'].includes(job.status) && job.result?.kind === 'bdd-plan')?.result;
+    const workflow = await this.resolveWorkflow(userId, task);
     const pendingMessages = messagesSinceLastAgentMessage(messages);
     const feedback = feedbackOverride ?? pendingMessages.filter((message) => message.role === 'user').map((message) => message.content).join('\n\n');
     const githubFeedback = [...pendingMessages]
@@ -673,6 +701,9 @@ export class Orchestrator {
       task_outcome: task.outcome,
       acceptance_criteria: task.acceptanceCriteria,
       plan: task.plan ?? '',
+      bdd_plan: bdd?.kind === 'bdd-plan' ? JSON.stringify({ plan: bdd.plan, scenarios: bdd.scenarios }) : '',
+      mobile_platforms: workflow?.mobilePlatforms?.join(', ') ?? '',
+      platform_implementations: jobs.filter((job) => job.payload.kind === 'agent' && job.payload.step.platform && job.result?.kind === 'implementation' && ['applying', 'completed'].includes(job.status)).map((job) => `${job.stepId}: ${job.result?.summary}`).join('\n\n'),
       feedback,
       pr_url: task.prUrl ?? '',
       parent_plan: '',
@@ -711,6 +742,11 @@ export class Orchestrator {
     // applied effects can only be replayed with the exact same outcome.
     if (result.kind !== 'rebase' && result.kind !== 'conflict-resolution' && result.kind !== 'merge') {
       this.taskContractFromResult(task, result);
+    }
+    if (result.kind === 'verdict' && result.verdict === 'GO' && task.pinnedWorkflow?.mobilePlatforms) {
+      const bdd = await this.latestBddPlan(userId, task.id);
+      const failure = bdd ? mobileBddGate(bdd, task.pinnedWorkflow.mobilePlatforms, result) : 'Missing approved BDD plan';
+      if (failure) throw badRequest(failure);
     }
     const attempt = expectedAttempt;
     const outcomeHash = this.jobOutcomeHash({ result });
@@ -752,7 +788,8 @@ export class Orchestrator {
         if (transitionReplay) {
           current = transitionReplay.task;
         } else if (this.isJobCurrent(current, claim.job)) {
-          const feedbackOverride = result.kind === 'verdict' && result.verdict === 'NO_GO' ? (result.feedback ?? result.summary) : undefined;
+          const feedbackOverride = result.kind === 'verdict' && result.verdict === 'NO_GO' ? (result.feedback ?? result.summary)
+            : (result.kind === 'implementation' || result.kind === 'bdd-plan') && job.payload.kind === 'agent' ? job.payload.context.feedback || undefined : undefined;
           current = await this.applyEvent(userId, current, eventForResult(result), {
             actor: 'worker',
             feedbackOverride,
@@ -931,6 +968,16 @@ export class Orchestrator {
       return task;
     };
     switch (result.kind) {
+      case 'bdd-plan': {
+        const artifacts = [
+          { name: BDD_PLAN_ARTIFACT, content: JSON.stringify(result), contentType: 'application/json' },
+          { name: BDD_PLAN_MARKDOWN, content: result.plan, contentType: 'text/markdown' },
+        ];
+        for (const artifact of artifacts) {
+          await this.repo.createArtifact(userId, { taskId: task.id, jobId: job.id, ...artifact, dedupeKey: `job:${job.id}:artifact:${artifact.name}` });
+        }
+        return persistGeneratedContract();
+      }
       case 'plan': {
         const { outcome, acceptanceCriteria } = generatedContract!;
         const updated = await this.repo.updateTask(userId, task.id, { plan: result.plan, outcome, acceptanceCriteria });
@@ -1067,7 +1114,7 @@ export class Orchestrator {
     task: Task,
     result: Exclude<AgentResult, { kind: 'rebase' | 'conflict-resolution' | 'merge' }>,
   ): Pick<Task, 'outcome' | 'acceptanceCriteria'> | null {
-    if (result.kind === 'plan') {
+    if (result.kind === 'plan' || result.kind === 'bdd-plan') {
       const embedded = extractTaskContract(result.plan);
       const outcome = result.outcome?.trim() || embedded.outcome || task.outcome.trim();
       const acceptanceCriteria = result.acceptanceCriteria?.trim() || embedded.acceptanceCriteria || task.acceptanceCriteria.trim();

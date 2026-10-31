@@ -4,7 +4,7 @@ Choose **Design an app** on Home to create a task using the **App Design** workf
 
 ## Deployment and authentication
 
-Apply all migrations, including `20261025202507_claude_code_design_previews.sql`, and deploy the server, web app, shared package, and worker together. Worker **0.3.0** uses protocol **5**; older workers receive HTTP 426 because they require hosted Design artifacts and cannot collect previews without a URL.
+Apply all migrations, including `20261025202507_claude_code_design_previews.sql`, and deploy the server, web app, shared package, and worker together. Worker **0.4.0** uses protocol **6**, supporting portable Design previews and the [mobile BDD result contract](mobile-engineering.md). Older workers receive HTTP 426; deploy the server and worker from the same release.
 
 The migration updates the original bundled Design prompts in saved workflows, active task snapshots, and pending jobs, including leased jobs that may be requeued during the upgrade. Workflow IDs, models, appended context, lease fields, and graph structure are preserved. Modified prompts are left alone; update customized workflows manually if they still require `/design` or artifact publishing. Completed task snapshots, saved conversations, approved revisions, and frozen handoffs are preserved. Existing hosted revisions keep their optional **Open in Claude** link.
 

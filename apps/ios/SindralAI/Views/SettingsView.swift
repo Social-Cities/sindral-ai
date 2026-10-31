@@ -399,6 +399,8 @@ struct ProjectsSettingsCard: View {
     @State private var owner = ""
     @State private var repositoryName = ""
     @State private var repositoryEdited = false
+    @State private var projectType = "standard"
+    @State private var platforms: Set<String> = ["ios", "android"]
     @State private var visibility = ProjectRepositoryVisibility.private
     @State private var creating = false
     @State private var feedback: String?
@@ -420,6 +422,19 @@ struct ProjectsSettingsCard: View {
     private var fields: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 12) {
+                Picker("Project type", selection: $projectType) {
+                    Text("Standard").tag("standard")
+                    Text("Mobile app").tag("mobile-app")
+                }
+                if projectType == "mobile-app" {
+                    ForEach(["ios", "android", "web"], id: \.self) { platform in
+                        Toggle(platform == "ios" ? "iOS" : platform.capitalized, isOn: Binding(get: { platforms.contains(platform) }, set: { enabled in
+                            if enabled { platforms.insert(platform) } else { platforms.remove(platform) }
+                        }))
+                    }
+                    Text("One monorepo: ios/ (SwiftUI), android/ (Kotlin / Compose), web/ (React), and supabase/ for the shared backend. Selected clients run in that order.")
+                        .font(Theme.secondaryBody).foregroundStyle(Theme.mutedForeground)
+                }
                 label("App title")
                 TextField("", text: Binding(get: { name }, set: updateName), prompt: Text("Billing platform").foregroundStyle(Theme.mutedForeground))
                     .font(Theme.body).foregroundStyle(Theme.foreground)
@@ -463,7 +478,7 @@ struct ProjectsSettingsCard: View {
                 }
             }
             .buttonStyle(.sindral(.primary, height: 48))
-            .disabled(catalog?.connected != true || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || owner.isEmpty || repositoryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || creating)
+            .disabled(catalog?.connected != true || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || owner.isEmpty || repositoryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || creating || (projectType == "mobile-app" && platforms.isEmpty))
 
             projectList
         }
@@ -594,7 +609,9 @@ struct ProjectsSettingsCard: View {
             let project = try await api.createProject(
                 name: trimmedName,
                 description: description.trimmingCharacters(in: .whitespacesAndNewlines),
-                repository: NewGitHubRepository(owner: owner, name: trimmedRepositoryName, visibility: visibility.rawValue)
+                repository: NewGitHubRepository(owner: owner, name: trimmedRepositoryName, visibility: visibility.rawValue),
+                projectType: projectType,
+                platforms: projectType == "mobile-app" ? ["ios", "android", "web"].filter { platforms.contains($0) } : nil
             )
             await store.refreshProjects()
             feedback = "Created \(project.repositories.first?.repository ?? project.name)."

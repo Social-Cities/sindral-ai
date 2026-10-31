@@ -148,10 +148,10 @@ export function repinTaskWorkflow(id: string, expectedVersion: number, idempoten
   });
 }
 
-export function sendMessage(id: string, content: string) {
+export function sendMessage(id: string, content: string, feedbackTarget?: 'bdd' | 'implementation') {
   return apiFetch<ResponseOf<'POST /api/tasks/:id/messages'>>(`/api/tasks/${encodeURIComponent(id)}/messages`, {
     method: 'POST',
-    json: { content },
+    json: { content, ...(feedbackTarget ? { feedbackTarget } : {}) },
   });
 }
 

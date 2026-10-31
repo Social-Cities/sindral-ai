@@ -133,7 +133,10 @@ struct StateStyle: Hashable {
     ]
 
     static func `for`(_ state: String, step: WorkflowStep? = nil) -> StateStyle {
-        if let known = known[state] { return known }
+        if let known = known[state] {
+            if state == "in-review", step?.label == "Ready for Release" { return .init(label: "Ready for Release", color: known.color, pulses: known.pulses) }
+            return known
+        }
         let label = step?.label ?? state.split(separator: "-").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
         return step?.type == "agent"
             ? .init(label: label, color: Color(hex: 0xA78BFA), pulses: true)

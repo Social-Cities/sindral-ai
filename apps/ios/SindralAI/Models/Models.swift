@@ -47,6 +47,7 @@ struct WorkflowStep: Codable, Identifiable, Hashable, Sendable {
     var tools: [String]?
     var permissions: [String]?
     var output: String?
+    var platform: String? = nil
     var resumeSessionKey: String?
     var position: WorkflowPosition?
 }
@@ -66,6 +67,7 @@ struct Workflow: Codable, Identifiable, Hashable, Sendable {
     var entryStepId: String
     var steps: [WorkflowStep]
     var edges: [WorkflowEdge]
+    var mobilePlatforms: [String]? = nil
     var troubleshootStep: WorkflowStep?
     var userId: String?
     var isDefault: Bool?
@@ -123,7 +125,17 @@ struct ProjectRepository: Codable, Identifiable, Hashable, Sendable {
     let updatedAt: String
 }
 
+struct BddScenario: Codable, Identifiable, Hashable, Sendable {
+    let id: String; let given: String; let when: String; let then: String
+}
+
+struct BddPlan: Codable, Hashable, Sendable {
+    let plan: String; let scenarios: [BddScenario]
+}
+
 struct Project: Codable, Identifiable, Hashable, Sendable {
+    var projectType: String? = nil
+    var platforms: [String]? = nil
     let id: String
     let userId: String
     let name: String
@@ -196,6 +208,7 @@ struct TaskDetail: Codable, Identifiable, Hashable, Sendable {
     let artifacts: [Artifact]
     let repositories: [TaskRepository]
     let pullRequests: [PullRequest]
+    var bddPlan: BddPlan? = nil
     var designInput: DesignInputSummary? = nil
 
     var summary: SindralTask { SindralTask(id: id, userId: userId, version: version, key: key, title: title, description: description, projectId: projectId, outcome: outcome, acceptanceCriteria: acceptanceCriteria, state: state, currentStepId: currentStepId, workflowId: workflowId, pinnedWorkflow: pinnedWorkflow, repos: repos, ticketUrl: ticketUrl, prUrl: prUrl, branch: branch, baseBranch: baseBranch, plan: plan, parentTaskId: parentTaskId, sequence: sequence, failedStepId: failedStepId, lastError: lastError, createdAt: createdAt, updatedAt: updatedAt) }

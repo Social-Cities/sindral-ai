@@ -1,11 +1,13 @@
 import { z } from 'zod';
 import { ALL_OUTPUT_KINDS, ALL_PERMISSIONS, ALL_TOOLS } from './defaultWorkflows.js';
-import { ARTIFACT_CONTENT_TYPES, MAX_ARTIFACT_BYTES } from './types.js';
+import { APP_PLATFORMS, ARTIFACT_CONTENT_TYPES, MAX_ARTIFACT_BYTES } from './types.js';
 import { designResultSchema } from './design.js';
 
 const id = z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9-_]*$/i);
 const shortText = z.string().trim().min(1).max(200);
 const longText = z.string().max(100_000);
+export const appPlatformsSchema = z.array(z.enum(APP_PLATFORMS)).min(1).max(3)
+  .refine((values) => new Set(values).size === values.length, 'Platforms must be unique');
 
 export const workflowStepSchema = z.object({
   id,
@@ -20,6 +22,7 @@ export const workflowStepSchema = z.object({
   permissions: z.array(z.enum(ALL_PERMISSIONS)).max(ALL_PERMISSIONS.length).optional(),
   output: z.enum(ALL_OUTPUT_KINDS).optional(),
   resumeSessionKey: z.string().trim().min(1).max(64).regex(/^[a-z0-9][a-z0-9-_]*$/i).optional(),
+  platform: z.enum(APP_PLATFORMS).optional(),
   position: z.object({ x: z.number().finite(), y: z.number().finite() }).optional(),
 });
 
@@ -37,6 +40,7 @@ export const workflowSchema = z.object({
   entryStepId: id,
   steps: z.array(workflowStepSchema).min(1).max(50),
   edges: z.array(workflowEdgeSchema).max(200),
+  mobilePlatforms: appPlatformsSchema.optional(),
   troubleshootStep: workflowStepSchema.optional(),
 });
 
@@ -60,6 +64,8 @@ export const createGitHubRepositorySchema = z.object({
 export const createProjectSchema = z.object({
   name: shortText,
   description: z.string().trim().max(2000).default(''),
+  projectType: z.enum(['standard', 'mobile-app']).optional(),
+  platforms: appPlatformsSchema.optional(),
   repository: createGitHubRepositorySchema.optional(),
   repos: z.array(repo).max(20).optional(),
 }).refine((input) => Boolean(input.repository) || (input.repos?.length ?? 0) > 0, {
@@ -68,9 +74,15 @@ export const createProjectSchema = z.object({
 }).refine((input) => (input.repos?.length ?? 0) + (input.repository ? 1 : 0) <= 20, {
   message: 'Projects support at most 20 repositories',
   path: ['repos'],
+}).refine((input) => input.projectType !== 'mobile-app' || (input.repos?.length ?? 0) + (input.repository ? 1 : 0) === 1, {
+  message: 'Mobile app projects use one monorepo', path: ['repos'],
+}).refine((input) => input.projectType === 'mobile-app' || input.platforms === undefined, {
+  message: 'Platform selection requires a mobile app project', path: ['platforms'],
 });
 
 export const updateProjectSchema = z.object({
+  projectType: z.enum(['standard', 'mobile-app']).optional(),
+  platforms: appPlatformsSchema.optional(),
   name: shortText.optional(),
   description: z.string().trim().max(2000).optional(),
   repos: z.array(repo).max(20).optional(),
@@ -114,6 +126,7 @@ export const repinWorkflowSchema = z.object({
 
 export const sendMessageSchema = z.object({
   content: z.string().trim().min(1).max(20_000),
+  feedbackTarget: z.enum(['bdd', 'implementation']).optional(),
 });
 
 export const listTasksQuerySchema = z.object({
@@ -183,8 +196,22 @@ const taskContractResultFields = {
   acceptanceCriteria: z.string().trim().min(1).max(50_000).optional(),
 };
 
+export const bddPlanResultSchema = z.object({
+  kind: z.literal('bdd-plan'),
+  summary: z.string().max(20_000),
+  plan: z.string().trim().min(1).max(200_000),
+  scenarios: z.array(z.object({
+    id,
+    given: z.string().trim().min(1).max(10_000),
+    when: z.string().trim().min(1).max(10_000),
+    then: z.string().trim().min(1).max(10_000),
+  })).min(1).max(200).refine((scenarios) => new Set(scenarios.map((scenario) => scenario.id)).size === scenarios.length, 'Scenario ids must be unique'),
+  ...taskContractResultFields,
+});
+
 export const agentResultSchema = z.discriminatedUnion('kind', [
   designResultSchema,
+  bddPlanResultSchema,
   z.object({
     kind: z.literal('plan'),
     summary: z.string().max(20_000),
@@ -259,6 +286,13 @@ export const agentResultSchema = z.discriminatedUnion('kind', [
     report: z.string().max(200_000),
     verdict: z.enum(['GO', 'NO_GO']),
     feedback: z.string().max(50_000).optional(),
+    bddChecks: z.array(z.object({
+      scenarioId: id,
+      platform: z.enum(APP_PLATFORMS),
+      command: z.string().trim().min(1).max(2000),
+      status: z.enum(['passed', 'failed', 'blocked']),
+      evidence: z.string().trim().min(1).max(20_000),
+    })).max(600).optional(),
     ...taskContractResultFields,
   }),
   z.object({ kind: z.literal('document'), summary: z.string().max(20_000), artifacts: z.array(artifactSchema).max(50), ...taskContractResultFields }),

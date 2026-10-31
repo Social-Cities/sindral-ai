@@ -19,6 +19,7 @@ export function toDraft(record: Workflow): Workflow {
     edges: record.edges.map((e) => ({ ...e })),
   };
   if (record.description !== undefined) draft.description = record.description;
+  if (record.mobilePlatforms) draft.mobilePlatforms = [...record.mobilePlatforms];
   if (record.troubleshootStep) draft.troubleshootStep = { ...record.troubleshootStep };
   return draft;
 }

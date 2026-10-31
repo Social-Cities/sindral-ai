@@ -94,6 +94,7 @@ export function SummaryTab({ task, workflow, canApprove, approving, onApprove, o
                 View full plan →
               </button>
             </div>
+            {task.bddPlan && <div className="p-4 mb-3 rounded-lg bg-muted border border-border"><p className="text-xs font-semibold mb-2">BDD test plan</p><Markdown>{task.bddPlan.plan}</Markdown></div>}
             <div className="grid gap-3">
               {PLAN_FIELDS.map(({ key, label }) => (
                 <div key={key} className="p-4 rounded-lg bg-muted border border-border min-w-0">
@@ -107,7 +108,7 @@ export function SummaryTab({ task, workflow, canApprove, approving, onApprove, o
             {canApprove && (
               <div className="mt-3 flex justify-end">
                 <Button variant="success" onClick={onApprove} disabled={approving}>
-                  Approve Plan
+                  {task.pinnedWorkflow?.mobilePlatforms ? 'Approve Both Plans' : 'Approve Plan'}
                 </Button>
               </div>
             )}

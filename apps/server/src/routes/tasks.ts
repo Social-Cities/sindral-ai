@@ -94,8 +94,8 @@ export const taskRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx })
 
   app.post('/api/tasks/:id/messages', async (request, reply) => {
     const { id } = validate(idParamsSchema, request.params);
-    const { content } = validate(sendMessageSchema, request.body);
-    const { message, task } = await orchestrator.postUserMessage(request.user!.id, id, content, 'web');
+    const { content, feedbackTarget } = validate(sendMessageSchema, request.body);
+    const { message, task } = await orchestrator.postUserMessage(request.user!.id, id, content, 'web', undefined, undefined, feedbackTarget);
     return reply.code(201).send({ message, task });
   });
 

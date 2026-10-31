@@ -8,6 +8,7 @@ export function toWorkflow(record: WorkflowRecord): Workflow {
   const workflow: Workflow = { id: record.id, name: record.name, entryStepId: record.entryStepId, steps: record.steps, edges: record.edges };
   if (record.description !== undefined) workflow.description = record.description;
   if (record.troubleshootStep !== undefined) workflow.troubleshootStep = record.troubleshootStep;
+  if (record.mobilePlatforms !== undefined) workflow.mobilePlatforms = record.mobilePlatforms;
   return snapshotWorkflow(workflow);
 }
 
