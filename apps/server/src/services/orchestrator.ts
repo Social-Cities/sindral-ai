@@ -13,6 +13,9 @@ import {
   removeMarkdownSection,
   snapshotWorkflow,
   selectMobilePlatforms,
+  resolveMobileTaskPlatforms,
+  type AppPlatform,
+  type Project,
   mobileBddGate,
   BDD_PLAN_ARTIFACT,
   BDD_PLAN_MARKDOWN,
@@ -164,6 +167,8 @@ export class Orchestrator {
     }
     const key = input.key ?? `SIN-${await this.repo.nextTaskNumber(userId)}`;
     const projectRepos = project?.repositories.map((repo) => repo.repository) ?? [];
+    const taskWorkflow = workflowId ? await this.workflows.get(userId, workflowId) : null;
+    const platforms = this.resolveTaskPlatformSelection(taskWorkflow, input.platforms, project);
     const repos = project ? (input.repos.length > 0 ? input.repos : projectRepos) : input.repos;
     if (project) {
       const allowed = new Set(projectRepos);
@@ -182,6 +187,7 @@ export class Orchestrator {
       title: input.title,
       description: input.description,
       projectId: project?.id ?? null,
+      platforms,
       outcome: importedContract.outcome ?? '',
       acceptanceCriteria: importedContract.acceptanceCriteria ?? '',
       state: 'todo',
@@ -231,8 +237,9 @@ export class Orchestrator {
     const changes: Parameters<Repository['updateTask']>[2] = {};
     if (patch.title !== undefined) changes.title = patch.title;
     if (patch.description !== undefined) changes.description = patch.description;
-    if (patch.repos !== undefined || patch.workflowId !== undefined || patch.projectId !== undefined) {
+    if (patch.repos !== undefined || patch.workflowId !== undefined || patch.projectId !== undefined || patch.platforms !== undefined) {
       if (task.state !== 'todo') throw conflict('Repositories and workflow can only be changed while the task is in todo');
+      if (patch.platforms !== undefined && task.pinnedWorkflow) throw conflict('Platforms are pinned once work starts; create a new task to change scope');
       let projectRepos: string[] | null = null;
       if (patch.projectId !== undefined) {
         if (patch.projectId === null) {
@@ -267,6 +274,15 @@ export class Orchestrator {
           changes.workflowId = wf.id;
         }
       }
+      const projectId = changes.projectId !== undefined ? changes.projectId : task.projectId;
+      const workflowId = changes.workflowId !== undefined ? changes.workflowId : task.workflowId;
+      const [project, workflow] = await Promise.all([
+        projectId ? this.repo.getProject(userId, projectId) : null,
+        workflowId ? this.workflows.get(userId, workflowId) : null,
+      ]);
+      const scopeChanged = (patch.workflowId !== undefined && patch.workflowId !== task.workflowId) || (patch.projectId !== undefined && patch.projectId !== task.projectId);
+      const requested = patch.platforms !== undefined ? patch.platforms : scopeChanged ? undefined : task.platforms;
+      changes.platforms = this.resolveTaskPlatformSelection(workflow, requested, project);
     }
     const updated = await this.repo.updateTask(userId, id, changes);
     if (!updated) throw notFound('Task');
@@ -321,8 +337,13 @@ export class Orchestrator {
     if (!workflow.mobilePlatforms) return workflow;
     if (task.repos.length !== 1) throw badRequest('Mobile App SDLC requires one monorepo repository');
     const project = task.projectId ? await this.repo.getProject(userId, task.projectId) : null;
-    const platforms = task.pinnedWorkflow?.mobilePlatforms ?? (project?.projectType === 'mobile-app' ? project.platforms : workflow.mobilePlatforms);
+    const platforms = task.pinnedWorkflow?.mobilePlatforms ?? task.platforms ?? (project?.projectType === 'mobile-app' ? project.platforms : workflow.mobilePlatforms);
     return selectMobilePlatforms(workflow, platforms);
+  }
+
+  private resolveTaskPlatformSelection(workflow: Workflow | null, requested: AppPlatform[] | null | undefined, project: Project | null): AppPlatform[] | null {
+    try { return resolveMobileTaskPlatforms(workflow, requested, project); }
+    catch (error) { throw badRequest(error instanceof Error ? error.message : 'Invalid task platform selection'); }
   }
 
   private async latestBddPlan(userId: string, taskId: string): Promise<BddPlanResult | null> {

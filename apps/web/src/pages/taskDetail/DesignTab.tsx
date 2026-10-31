@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
-import type { DesignResult, TaskWithRelations, Workflow } from '@sindral/shared';
+import { mobileTaskPlatformOptions, type AppPlatform, type DesignResult, type TaskWithRelations, type Workflow } from '@sindral/shared';
 import { Button } from '@/components/Button';
 import { Markdown } from '@/components/Markdown';
 import { Modal } from '@/components/Modal';
 import { ExternalLink } from '@/components/ExternalLink';
+import { TaskPlatformSelector } from '@/components/TaskPlatformSelector';
 import { useProjects } from '@/hooks/useProjects';
 import { useWorkflows } from '@/hooks/useWorkflows';
 import { queryKeys } from '@/hooks/queryKeys';
@@ -39,16 +40,24 @@ export function DesignTab({ task, workflow, userInitial, onSend, sending, error,
   const [repos, setRepos] = useState(task.repos.join(', '));
   const [projectId, setProjectId] = useState(task.projectId ?? '');
   const [workflowId, setWorkflowId] = useState('');
+  const [platforms, setPlatforms] = useState<AppPlatform[] | null>(null);
   const handoffKey = useRef(crypto.randomUUID());
   const projects = useProjects();
   const workflows = useWorkflows();
   const implementationWorkflows = (workflows.data ?? []).filter((item) => item.steps.some((step) => ['implementation', 'pr', 'review-slice'].includes(step.output ?? '')));
+  const project = projects.data?.find((item) => item.id === projectId);
+  const defaultWorkflow = (project?.projectType === 'mobile-app' ? implementationWorkflows.find((item) => item.mobilePlatforms) : null) ?? implementationWorkflows[0];
+  const selectedWorkflow = implementationWorkflows.find((item) => item.id === workflowId) ?? defaultWorkflow;
+  const mobile = Boolean(selectedWorkflow?.mobilePlatforms);
+  const selectedPlatforms = platforms ?? (project?.projectType === 'mobile-app' ? project.platforms : selectedWorkflow?.mobilePlatforms ?? []);
+  useEffect(() => { setPlatforms(null); }, [projectId, workflowId]);
   const revisions = overview.data?.revisions ?? [];
   const selected = revisions.find((revision) => revision.id === selectedId) ?? revisions.at(-1);
   const revision = useQuery({ queryKey: [...overviewKey, selected?.id ?? ''], queryFn: () => getDesignRevision(task.id, selected!.id), enabled: Boolean(selected), refetchInterval: 240_000 });
   const input = overview.data?.input;
   const result = revision.data?.revision.result ?? input?.result;
   const revisionId = selected?.id ?? input?.revisionId;
+  useEffect(() => { handoffKey.current = crypto.randomUUID(); }, [title, scope, repos, projectId, workflowId, platforms, revisionId]);
   const approvedAt = selected ? selected.approvedAt : input?.approvedAt ?? null;
   const previewUrls = selected ? revision.data?.previewUrls : overview.data?.inputPreviewUrls;
   const isInput = Boolean(input && !selected);
@@ -60,7 +69,8 @@ export function DesignTab({ task, workflow, userInitial, onSend, sending, error,
   const handoff = useMutation({
     mutationFn: () => createTask({
       title, description: `${scope}\n\nApproved design revision: ${revisionId}\n\n${result?.specification ?? ''}`.slice(0, 100_000),
-      repos: repos.split(/[,\s]+/).filter(Boolean), workflowId: workflowId || implementationWorkflows[0]?.id,
+      repos: repos.split(/[,\s]+/).filter(Boolean), workflowId: selectedWorkflow?.id,
+      ...(mobile ? { platforms: selectedPlatforms } : {}),
       ...(projectId ? { projectId } : {}), designHandoff: { revisionId: revisionId!, idempotencyKey: handoffKey.current },
     }),
     onSuccess: ({ task: created }) => { void qc.invalidateQueries({ queryKey: queryKeys.tasks }); navigate(`/tasks/${created.id}`); },
@@ -118,9 +128,10 @@ export function DesignTab({ task, workflow, userInitial, onSend, sending, error,
           <label className="block space-y-1 text-xs">Implementation scope<textarea className={inputClass} rows={3} value={scope} onChange={(event) => setScope(event.target.value)} /></label>
           <label className="block space-y-1 text-xs">Project<select className={inputClass} value={projectId} onChange={(event) => { setProjectId(event.target.value); const project = projects.data?.find((item) => item.id === event.target.value); if (project) setRepos(project.repositories.map((item) => item.repository).join(', ')); }}><option value="">No project</option>{projects.data?.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
           <label className="block space-y-1 text-xs">Repositories<input className={inputClass} placeholder="owner/app, owner/api" value={repos} onChange={(event) => setRepos(event.target.value)} /></label>
-          <label className="block space-y-1 text-xs">Workflow<select className={inputClass} value={workflowId || implementationWorkflows[0]?.id || ''} onChange={(event) => setWorkflowId(event.target.value)}>{implementationWorkflows.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+          <label className="block space-y-1 text-xs">Workflow<select className={inputClass} value={selectedWorkflow?.id || ''} onChange={(event) => setWorkflowId(event.target.value)}>{implementationWorkflows.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+          {mobile && <TaskPlatformSelector value={selectedPlatforms} available={mobileTaskPlatformOptions(selectedWorkflow)} onChange={setPlatforms} />}
           {handoff.error && <p role="alert" className="text-sm text-destructive">{handoff.error.message}</p>}
-          <Button disabled={!title.trim() || !repos.trim() || !implementationWorkflows.length} loading={handoff.isPending} onClick={() => handoff.mutate()}>Create task</Button>
+          <Button disabled={!title.trim() || !repos.trim() || !implementationWorkflows.length || (mobile && !selectedPlatforms.length)} loading={handoff.isPending} onClick={() => handoff.mutate()}>Create task</Button>
         </div>
       </Modal>
     </div>

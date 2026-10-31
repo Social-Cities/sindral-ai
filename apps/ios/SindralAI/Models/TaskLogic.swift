@@ -51,13 +51,18 @@ protocol TaskLike {
     var currentStepId: String? { get }
     var workflowId: String? { get }
     var pinnedWorkflow: Workflow? { get }
+    var platforms: [String]? { get }
 }
 
 extension SindralTask: TaskLike {}
 extension TaskDetail: TaskLike {}
 
 extension TaskLike {
-    func resolvedWorkflow(_ workflows: [Workflow]) -> Workflow? { pinnedWorkflow ?? workflows.first { $0.id == workflowId } }
+    func resolvedWorkflow(_ workflows: [Workflow]) -> Workflow? {
+        if let pinnedWorkflow { return pinnedWorkflow }
+        guard let live = workflows.first(where: { $0.id == workflowId }) else { return nil }
+        return live.mobilePlatforms == nil ? live : live.selectingPlatforms(platforms ?? live.mobilePlatforms ?? [])
+    }
 
     func currentStep(_ workflows: [Workflow]) -> WorkflowStep? {
         guard let workflow = resolvedWorkflow(workflows) else { return nil }
@@ -149,5 +154,45 @@ enum Formatters {
         if hour < 12 { return "Good morning" }
         if hour < 18 { return "Good afternoon" }
         return "Good evening"
+    }
+}
+
+
+/// Pure platform scope helpers shared by task forms and pipeline previews.
+enum TaskPlatformSelection {
+    static let all = ["ios", "android", "web"]
+    static func options(workflow: Workflow?, project _: Project?) -> [String] {
+        guard let workflow, workflow.mobilePlatforms != nil else { return [] }
+        return all.filter { platform in
+            workflow.steps.contains { $0.platform == platform }
+        }
+    }
+    static func values(_ selected: [String]?, workflow: Workflow?, project: Project?) -> [String] {
+        let preferred = selected ?? (project?.projectType == "mobile-app" ? project?.platforms : workflow?.mobilePlatforms) ?? []
+        return options(workflow: workflow, project: project).filter { preferred.contains($0) }
+    }
+}
+
+extension Workflow {
+    func selectingPlatforms(_ platforms: [String]) -> Workflow {
+        guard mobilePlatforms != nil, !platforms.isEmpty else { return self }
+        let removed = Set(steps.filter { step in step.platform.map { !platforms.contains($0) } ?? false }.map(\.id))
+        func redirect(_ target: String) -> String {
+            var target = target
+            var seen = Set<String>()
+            while removed.contains(target), !seen.contains(target) {
+                seen.insert(target)
+                guard let next = edges.first(where: { $0.from == target && $0.event == "complete" }) else { break }
+                target = next.to
+            }
+            return target
+        }
+        var selected = self
+        selected.mobilePlatforms = TaskPlatformSelection.all.filter { platforms.contains($0) }
+        selected.steps = steps.filter { !removed.contains($0.id) }
+        selected.edges = edges.filter { !removed.contains($0.from) }.map { edge in
+            var edge = edge; edge.to = redirect(edge.to); return edge
+        }
+        return selected
     }
 }

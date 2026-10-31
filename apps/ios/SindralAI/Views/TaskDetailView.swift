@@ -1224,8 +1224,9 @@ private struct JobLogsView: View {
 private struct EditTaskView: View {
     @Environment(\.dismiss) private var dismiss; @Environment(APIClient.self) private var api; @Environment(AppStore.self) private var store
     let task: SindralTask; let didSave: () async -> Void
+    @State private var platforms: [String]?
     @State private var title: String; @State private var description: String; @State private var projectID: String; @State private var repos: String; @State private var workflowID: String; @State private var saving = false
-    init(task: SindralTask, didSave: @escaping () async -> Void) { self.task = task; self.didSave = didSave; _title = State(initialValue: task.title); _description = State(initialValue: task.description); _projectID = State(initialValue: task.projectId ?? ""); _repos = State(initialValue: task.repos.joined(separator: ", ")); _workflowID = State(initialValue: task.workflowId ?? "") }
+    init(task: SindralTask, didSave: @escaping () async -> Void) { self.task = task; self.didSave = didSave; _title = State(initialValue: task.title); _description = State(initialValue: task.description); _projectID = State(initialValue: task.projectId ?? ""); _repos = State(initialValue: task.repos.joined(separator: ", ")); _workflowID = State(initialValue: task.workflowId ?? ""); _platforms = State(initialValue: task.platforms) }
     var body: some View {
         NavigationStack {
             Form {
@@ -1237,12 +1238,18 @@ private struct EditTaskView: View {
                 }
                 TextField("Repositories", text: $repos).font(Theme.mono(14)).textInputAutocapitalization(.never)
                 Picker("Workflow", selection: $workflowID) { Text("Default").tag(""); ForEach(store.workflows) { Text($0.name).tag($0.id) } }
+                if let workflow = store.workflows.first(where: { $0.id == workflowID }), workflow.mobilePlatforms != nil {
+                    TaskPlatformSelector(selection: $platforms, workflow: workflow, project: store.projects.first { $0.id == projectID })
+                        .disabled(task.state != "todo" || task.pinnedWorkflow != nil)
+                }
             }
+            .onChange(of: projectID) { platforms = nil }
+            .onChange(of: workflowID) { platforms = nil }
             .themedList()
             .navigationTitle("Edit task")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Save") { Task { await save() } }.disabled(title.isEmpty || saving) }
+                ToolbarItem(placement: .confirmationAction) { Button("Save") { Task { await save() } }.disabled(title.isEmpty || saving || platforms?.isEmpty == true) }
             }
         }
     }
@@ -1253,7 +1260,7 @@ private struct EditTaskView: View {
             if let project = store.projects.first(where: { $0.id == projectID }), resolvedRepos.isEmpty {
                 resolvedRepos = project.repositories.map(\.repository)
             }
-            _ = try await api.updateTask(task.id, title: title, description: description, projectId: projectID.isEmpty ? nil : projectID, repos: resolvedRepos, workflowId: workflowID.isEmpty ? nil : workflowID)
+            _ = try await api.updateTask(task.id, title: title, description: description, projectId: projectID.isEmpty ? nil : projectID, repos: resolvedRepos, workflowId: workflowID.isEmpty ? nil : workflowID, platforms: task.state == "todo" ? platforms : nil)
             await store.refreshTasks()
             await didSave()
             dismiss()

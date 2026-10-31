@@ -93,6 +93,7 @@ export const updateProjectSchema = z.object({
 });
 
 export const createTaskSchema = z.object({
+  platforms: appPlatformsSchema.optional(),
   title: shortText,
   description: longText.default(''),
   ticketUrl: z.string().url().max(2000).optional(),
@@ -108,6 +109,7 @@ export const createTaskSchema = z.object({
 });
 
 export const updateTaskSchema = z.object({
+  platforms: appPlatformsSchema.nullable().optional(),
   title: shortText.optional(),
   description: longText.optional(),
   projectId: z.string().uuid().nullable().optional(),

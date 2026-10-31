@@ -148,3 +148,25 @@ struct EmptyPane: View {
 extension String {
     var commaSeparated: [String] { split { $0 == "," || $0.isWhitespace }.map(String.init).filter { !$0.isEmpty } }
 }
+
+
+struct TaskPlatformSelector: View {
+    @Binding var selection: [String]?
+    let workflow: Workflow?
+    let project: Project?
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Platforms for this task").font(Theme.bodyMedium)
+            ForEach(TaskPlatformSelection.options(workflow: workflow, project: project), id: \.self) { platform in
+                Toggle(platform == "ios" ? "iOS" : platform.capitalized, isOn: Binding(get: {
+                    TaskPlatformSelection.values(selection, workflow: workflow, project: project).contains(platform)
+                }, set: { enabled in
+                    let current = TaskPlatformSelection.values(selection, workflow: workflow, project: project)
+                    selection = enabled ? current + [platform] : current.filter { $0 != platform }
+                }))
+            }
+            Text("Only selected platforms run, in iOS → Android → Web order. Selection is locked when work starts.")
+                .font(Theme.secondaryBody).foregroundStyle(Theme.mutedForeground)
+        }
+    }
+}

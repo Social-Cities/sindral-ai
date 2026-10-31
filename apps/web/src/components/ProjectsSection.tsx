@@ -142,11 +142,11 @@ export function ProjectsSection() {
         </label>
         {projectType === 'mobile-app' && (
           <fieldset className="space-y-2">
-            <legend className="label-caps">Supported platforms</legend>
+            <legend className="label-caps">Default task platforms</legend>
             <div className="flex gap-4">
               {APP_PLATFORMS.map((platform) => <label key={platform} className="flex gap-2 text-xs"><input type="checkbox" checked={platforms.includes(platform)} onChange={() => setPlatforms((current) => current.includes(platform) ? current.filter((item) => item !== platform) : [...current, platform])} />{platform === 'ios' ? 'iOS' : platform === 'android' ? 'Android' : 'Web'}</label>)}
             </div>
-            <p className="text-xs text-muted-foreground">One monorepo with ios/, android/, and web/ folders and a shared Supabase backend. Selected apps are implemented in that order using SwiftUI, Kotlin / Jetpack Compose, and React.</p>
+            <p className="text-xs text-muted-foreground">Defaults for new tasks; each task can choose any combination. One monorepo with ios/, android/, and web/ folders and a shared Supabase backend. Selected apps are implemented in that order using SwiftUI, Kotlin / Jetpack Compose, and React.</p>
           </fieldset>
         )}
         <div className="inline-flex rounded-md border border-border bg-input p-1" aria-label="Repository source">

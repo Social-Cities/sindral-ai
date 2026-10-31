@@ -336,14 +336,18 @@ private struct DesignImplementationSheet: View {
     @State private var repos = ""
     @State private var projectID = ""
     @State private var workflowID = ""
+    @State private var platforms: [String]?
     @State private var creating = false
     @State private var errorMessage: String?
     @State private var requestKey = UUID().uuidString
     @State private var lastPayload: String?
     private var workflows: [Workflow] { store.workflows.filter(\.supportsImplementation) }
+    private var selectedWorkflow: Workflow? { workflows.first { $0.id == workflowID } }
+    private var selectedProject: Project? { store.projects.first { $0.id == projectID } }
+    private var selectedPlatforms: [String]? { selectedWorkflow?.mobilePlatforms == nil ? nil : TaskPlatformSelection.values(platforms, workflow: selectedWorkflow, project: selectedProject) }
     private var canCreate: Bool {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && title.count <= 200
-            && (!repos.commaSeparated.isEmpty || !projectID.isEmpty) && workflows.contains { $0.id == workflowID }
+            && (!repos.commaSeparated.isEmpty || !projectID.isEmpty) && workflows.contains { $0.id == workflowID } && selectedPlatforms?.isEmpty != true
     }
 
     var body: some View {
@@ -361,6 +365,7 @@ private struct DesignImplementationSheet: View {
                         ForEach(store.projects) { Text($0.name).tag($0.id) }
                     }
                     .onChange(of: projectID) { _, id in
+                        platforms = nil
                         if let project = store.projects.first(where: { $0.id == id }) { repos = project.repositories.map(\.repository).joined(separator: ", ") }
                     }
                     TextField("Repositories: owner/app, owner/api", text: $repos)
@@ -369,6 +374,7 @@ private struct DesignImplementationSheet: View {
                     Picker("Workflow", selection: $workflowID) {
                         ForEach(workflows) { Text($0.name).tag($0.id) }
                     }
+                    if selectedWorkflow?.mobilePlatforms != nil { TaskPlatformSelector(selection: $platforms, workflow: selectedWorkflow, project: selectedProject) }
                     if workflows.isEmpty { Text("Add an implementation workflow before creating this task.").foregroundStyle(Theme.warning) }
                 }
                 Section {
@@ -383,11 +389,12 @@ private struct DesignImplementationSheet: View {
             .themedList()
             .navigationTitle("Implement design").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(creating) } }
+            .onChange(of: workflowID) { platforms = nil }
             .onAppear {
                 title = String("Implement \(task.title)".prefix(200))
                 repos = task.repos.joined(separator: ", ")
                 projectID = task.projectId ?? ""
-                workflowID = workflows.first?.id ?? ""
+                workflowID = (selectedProject?.projectType == "mobile-app" ? workflows.first { $0.mobilePlatforms != nil } : workflows.first)?.id ?? ""
             }
         }
         .interactiveDismissDisabled(creating)
@@ -402,7 +409,7 @@ private struct DesignImplementationSheet: View {
         }
         let description = String("\(scope)\n\nApproved design revision: \(revision.id)\n\n\(revision.result.specification)".prefix(100_000))
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let payload = [trimmedTitle, description, projectID, workflowID, normalized.joined(separator: ",")].joined(separator: "\u{0}")
+        let payload = [trimmedTitle, description, projectID, workflowID, normalized.joined(separator: ","), selectedPlatforms?.joined(separator: ",") ?? ""].joined(separator: "\u{0}")
         if let lastPayload, lastPayload != payload { requestKey = UUID().uuidString }
         lastPayload = payload
         creating = true; errorMessage = nil
@@ -410,7 +417,7 @@ private struct DesignImplementationSheet: View {
         do {
             let created = try await api.createTask(title: trimmedTitle, description: description, ticket: nil,
                 projectId: projectID.isEmpty ? nil : projectID, repos: Array(Set(normalized)).sorted(), workflowId: workflowID,
-                designHandoff: .init(revisionId: revision.id, idempotencyKey: requestKey))
+                designHandoff: .init(revisionId: revision.id, idempotencyKey: requestKey), platforms: selectedPlatforms)
             await store.refreshTasks()
             dismiss()
             router.openTask(created.id)

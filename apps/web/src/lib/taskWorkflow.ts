@@ -1,13 +1,16 @@
 import type { Task, Workflow, WorkflowStep } from '@sindral/shared';
-import { getStep } from '@sindral/shared';
+import { getStep, selectMobilePlatforms } from '@sindral/shared';
 
 /**
  * Resolve the workflow a task runs on: the pinned snapshot when one exists,
  * otherwise the live workflow referenced by `workflowId`.
  */
-export function resolveWorkflow(task: Pick<Task, 'pinnedWorkflow' | 'workflowId'>, workflows: readonly Workflow[]): Workflow | null {
+export function resolveWorkflow(task: Pick<Task, 'pinnedWorkflow' | 'workflowId'> & Partial<Pick<Task, 'platforms'>>, workflows: readonly Workflow[]): Workflow | null {
   if (task.pinnedWorkflow) return task.pinnedWorkflow;
-  if (task.workflowId) return workflows.find((w) => w.id === task.workflowId) ?? null;
+  if (task.workflowId) {
+    const workflow = workflows.find((w) => w.id === task.workflowId) ?? null;
+    return workflow?.mobilePlatforms ? selectMobilePlatforms(workflow, task.platforms ?? workflow.mobilePlatforms) : workflow;
+  }
   return null;
 }
 

@@ -30,15 +30,16 @@ select throws_ok($$select public.design_session_command('31000000-0000-4000-8000
 
 insert into public.design_revisions(id,user_id,task_id,job_id,result) values
 ('37000000-0000-4000-8000-000000000007','31000000-0000-4000-8000-000000000001','33000000-0000-4000-8000-000000000003','34000000-0000-4000-8000-000000000004','{"kind":"design","specification":"Approved dashboard"}');
-select throws_ok($$select public.create_design_implementation_task('31000000-0000-4000-8000-000000000001','{"key":"BUILD-1","title":"Implement","repos":[]}',
+select throws_ok($$select public.create_design_implementation_task('31000000-0000-4000-8000-000000000001','{"key":"BUILD-1","title":"Implement","repos":[],"platforms":["ios","web"]}',
 '37000000-0000-4000-8000-000000000007','38000000-0000-4000-8000-000000000008','hash')$$,'23505','Approve this design revision before creating an implementation task','requires explicit approval');
 update public.tasks set state='design-review', version=1 where id='33000000-0000-4000-8000-000000000003';
 select throws_ok($$select public.approve_design_revision('31000000-0000-4000-8000-000000000001','33000000-0000-4000-8000-000000000003','37000000-0000-4000-8000-000000000007',0)$$,'23505','Design changed; refresh before approving','rejects a stale approval');
 select ok(public.approve_design_revision('31000000-0000-4000-8000-000000000001','33000000-0000-4000-8000-000000000003','37000000-0000-4000-8000-000000000007',1)->>'approved_at' is not null,'records the approved revision');
-select lives_ok($$select public.create_design_implementation_task('31000000-0000-4000-8000-000000000001','{"key":"BUILD-1","title":"Implement","repos":[]}',
+select lives_ok($$select public.create_design_implementation_task('31000000-0000-4000-8000-000000000001','{"key":"BUILD-1","title":"Implement","repos":[],"platforms":["ios","web"]}',
 '37000000-0000-4000-8000-000000000007','38000000-0000-4000-8000-000000000008','hash')$$,'atomically creates an implementation and its snapshot');
-select lives_ok($$select public.create_design_implementation_task('31000000-0000-4000-8000-000000000001','{"key":"BUILD-1","title":"Implement","repos":[]}',
+select lives_ok($$select public.create_design_implementation_task('31000000-0000-4000-8000-000000000001','{"key":"BUILD-1","title":"Implement","repos":[],"platforms":["ios","web"]}',
 '37000000-0000-4000-8000-000000000007','38000000-0000-4000-8000-000000000008','hash')$$,'replays creation without another task');
+select is((select to_jsonb(platforms) from public.tasks where user_id='31000000-0000-4000-8000-000000000001' and key='BUILD-1'),'["ios","web"]'::jsonb,'design handoff preserves selected task platforms');
 select is((select count(*) from public.tasks where user_id='31000000-0000-4000-8000-000000000001' and key='BUILD-1'),1::bigint,'keeps one implementation task');
 delete from public.tasks where id='33000000-0000-4000-8000-000000000003';
 select is((select snapshot->'result'->>'specification' from public.design_handoffs where user_id='31000000-0000-4000-8000-000000000001'),'Approved dashboard','source deletion preserves the frozen handoff');

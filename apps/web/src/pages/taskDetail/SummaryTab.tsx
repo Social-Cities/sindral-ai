@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { TaskWithRelations, Workflow } from '@sindral/shared';
 import { getStateStyle, getStep, isAgentActive } from '@sindral/shared';
 import { Markdown } from '@/components/Markdown';
@@ -13,6 +14,7 @@ interface SummaryTabProps {
   approving: boolean;
   onApprove: () => void;
   onViewPlan: () => void;
+  platformSelector?: ReactNode;
 }
 
 const PLAN_FIELDS: { key: keyof PlanOverview; label: string }[] = [
@@ -21,7 +23,7 @@ const PLAN_FIELDS: { key: keyof PlanOverview; label: string }[] = [
   { key: 'verification', label: 'Verification' },
 ];
 
-export function SummaryTab({ task, workflow, canApprove, approving, onApprove, onViewPlan }: SummaryTabProps) {
+export function SummaryTab({ task, workflow, canApprove, approving, onApprove, onViewPlan, platformSelector }: SummaryTabProps) {
   const agentActive = isAgentActive(task, workflow);
   const step = workflow ? getStep(workflow, task.currentStepId ?? workflow.entryStepId) : null;
   const style = getStateStyle(task.state, step);
@@ -30,6 +32,7 @@ export function SummaryTab({ task, workflow, canApprove, approving, onApprove, o
   return (
     <div className="overflow-y-auto h-full p-6">
       <div className="max-w-4xl space-y-6">
+        {platformSelector}
         {agentActive && (
           <div className="flex items-start gap-3 p-4 rounded-lg" style={{ background: 'color-mix(in srgb, var(--color-warning) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--color-warning) 14%, transparent)' }}>
             <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse mt-1.5 shrink-0" aria-hidden="true" />

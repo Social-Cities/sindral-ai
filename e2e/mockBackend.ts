@@ -4,6 +4,7 @@ import {
   FULL_SDLC_WORKFLOW,
   snapshotWorkflow,
   transition,
+  selectMobilePlatforms,
   type Artifact,
   type CreateTaskInput,
   type Job,
@@ -42,6 +43,7 @@ export function makeTask(overrides: Partial<TaskWithRelations> = {}): TaskWithRe
     title: 'Harden stacked branch delivery',
     description: 'Implement the approved delivery plan.',
     projectId: null,
+    platforms: null,
     outcome: 'Stacked branches can be delivered safely.',
     acceptanceCriteria: '- Every branch is rebased and reviewable.',
     state: 'todo',
@@ -237,6 +239,7 @@ export async function installMockBackend(page: Page, options: MockBackendOptions
         title: input.title,
         description: input.description ?? '',
         projectId: input.projectId ?? null,
+        platforms: input.platforms ?? null,
         outcome: '',
         acceptanceCriteria: '',
         repos: input.repos ?? [],
@@ -255,7 +258,8 @@ export async function installMockBackend(page: Page, options: MockBackendOptions
       const task = state.tasks.find((item) => item.id === actionMatch[1]);
       if (!task) return json(route, { error: { code: 'NOT_FOUND', message: 'Task not found' } }, 404);
       const event = (body as { event: string }).event;
-      const workflow = task.pinnedWorkflow ?? workflows.find((item) => item.id === task.workflowId) ?? FULL_SDLC_WORKFLOW;
+      const live = workflows.find((item) => item.id === task.workflowId) ?? FULL_SDLC_WORKFLOW;
+      const workflow = task.pinnedWorkflow ?? (live.mobilePlatforms ? selectMobilePlatforms(live, task.platforms ?? live.mobilePlatforms) : live);
       const next = transition(task, workflow, event);
       Object.assign(task, { state: next.nextState, currentStepId: next.nextStepId, failedStepId: next.failedStepId, version: task.version + 1 });
       if (!task.pinnedWorkflow) task.pinnedWorkflow = snapshotWorkflow(workflow);
@@ -293,6 +297,12 @@ export async function installMockBackend(page: Page, options: MockBackendOptions
       return json(route, { files: options.diffs?.[repository] ?? [{ filename: 'src/index.ts', status: 'modified', additions: 2, deletions: 1, patch: '@@ -1 +1 @@\n-old\n+new' }] });
     }
     const taskMatch = path.match(/^\/api\/tasks\/([^/]+)$/);
+    if (taskMatch && method === 'PATCH') {
+      const task = state.tasks.find((item) => item.id === taskMatch[1]);
+      if (!task) return json(route, { error: { code: 'NOT_FOUND', message: 'Task not found' } }, 404);
+      Object.assign(task, body);
+      return json(route, { task });
+    }
     if (taskMatch && method === 'GET') {
       const task = state.tasks.find((item) => item.id === taskMatch[1]);
       return task ? json(route, { task }) : json(route, { error: { code: 'NOT_FOUND', message: 'Task not found' } }, 404);
