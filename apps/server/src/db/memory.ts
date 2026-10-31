@@ -348,6 +348,7 @@ export class MemoryRepository implements Repository {
       title: input.title,
       description: input.description,
       projectId: input.projectId,
+      platforms: input.platforms ? [...input.platforms] : null,
       outcome: input.outcome,
       acceptanceCriteria: input.acceptanceCriteria,
       state: input.state,
@@ -399,6 +400,7 @@ export class MemoryRepository implements Repository {
   async updateTask(userId: string, id: string, patch: TaskPatch): Promise<Task | null> {
     const t = this.tasks.get(id);
     if (!t || t.userId !== userId) return null;
+    if (patch.platforms !== undefined && (t.state !== 'todo' || t.pinnedWorkflow)) throw new ConflictError('Platform scope is locked once work starts');
     Object.assign(t, clone(patch), { updatedAt: this.now() });
     return clone(t);
   }

@@ -67,10 +67,10 @@ final class APIClient {
 
     func listTasks() async throws -> [SindralTask] { let response: TasksResponse = try await request("api/tasks"); return response.tasks }
     func task(_ id: String) async throws -> TaskDetail { let response: TaskResponse<TaskDetail> = try await request("api/tasks/\(id)"); return response.task }
-    func createTask(title: String, description: String, ticket: TicketImport?, projectId: String? = nil, repos: [String], workflowId: String?, newRepository: NewGitHubRepository? = nil, designHandoff: DesignHandoffRequest? = nil) async throws -> SindralTask {
-        struct Body: Encodable { let title: String; let description: String; let ticketUrl: String?; let key: String?; let projectId: String?; let workflowId: String?; let repos: [String]; let newRepository: NewGitHubRepository?; let designHandoff: DesignHandoffRequest? }
+    func createTask(title: String, description: String, ticket: TicketImport?, projectId: String? = nil, repos: [String], workflowId: String?, newRepository: NewGitHubRepository? = nil, designHandoff: DesignHandoffRequest? = nil, platforms: [String]? = nil) async throws -> SindralTask {
+        struct Body: Encodable { let title: String; let description: String; let ticketUrl: String?; let key: String?; let projectId: String?; let workflowId: String?; let repos: [String]; let newRepository: NewGitHubRepository?; let designHandoff: DesignHandoffRequest?; let platforms: [String]? }
         let key = ticket.flatMap { $0.id.range(of: "^[A-Z][A-Z0-9]*-[0-9]+$", options: .regularExpression) == nil ? nil : $0.id }
-        let response: TaskResponse<SindralTask> = try await request("api/tasks", method: "POST", body: Body(title: title, description: description, ticketUrl: ticket?.url, key: key, projectId: projectId, workflowId: workflowId, repos: repos, newRepository: newRepository, designHandoff: designHandoff)); return response.task
+        let response: TaskResponse<SindralTask> = try await request("api/tasks", method: "POST", body: Body(title: title, description: description, ticketUrl: ticket?.url, key: key, projectId: projectId, workflowId: workflowId, repos: repos, newRepository: newRepository, designHandoff: designHandoff, platforms: platforms)); return response.task
     }
     func design(taskId: String) async throws -> DesignOverview { try await request("api/tasks/\(taskId)/design") }
     func designRevision(taskId: String, revisionId: String) async throws -> DesignRevisionView {
@@ -82,9 +82,9 @@ final class APIClient {
         let response: Response = try await request("api/tasks/\(taskId)/design/approve", method: "POST", body: Body(revisionId: revisionId, expectedVersion: expectedVersion))
         return response.revision
     }
-    func updateTask(_ id: String, title: String, description: String, projectId: String?, repos: [String], workflowId: String?) async throws -> SindralTask {
-        struct Body: Encodable { let title: String; let description: String; let projectId: String?; let repos: [String]; let workflowId: String? }
-        let response: TaskResponse<SindralTask> = try await request("api/tasks/\(id)", method: "PATCH", body: Body(title: title, description: description, projectId: projectId, repos: repos, workflowId: workflowId)); return response.task
+    func updateTask(_ id: String, title: String, description: String, projectId: String?, repos: [String], workflowId: String?, platforms: [String]? = nil) async throws -> SindralTask {
+        struct Body: Encodable { let title: String; let description: String; let projectId: String?; let repos: [String]; let workflowId: String?; let platforms: [String]? }
+        let response: TaskResponse<SindralTask> = try await request("api/tasks/\(id)", method: "PATCH", body: Body(title: title, description: description, projectId: projectId, repos: repos, workflowId: workflowId, platforms: platforms)); return response.task
     }
     func deleteTask(_ id: String) async throws { let _: EmptyResponse = try await request("api/tasks/\(id)", method: "DELETE") }
     func runAction(task: SindralTask, event: String) async throws -> SindralTask {

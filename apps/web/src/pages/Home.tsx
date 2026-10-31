@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, KeyboardEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
-import type { CreateTaskInput, TicketImport, Worker } from '@sindral/shared';
-import { TERMINAL_STATES, dashboardBucket, detectTicket, normalizeRepo } from '@sindral/shared';
+import type { AppPlatform, CreateTaskInput, TicketImport, Worker } from '@sindral/shared';
+import { TERMINAL_STATES, dashboardBucket, detectTicket, normalizeRepo, mobileTaskPlatformOptions } from '@sindral/shared';
 import { displayNameFor, useAuth } from '@/auth/AuthProvider';
 import { ProjectsSection } from '@/components/ProjectsSection';
+import { TaskPlatformSelector } from '@/components/TaskPlatformSelector';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Button } from '@/components/Button';
 import { useCreateTask, useTasks } from '@/hooks/useTasks';
@@ -42,6 +43,7 @@ export function Home() {
   const [reposInput, setReposInput] = useState('');
   const [projectId, setProjectId] = useState('');
   const [workflowId, setWorkflowId] = useState('');
+  const [platforms, setPlatforms] = useState<AppPlatform[] | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [uploadNote, setUploadNote] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -54,6 +56,12 @@ export function Home() {
   const tasks = useMemo(() => tasksQuery.data ?? [], [tasksQuery.data]);
   const selectedProject = projects.find((project) => project.id === projectId) ?? null;
   const selectedProjectType = selectedProject?.projectType;
+  const selectedWorkflow = workflows.find((workflow) => workflow.id === workflowId);
+  const mobile = mode !== 'design' && Boolean(selectedWorkflow?.mobilePlatforms);
+  const platformOptions = mobileTaskPlatformOptions(selectedWorkflow);
+  const platformDefaults = selectedProjectType === 'mobile-app' ? selectedProject!.platforms : selectedWorkflow?.mobilePlatforms ?? [];
+  const selectedPlatforms = platforms ?? platformDefaults;
+  useEffect(() => { setPlatforms(null); }, [projectId, workflowId]);
   const repositoryChoices = selectedProject
     ? selectedProject.repositories.map((repository) => repository.repository)
     : (githubCatalog.data?.repositories.map((repository) => repository.fullName) ?? []);
@@ -71,13 +79,6 @@ export function Home() {
     }
     workflowProjectRef.current = selectionKey;
   }, [projectId, selectedProjectType, workflows]);
-
-  useEffect(() => {
-    if (!workflowId && workflows.length > 0) {
-      const preferred = workflows.find((w) => w.isDefault) ?? workflows[0];
-      if (preferred) setWorkflowId(preferred.id);
-    }
-  }, [workflows, workflowId]);
 
   useEffect(() => {
     if (mode !== 'design' && !projectId && projects.length > 0) setProjectId(projects[0]!.id);
@@ -142,6 +143,7 @@ export function Home() {
   async function handleCreate() {
     if (!canCreate || createTask.isPending) return;
     setFormError(null);
+    if (mobile && !selectedPlatforms.length) { setFormError('Select at least one platform for this task.'); return; }
     const repos = parseRepos();
     if (!repos) return;
 
@@ -160,6 +162,7 @@ export function Home() {
           ...(resolvedProjectId ? { projectId: resolvedProjectId } : {}),
           repos: resolvedRepos,
           workflowId: mode === 'design' ? designWorkflow?.id : workflowId || undefined,
+          ...(mobile ? { platforms: selectedPlatforms } : {}),
         };
       } else if (ticket) {
         const key = /^[A-Z][A-Z0-9]*-\d+$/.test(ticket.id) ? ticket.id : undefined;
@@ -171,6 +174,7 @@ export function Home() {
           ...(resolvedProjectId ? { projectId: resolvedProjectId } : {}),
           repos: resolvedRepos,
           workflowId: workflowId || undefined,
+          ...(mobile ? { platforms: selectedPlatforms } : {}),
         };
       } else {
         return;
@@ -352,6 +356,7 @@ export function Home() {
                         {selectedProject.repositories.length} repos · {selectedProject.repositories.map((repo) => repo.repository).join(', ')}
                       </p>
                     )}
+                    {mobile && <div className="mt-3"><TaskPlatformSelector value={selectedPlatforms} available={platformOptions} onChange={setPlatforms} /></div>}
                     {projects.length === 0 && (
                       <p className="mt-2 text-[10px] text-muted-foreground">
                         Use the New project tab before starting code tasks.

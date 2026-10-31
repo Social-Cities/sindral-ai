@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { TaskWithRelations } from '@sindral/shared';
-import { FULL_SDLC_WORKFLOW, snapshotWorkflow } from '@sindral/shared';
+import { FULL_SDLC_WORKFLOW, MOBILE_APP_WORKFLOW, snapshotWorkflow } from '@sindral/shared';
 import * as api from '@/lib/api';
 import { renderWithProviders } from '@/test/utils';
 import { makeMessage, makeTaskWithRelations, workflowRecord } from '@/test/fixtures';
@@ -268,4 +268,13 @@ describe('TaskDetail', () => {
     await user.click(await screen.findByRole('tab', { name: /Chat/ }));
     expect(screen.getByText('via GitHub')).toBeInTheDocument();
   });
+  it('previews only selected platform steps before a mobile task starts', async () => {
+    const task = makeTaskWithRelations({ platforms: ['ios'], workflowId: MOBILE_APP_WORKFLOW.id, pinnedWorkflow: null, state: 'todo', currentStepId: null });
+    setup(task, [workflowRecord(MOBILE_APP_WORKFLOW)]);
+    const pipeline = await screen.findByRole('list', { name: 'Pipeline' });
+    expect(within(pipeline).getByText('Implement iOS')).toBeInTheDocument();
+    expect(within(pipeline).queryByText('Implement Android')).not.toBeInTheDocument();
+    expect(within(pipeline).queryByText('Implement Web')).not.toBeInTheDocument();
+  });
+
 });

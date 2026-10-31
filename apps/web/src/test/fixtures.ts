@@ -25,6 +25,7 @@ export function makeTask(overrides: Partial<Task> = {}): Task {
     title: `Task ${counter}`,
     description: 'Some description',
     projectId: null,
+    platforms: null,
     outcome: '',
     acceptanceCriteria: '',
     state: 'todo',

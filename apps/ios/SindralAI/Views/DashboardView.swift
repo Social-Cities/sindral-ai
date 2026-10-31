@@ -189,6 +189,7 @@ struct CreateTaskCard: View {
     @State private var githubCatalogError: String?
     @State private var loadingGitHubCatalog = false
     @State private var workflowID = ""
+    @State private var platforms: [String]?
     @State private var formError: String?
     @State private var uploadNote: String?
     @State private var importingFile = false
@@ -232,6 +233,9 @@ struct CreateTaskCard: View {
                     }
                     projectSection
                     repoSection
+                    if mode != .design, selectedWorkflow?.mobilePlatforms != nil {
+                        TaskPlatformSelector(selection: $platforms, workflow: selectedWorkflow, project: selectedProject)
+                    }
                     if let formError { Text(formError).font(Theme.font(13)).foregroundStyle(Theme.dangerText) }
                     ViewThatFits(in: .horizontal) {
                         HStack(spacing: 12) { uploadButton; Spacer(minLength: 8); workflowPicker; createButton }
@@ -248,7 +252,9 @@ struct CreateTaskCard: View {
         .onAppear { pickDefaultWorkflow(); pickDefaultProject() }
         .onChange(of: store.workflows) { pickDefaultWorkflow() }
         .onChange(of: store.projects) { pickDefaultProject() }
+        .onChange(of: workflowID) { platforms = nil }
         .onChange(of: projectID) {
+            platforms = nil
             workflowID = (selectedProject?.projectType == "mobile-app"
                 ? store.workflows.first { $0.mobilePlatforms != nil }
                 : store.workflows.first { $0.isDefault == true })?.id ?? ""
@@ -456,11 +462,13 @@ struct CreateTaskCard: View {
         if mode == .design { return designWorkflow != nil && !textInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         return mode == .text ? !textInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty : ticket != nil
     }
+    private var selectedWorkflow: Workflow? { store.workflows.first { $0.id == workflowID } }
     private var selectedProject: Project? { store.projects.first { $0.id == projectID } }
 
     private func pickDefaultWorkflow() {
         guard workflowID.isEmpty || !store.workflows.contains(where: { $0.id == workflowID }) else { return }
-        workflowID = (store.workflows.first { $0.isDefault == true } ?? store.workflows.first)?.id ?? ""
+        let preferred = selectedProject?.projectType == "mobile-app" ? store.workflows.first { $0.mobilePlatforms != nil } : nil
+        workflowID = (preferred ?? store.workflows.first { $0.isDefault == true } ?? store.workflows.first)?.id ?? ""
     }
 
     private func pickDefaultProject() {
@@ -509,6 +517,8 @@ struct CreateTaskCard: View {
     private func create() async {
         guard canCreate, !creating else { return }
         formError = nil
+        let selectedPlatforms = mode != .design && selectedWorkflow?.mobilePlatforms != nil ? TaskPlatformSelection.values(platforms, workflow: selectedWorkflow, project: selectedProject) : nil
+        if selectedPlatforms?.isEmpty == true { formError = "Select at least one platform for this task."; return }
         guard let repos = parseRepos() else { return }
         creating = true; defer { creating = false }
         let description = mode != .url ? textInput.trimmingCharacters(in: .whitespacesAndNewlines) : ticket?.description ?? ""
@@ -520,7 +530,7 @@ struct CreateTaskCard: View {
                 resolvedRepos = project.repositories.map(\.repository)
             }
 
-            let created = try await api.createTask(title: title, description: description, ticket: mode == .url ? ticket : nil, projectId: resolvedProjectID, repos: resolvedRepos, workflowId: mode == .design ? designWorkflow?.id : (workflowID.isEmpty ? nil : workflowID))
+            let created = try await api.createTask(title: title, description: description, ticket: mode == .url ? ticket : nil, projectId: resolvedProjectID, repos: resolvedRepos, workflowId: mode == .design ? designWorkflow?.id : (workflowID.isEmpty ? nil : workflowID), platforms: selectedPlatforms)
             textInput = ""; urlInput = ""; ticket = nil; reposInput = ""; projectID = resolvedProjectID ?? ""
             await store.refreshTasks()
             onCreated()

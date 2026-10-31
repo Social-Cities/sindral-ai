@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createMobileWorkflow, MOBILE_APP_WORKFLOW } from './defaultWorkflows.js';
-import { mobileBddGate, selectMobilePlatforms } from './mobile.js';
+import { mobileBddGate, selectMobilePlatforms, resolveMobileTaskPlatforms } from './mobile.js';
 import { happyPath, snapshotWorkflow, validateWorkflow } from './workflow.js';
 import { agentResultSchema, createProjectSchema, workflowSchema } from './schemas.js';
 import type { AppPlatform, BddPlanResult, VerdictResult } from './types.js';
@@ -22,6 +22,15 @@ describe('mobile workflow', () => {
       expect(workflow.steps.filter((step) => step.platform).every((step) => platforms.includes(step.platform!))).toBe(true);
     });
   }
+  it('uses task selection before project defaults and validates supported clients', () => {
+    const project = { projectType: 'mobile-app' as const, platforms: ['ios', 'android', 'web'] as AppPlatform[] };
+    expect(resolveMobileTaskPlatforms(MOBILE_APP_WORKFLOW, ['web', 'ios'], project)).toEqual(['ios', 'web']);
+    expect(resolveMobileTaskPlatforms(MOBILE_APP_WORKFLOW, undefined, project)).toEqual(['ios', 'android', 'web']);
+    expect(() => resolveMobileTaskPlatforms(MOBILE_APP_WORKFLOW, [], project)).toThrow(/at least one/);
+    expect(resolveMobileTaskPlatforms(MOBILE_APP_WORKFLOW, ['web'], { projectType: 'mobile-app', platforms: ['ios'] })).toEqual(['web']);
+    expect(() => resolveMobileTaskPlatforms(createMobileWorkflow(['ios']), ['web'])).toThrow(/supported/);
+    expect(() => resolveMobileTaskPlatforms(null, ['ios'])).toThrow(/mobile app workflow/);
+  });
   it('defaults to native clients and reconciles the implementation plan after BDD feedback', () => {
     const workflow = createMobileWorkflow();
     expect(workflow.mobilePlatforms).toEqual(['ios', 'android']);

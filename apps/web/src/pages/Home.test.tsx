@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MOBILE_APP_WORKFLOW } from '@sindral/shared';
 import * as api from '@/lib/api';
 import { renderWithProviders } from '@/test/utils';
 import { makeTask, workflowRecord } from '@/test/fixtures';
@@ -245,4 +246,25 @@ describe('Home', () => {
     }));
     expect(await screen.findByText('Created project using 2 repositories.')).toBeInTheDocument();
   });
+  it('selects the mobile workflow when project data arrives first and creates a task-selected subset', async () => {
+    const user = userEvent.setup();
+    let releaseWorkflows = () => {};
+    vi.mocked(api.listWorkflows).mockImplementation(() => new Promise((resolve) => { releaseWorkflows = () => resolve({ workflows: [workflowRecord(), workflowRecord(MOBILE_APP_WORKFLOW, { id: 'mobile', isDefault: false })] }); }));
+    vi.mocked(api.listProjects).mockResolvedValue({ projects: [{
+      id: 'mobile-project', userId: 'user-1', name: 'Mobile app', description: '', projectType: 'mobile-app', platforms: ['ios', 'android', 'web'],
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+      repositories: [{ id: 'repo', userId: 'user-1', projectId: 'mobile-project', repository: 'acme/app', createdAt: '', updatedAt: '' }],
+    }] });
+    vi.mocked(api.createTask).mockResolvedValue({ task: makeTask({ platforms: ['ios', 'web'] }) });
+    renderWithProviders(<Home />);
+    await screen.findByText('1 repos · acme/app');
+    await act(async () => { releaseWorkflows(); });
+    await user.type(await screen.findByLabelText('Task description'), 'Change account preferences');
+    await user.click(await screen.findByRole('checkbox', { name: 'Android' }));
+    expect(screen.getByRole('checkbox', { name: 'iOS' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Web' })).toBeChecked();
+    await user.click(screen.getByRole('button', { name: /Create task/ }));
+    await waitFor(() => expect(api.createTask).toHaveBeenCalledWith(expect.objectContaining({ workflowId: 'mobile', projectId: 'mobile-project', platforms: ['ios', 'web'] })));
+  });
+
 });

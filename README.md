@@ -116,7 +116,7 @@ pnpm smoke
 
 ## Workflows
 
-Create a **Mobile app** project for a single monorepo with SwiftUI in `ios/`, Kotlin / Jetpack Compose in `android/`, React in `web/`, and a shared Supabase backend. iOS and Android are selected by default. Mobile App SDLC adds BDD test generation, review and feedback on both plans, separate platform agents in iOS → Android → Web order, and a mandatory BDD release gate. See the [mobile engineering workflow and deployment guide](docs/operations/mobile-engineering.md).
+Create a **Mobile app** project for a single monorepo with SwiftUI in `ios/`, Kotlin / Jetpack Compose in `android/`, React in `web/`, and a shared Supabase backend. iOS and Android are selected by default; each task can choose any combination of iOS, Android, and Web, and only selected clients appear in its pipeline and run. Mobile App SDLC adds BDD test generation, review and feedback on both plans, separate platform agents in iOS → Android → Web order, and a mandatory BDD release gate. See the [mobile engineering workflow and deployment guide](docs/operations/mobile-engineering.md).
 
 Choose **Design an app** on Home to start a Claude Design conversation, review screens beside chat, iterate, and approve a revision. **Create implementation task** copies the approved design, source, assets, and specification into a normal code task. Centrally stored sessions and files let another authenticated worker resume after a redeploy. See the [Claude Design setup and recovery guide](docs/operations/claude-design.md) for account requirements, export limits, and the live acceptance check.
 

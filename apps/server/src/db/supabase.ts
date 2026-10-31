@@ -77,7 +77,7 @@ export function createSupabaseClient(url: string, serviceRoleKey: string): Supab
   });
 }
 
-export const EXPECTED_SCHEMA_VERSION = '20261031171422';
+export const EXPECTED_SCHEMA_VERSION = '20261031173740';
 
 interface DesignRevisionRow {
   id: string; task_id: string; job_id: string; result: DesignResult; created_at: string; approved_at: string | null;
@@ -102,6 +102,7 @@ interface WorkflowRow {
   updated_at: string;
 }
 interface TaskRow {
+  platforms: Task['platforms'];
   id: string;
   user_id: string;
   version: number;
@@ -309,6 +310,7 @@ const mapWorkflow = (r: WorkflowRow): WorkflowRecord => ({
 });
 
 const mapTask = (r: TaskRow): Task => ({
+  platforms: r.platforms ?? null,
   id: r.id,
   userId: r.user_id,
   version: Number(r.version),
@@ -503,6 +505,7 @@ function taskPatchToRow(patch: TaskPatch): Record<string, unknown> {
   if (patch.title !== undefined) row.title = patch.title;
   if (patch.description !== undefined) row.description = patch.description;
   if (patch.projectId !== undefined) row.project_id = patch.projectId;
+  if (patch.platforms !== undefined) row.platforms = patch.platforms;
   if (patch.outcome !== undefined) row.outcome = patch.outcome;
   if (patch.acceptanceCriteria !== undefined) row.acceptance_criteria = patch.acceptanceCriteria;
   if (patch.state !== undefined) row.state = patch.state;
@@ -831,6 +834,7 @@ export class SupabaseRepository implements Repository {
           title: input.title,
           description: input.description,
           project_id: input.projectId,
+          platforms: input.platforms ?? null,
           outcome: input.outcome,
           acceptance_criteria: input.acceptanceCriteria,
           state: input.state,
@@ -876,9 +880,10 @@ export class SupabaseRepository implements Repository {
   }
 
   async updateTask(userId: string, id: string, patch: TaskPatch): Promise<Task | null> {
-    const row = await run<TaskRow | null>(
-      this.client.from('tasks').update(taskPatchToRow(patch)).eq('user_id', userId).eq('id', id).select('*').maybeSingle(),
-    );
+    let query = this.client.from('tasks').update(taskPatchToRow(patch)).eq('user_id', userId).eq('id', id);
+    if (patch.platforms !== undefined) query = query.eq('state', 'todo').is('pinned_workflow', null);
+    const row = await run<TaskRow | null>(query.select('*').maybeSingle());
+    if (!row && patch.platforms !== undefined && await this.getTask(userId, id)) throw new ConflictError('Platform scope is locked once work starts');
     return row ? mapTask(row) : null;
   }
 

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { Workflow } from '@sindral/shared';
-import { availableActions, getStep, isAgentActive } from '@sindral/shared';
+import { availableActions, getStep, isAgentActive, mobileTaskPlatformOptions, selectMobilePlatforms } from '@sindral/shared';
 import { displayNameFor, useAuth } from '@/auth/AuthProvider';
 import { Button } from '@/components/Button';
 import type { ButtonVariant } from '@/components/Button';
@@ -10,7 +10,8 @@ import { ExternalLink } from '@/components/ExternalLink';
 import { Modal } from '@/components/Modal';
 import { PageLoader, Spinner } from '@/components/Spinner';
 import { StatusBadge } from '@/components/StatusBadge';
-import { useDeleteTask, useRepinTaskWorkflow, useSendMessage, useStopAgent, useTask, useTaskAction } from '@/hooks/useTasks';
+import { TaskPlatformSelector } from '@/components/TaskPlatformSelector';
+import { useDeleteTask, useRepinTaskWorkflow, useSendMessage, useStopAgent, useTask, useTaskAction, useUpdateTask } from '@/hooks/useTasks';
 import { useWorkflows } from '@/hooks/useWorkflows';
 import { ApiError } from '@/lib/api';
 import { formatDate } from '@/lib/format';
@@ -87,13 +88,17 @@ export function TaskDetail() {
   const { user } = useAuth();
   const taskQuery = useTask(id);
   const workflowsQuery = useWorkflows();
+  const updateTask = useUpdateTask(id ?? '');
   const [pendingCloseEvent, setPendingCloseEvent] = useState<'mark-done' | 'mark-wont-do' | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const task = taskQuery.data ?? null;
   const workflows = useMemo(() => workflowsQuery.data ?? [], [workflowsQuery.data]);
   const workflow: Workflow | null = useMemo(() => (task ? resolveWorkflow(task, workflows) : null), [task, workflows]);
-  const liveWorkflow: Workflow | null = useMemo(() => (task?.workflowId ? workflows.find((wf) => wf.id === task.workflowId) ?? null : null), [task?.workflowId, workflows]);
+  const liveWorkflow: Workflow | null = useMemo(() => {
+    const live = task?.workflowId ? workflows.find((wf) => wf.id === task.workflowId) ?? null : null;
+    return live?.mobilePlatforms ? selectMobilePlatforms(live, task?.pinnedWorkflow?.mobilePlatforms ?? task?.platforms ?? live.mobilePlatforms) : live;
+  }, [task, workflows]);
   const pinnedWorkflowOutdated = Boolean(task?.pinnedWorkflow && liveWorkflow && !workflowsMatch(task.pinnedWorkflow, liveWorkflow));
 
   const action = useTaskAction(id ?? '', workflow);
@@ -200,7 +205,7 @@ export function TaskDetail() {
             </Button>
           )}
           {actions.filter((a) => a.event !== 'approve' || (tab !== 'summary' && tab !== 'plan')).map((a) => (
-            <Button key={a.event} variant={variantForEvent(a.event)} onClick={() => runAction(a.event)} disabled={action.isPending} data-event={a.event}>
+            <Button key={a.event} variant={variantForEvent(a.event)} onClick={() => runAction(a.event)} disabled={action.isPending || updateTask.isPending} data-event={a.event}>
               {a.label}
             </Button>
           ))}
@@ -306,6 +311,10 @@ export function TaskDetail() {
                 approving={action.isPending}
                 onApprove={approvePlan}
                 onViewPlan={() => setTab('plan')}
+                platformSelector={workflow?.mobilePlatforms && <div className="border-b border-border pb-4">
+                  <TaskPlatformSelector value={task.platforms ?? workflow.mobilePlatforms} available={task.pinnedWorkflow ? workflow.mobilePlatforms : mobileTaskPlatformOptions(workflows.find((item) => item.id === task.workflowId))} onChange={(platforms) => updateTask.mutate({ platforms })} disabled={task.state !== 'todo' || Boolean(task.pinnedWorkflow) || updateTask.isPending} requireOne />
+                  {updateTask.error && <p role="alert" className="text-xs text-[#f87171]">{errorMessage(updateTask.error)}</p>}
+                </div>}
               />
             )}
             {tab === 'plan' && <PlanTab task={task} canApprove={canApprovePlan} approving={action.isPending} onApprove={approvePlan} sendingFeedback={send.isPending} onFeedback={(content, feedbackTarget) => send.mutateAsync({ content, feedbackTarget })} />}

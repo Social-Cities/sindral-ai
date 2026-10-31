@@ -1,10 +1,29 @@
-import type { AppPlatform, BddPlanResult, VerdictResult, Workflow, WorkflowStep } from './types.js';
+import type { AppPlatform, BddPlanResult, Project, VerdictResult, Workflow, WorkflowStep } from './types.js';
 import { APP_PLATFORMS } from './types.js';
 import { DOMAIN_DRIVEN_DESIGN_CONTRACT } from './domainDrivenDesign.js';
 
 export const BDD_PLAN_ARTIFACT = 'bdd-plan.json';
 export const BDD_PLAN_MARKDOWN = 'bdd-plan.md';
 export const DEFAULT_MOBILE_PLATFORMS: AppPlatform[] = ['ios', 'android'];
+
+type PlatformProject = Pick<Project, 'projectType' | 'platforms'>;
+
+export function mobileTaskPlatformOptions(workflow: Workflow | null | undefined): AppPlatform[] {
+  if (!workflow?.mobilePlatforms) return [];
+  return APP_PLATFORMS.filter((platform) => workflow.steps.some((step) => step.platform === platform));
+}
+
+/** Task scope overrides project defaults, while staying inside the clients supported by the workflow. */
+export function resolveMobileTaskPlatforms(workflow: Workflow | null, requested?: AppPlatform[] | null, project?: PlatformProject | null): AppPlatform[] | null {
+  if (!workflow?.mobilePlatforms) {
+    if (requested) throw new Error('Platform selection requires a mobile app workflow');
+    return null;
+  }
+  const selected = requested ?? (project?.projectType === 'mobile-app' ? project.platforms : workflow.mobilePlatforms);
+  const available = mobileTaskPlatformOptions(workflow);
+  if (selected.some((platform) => !available.includes(platform))) throw new Error('Select platforms supported by the workflow');
+  return selectMobilePlatforms(workflow, selected).mobilePlatforms!;
+}
 
 export const MOBILE_CONTRACT = `## Mobile engineering contract
 Selected platforms, in implementation order: {{mobile_platforms}}
@@ -43,7 +62,7 @@ export function buildMobileWorkflow(base: Workflow, platforms: AppPlatform[] = D
   const workflow: Workflow = JSON.parse(JSON.stringify(base)) as Workflow;
   workflow.id = 'wf-mobile-app';
   workflow.name = 'Mobile App SDLC';
-  workflow.description = 'BDD tests → implementation plan → review both plans → iOS → Android → Web → review → verify BDD → ready for release.';
+  workflow.description = 'BDD tests → review both plans → task-selected clients in iOS → Android → Web order → review → verify → ready for release.';
   workflow.mobilePlatforms = [...selected];
   const implementation = workflow.steps.find((step) => step.id === 'implement')!;
   const platformSteps = (revision: boolean): WorkflowStep[] => selected.map((platform, index) => ({
@@ -95,6 +114,10 @@ export function selectMobilePlatforms(workflow: Workflow, platforms: AppPlatform
   if (!workflow.mobilePlatforms) return workflow;
   const selected = APP_PLATFORMS.filter((platform) => platforms.includes(platform));
   if (!selected.length) throw new Error('Select at least one mobile app platform');
+  if (selected.length !== platforms.length) throw new Error('Select valid, unique mobile app platforms');
+  for (const platform of selected) {
+    if (!workflow.steps.some((step) => step.platform === platform)) throw new Error(`This workflow has no ${platform} implementation step`);
+  }
   const removed = new Set(workflow.steps.filter((step) => step.platform && !selected.includes(step.platform)).map((step) => step.id));
   const redirect = (id: string): string => {
     const seen = new Set<string>();

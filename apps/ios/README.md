@@ -51,3 +51,7 @@ Approval requires preview screens and an implementation specification; no hosted
 Previews use short-lived signed server URLs in an isolated web view without the app's auth header or cookies. Preview grants refresh while the view is active. Live updates reconnect to Vercel's rotating SSE stream and refresh authenticated state on `sync` signals.
 
 For a fixture-only interface review, launch a Debug or Staging simulator build with `-SindralDemo YES -SindralDemoSection tasks -SindralDemoTask d1`. This uses local sample data, including a design revision and preview, without modifying hosted tasks.
+
+## Task platform selection
+
+Mobile App SDLC tasks provide **Platforms for this task** toggles on Home, in the task editor, and when creating an implementation task from an approved design. Project settings supply defaults; each task can target any nonempty combination of iOS, Android, and Web. Todo tasks can change their selection before work starts. The pipeline shows only selected clients, in iOS → Android → Web order, and the server pins that selection on first start. BDD and DDD checks cover selected clients and the shared backend.

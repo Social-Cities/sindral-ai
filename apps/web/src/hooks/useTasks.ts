@@ -46,8 +46,18 @@ export function useCreateTask() {
 
 export function useUpdateTask(id: string) {
   const qc = useQueryClient();
+  const key = queryKeys.task(id);
   return useMutation({
     mutationFn: (input: UpdateTaskInput) => updateTask(id, input),
+    onMutate: async (input) => {
+      await qc.cancelQueries({ queryKey: key });
+      const previous = qc.getQueryData<TaskWithRelations>(key);
+      if (previous) qc.setQueryData<TaskWithRelations>(key, { ...previous, ...input });
+      return { previous };
+    },
+    onError: (_error, _input, context) => {
+      if (context?.previous) qc.setQueryData(key, context.previous);
+    },
     onSuccess: ({ task }) => {
       qc.setQueryData<TaskWithRelations>(queryKeys.task(id), (prev) => (prev ? { ...prev, ...task } : prev));
       void qc.invalidateQueries({ queryKey: queryKeys.tasks });

@@ -67,6 +67,7 @@ export interface WorkflowPatch {
 }
 
 export interface TaskInsert {
+  platforms?: AppPlatform[] | null;
   key: string;
   title: string;
   description: string;
@@ -91,6 +92,7 @@ export type TaskPatch = Partial<
     | 'title'
     | 'description'
     | 'projectId'
+    | 'platforms'
     | 'outcome'
     | 'acceptanceCriteria'
     | 'state'
