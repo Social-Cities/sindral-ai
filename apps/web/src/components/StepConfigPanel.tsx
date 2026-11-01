@@ -14,6 +14,7 @@ interface StepConfigPanelProps {
   onChange: (patch: Partial<WorkflowStep>) => void;
   onEdgesChange: (edges: WorkflowEdge[]) => void;
   onSetEntry: (stepId: string) => void;
+  onTypeChange: (type: WorkflowStep['type']) => void;
   onDelete: (stepId: string) => void;
 }
 
@@ -44,7 +45,7 @@ function Toggle({ active, onClick, children, tone }: { active: boolean; onClick:
   );
 }
 
-export function StepConfigPanel({ workflow, step, issues, onChange, onEdgesChange, onSetEntry, onDelete }: StepConfigPanelProps) {
+export function StepConfigPanel({ workflow, step, issues, onChange, onEdgesChange, onSetEntry, onTypeChange, onDelete }: StepConfigPanelProps) {
   const stepIndex = workflow.steps.findIndex((s) => s.id === step.id);
   const issueFor = (field: string) => issues.find((i) => i.path === `steps[${stepIndex}].${field}`)?.message;
   const stepIssues = issues.filter((i) => i.path === `steps.${step.id}`);
@@ -75,7 +76,11 @@ export function StepConfigPanel({ workflow, step, issues, onChange, onEdgesChang
   return (
     <div className="p-5 space-y-4">
       <div>
-        <p className="label-caps">Type</p>
+        <Select label="Step type" value={step.type} onChange={(event) => onTypeChange(event.target.value as WorkflowStep['type'])} hint={isEntry ? 'Entry steps must be human checkpoints.' : undefined}>
+          <option value="human">Human checkpoint</option>
+          <option value="agent" disabled={isEntry}>Agent step</option>
+          <option value="end" disabled={isEntry}>End step</option>
+        </Select>
         <p className="text-xs text-secondary-foreground mt-1.5 leading-relaxed">
           {step.type === 'human' && 'Human checkpoint — workflow pauses until a user clicks an action or sends chat feedback.'}
           {step.type === 'agent' && 'Agent step — dispatched to a worker; emits "complete" when finished (or "reject" for a NO_GO verdict).'}

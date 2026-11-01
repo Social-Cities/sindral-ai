@@ -452,6 +452,16 @@ export class MemoryRepository implements Repository {
       }
     }
 
+    if (command.workflowAssignment) {
+      const workflow = this.workflows.get(command.workflowAssignment.workflowId);
+      if (!workflow || workflow.userId !== userId) throw new ConflictError('Workflow does not exist or is not owned by this user');
+      if (['done', 'wont-do'].includes(task.state)) throw new ConflictError('Reopen the task before changing its workflow');
+      if ([...this.jobs.values()].some((job) => job.userId === userId && (job.taskId === task.id || job.taskId === task.parentTaskId) && ['claimed', 'running', 'applying'].includes(job.status))) {
+        throw new ConflictError('Stop the running agent and wait for it to finish before changing the workflow.');
+      }
+      Object.assign(task, clone(command.workflowAssignment), { lastError: null });
+    }
+
     Object.assign(task, clone(command.patch), { version: task.version + 1, updatedAt: this.now() });
     const event: Owned<TaskEvent> = {
       id: randomUUID(),

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FULL_SDLC_WORKFLOW } from '@sindral/shared';
 import * as api from '@/lib/api';
@@ -26,6 +26,7 @@ describe('Workflows editor', () => {
       tasks: [makeTask({ state: 'implement', currentStepId: 'implement', pinnedWorkflow: FULL_SDLC_WORKFLOW })],
     });
     vi.mocked(api.updateWorkflow).mockReset();
+    vi.mocked(api.createWorkflow).mockReset();
     vi.mocked(api.deleteWorkflow).mockReset();
     vi.mocked(api.deleteWorkflow).mockResolvedValue({ ok: true });
   });
@@ -81,6 +82,71 @@ describe('Workflows editor', () => {
     expect(body.name).toBe('Full SDLC v2');
     expect('id' in body).toBe(false);
     expect(await screen.findByRole('button', { name: 'Saved ✓' })).toBeDisabled();
+  });
+
+  it('creates a workflow from scratch and opens it in the editor', async () => {
+    const user = userEvent.setup();
+    const created = workflowRecord({
+      id: 'new-workflow', name: 'My workflow', entryStepId: 'todo',
+      steps: [
+        { id: 'todo', type: 'human', label: 'Start', state: 'todo' },
+        { id: 'done', type: 'end', label: 'Done', state: 'done' },
+      ],
+      edges: [{ from: 'todo', to: 'done', event: 'complete' }],
+    }, { isDefault: false });
+    vi.mocked(api.createWorkflow).mockImplementation(async () => {
+      vi.mocked(api.listWorkflows).mockResolvedValue({ workflows: [workflowRecord(), created] });
+      return { workflow: created };
+    });
+    renderWithProviders(<Workflows />, { route: '/workflows' });
+    await user.click(await screen.findByRole('button', { name: 'New workflow' }));
+    const dialog = screen.getByRole('dialog', { name: 'New workflow' });
+    expect(within(dialog).getByRole('button', { name: 'Create' })).toBeDisabled();
+    await user.type(within(dialog).getByLabelText('Workflow name'), 'My workflow');
+    await user.click(within(dialog).getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(api.createWorkflow).toHaveBeenCalledWith({ name: 'My workflow' }));
+    expect(await screen.findByRole('img', { name: 'Workflow graph for My workflow' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('clones the selected saved workflow with a distinct name', async () => {
+    const user = userEvent.setup();
+    const copy = workflowRecord(FULL_SDLC_WORKFLOW, { id: 'copy-id', name: 'Full SDLC (copy)', isDefault: false });
+    vi.mocked(api.createWorkflow).mockImplementation(async () => {
+      vi.mocked(api.listWorkflows).mockResolvedValue({ workflows: [workflowRecord(), copy] });
+      return { workflow: copy };
+    });
+    renderWithProviders(<Workflows />, { route: '/workflows' });
+    await user.click(await screen.findByRole('button', { name: 'Clone workflow' }));
+    const dialog = screen.getByRole('dialog', { name: 'Clone workflow' });
+    expect(within(dialog).getByLabelText('Workflow name')).toHaveValue('Full SDLC (copy)');
+    await user.click(within(dialog).getByRole('button', { name: 'Clone' }));
+    await waitFor(() => expect(api.createWorkflow).toHaveBeenCalledWith({ name: 'Full SDLC (copy)', cloneFrom: 'wf-default' }));
+    expect(await screen.findByRole('img', { name: 'Workflow graph for Full SDLC (copy)' })).toBeInTheDocument();
+  });
+
+  it('keeps a failed creation open with its name and error', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.createWorkflow).mockRejectedValue(new Error('Could not create workflow'));
+    renderWithProviders(<Workflows />, { route: '/workflows' });
+    await user.click(await screen.findByRole('button', { name: 'New workflow' }));
+    const dialog = screen.getByRole('dialog', { name: 'New workflow' });
+    await user.type(within(dialog).getByLabelText('Workflow name'), 'Retry me');
+    await user.click(within(dialog).getByRole('button', { name: 'Create' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Could not create workflow');
+    expect(within(dialog).getByLabelText('Workflow name')).toHaveValue('Retry me');
+  });
+
+  it('lets new steps become agent steps or end steps', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Workflows />, { route: '/workflows' });
+    await user.click(await screen.findByRole('button', { name: 'Add step' }));
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Step type' }), 'agent');
+    expect(screen.getByLabelText('Engine')).toHaveValue('claude');
+    expect(screen.getByText('Agent steps need a prompt')).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Step type' }), 'end');
+    expect(screen.queryByLabelText('Engine')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
   });
 
   it('warns about pinned tasks before deleting a workflow without affecting their snapshot', async () => {

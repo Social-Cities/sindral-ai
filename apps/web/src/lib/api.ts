@@ -1,5 +1,7 @@
 import type {
   ApiRoutes,
+  AssignWorkflowInput,
+  PreviewWorkflowAssignmentInput,
   CreateProjectInput,
   CreateTaskInput,
   CreateWorkflowInput,
@@ -145,6 +147,16 @@ export function repinTaskWorkflow(id: string, expectedVersion: number, idempoten
     method: 'POST',
     headers: { 'Idempotency-Key': idempotencyKey },
     json: { expectedVersion },
+  });
+}
+
+export function previewTaskWorkflowAssignment(id: string, input: PreviewWorkflowAssignmentInput) {
+  return apiFetch<ResponseOf<'POST /api/tasks/:id/workflow-assignment/preview'>>(`/api/tasks/${encodeURIComponent(id)}/workflow-assignment/preview`, { method: 'POST', json: input });
+}
+
+export function assignTaskWorkflow(id: string, input: AssignWorkflowInput, idempotencyKey = crypto.randomUUID()) {
+  return apiFetch<ResponseOf<'POST /api/tasks/:id/workflow-assignment'>>(`/api/tasks/${encodeURIComponent(id)}/workflow-assignment`, {
+    method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, json: input,
   });
 }
 

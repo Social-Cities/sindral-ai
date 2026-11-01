@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { UpdateWorkflowInput, Workflow, WorkflowEdge, WorkflowRecord, WorkflowStep } from '@sindral/shared';
-import { TERMINAL_STATES, validateWorkflow } from '@sindral/shared';
+import { TERMINAL_STATES, changeWorkflowStepType, validateWorkflow } from '@sindral/shared';
 import { Button } from '@/components/Button';
 import { Modal } from '@/components/Modal';
 import { PageLoader } from '@/components/Spinner';
@@ -55,6 +55,8 @@ export function Workflows() {
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
+  const [cloneSource, setCloneSource] = useState<WorkflowRecord | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -155,17 +157,28 @@ export function Workflows() {
     if (selectedStepId === stepId) setSelectedStepId(null);
   }
 
+  function beginCreate(source: WorkflowRecord | null) {
+    setCloneSource(source);
+    setNewName(source ? `${source.name.slice(0, 193)} (copy)` : '');
+    setCreateError(null);
+    setCreating(true);
+  }
+
   async function handleCreate() {
     const name = newName.trim();
-    if (!name) return;
+    if (!name || createWorkflow.isPending) return;
+    if (dirty && !window.confirm('Discard unsaved changes to this workflow?')) return;
+    setCreateError(null);
     try {
-      const { workflow } = await createWorkflow.mutateAsync({ name, cloneFrom: selectedRecord?.id });
+      const { workflow } = await createWorkflow.mutateAsync({ name, ...(cloneSource ? { cloneFrom: cloneSource.id } : {}) });
       setNewName('');
       setCreating(false);
       setSelectedWfId(workflow.id);
       setSelectedStepId(null);
+      setSaveError(null);
+      setSavedAt(null);
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Could not create workflow');
+      setCreateError(err instanceof Error ? err.message : 'Could not create workflow');
     }
   }
 
@@ -201,10 +214,7 @@ export function Workflows() {
           <span className="label-caps">Workflows</span>
           <button
             type="button"
-            onClick={() => {
-              setCreating(true);
-              setNewName('');
-            }}
+            onClick={() => beginCreate(null)}
             className="w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors bg-secondary"
             title="New workflow"
             aria-label="New workflow"
@@ -214,33 +224,6 @@ export function Workflows() {
             </svg>
           </button>
         </div>
-
-        {creating && (
-          <div className="px-3 py-2.5 border-b border-border">
-            <input
-              autoFocus
-              aria-label="Workflow name"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void handleCreate();
-                if (e.key === 'Escape') setCreating(false);
-              }}
-              placeholder="Workflow name..."
-              className="w-full text-xs text-foreground px-2 py-1.5 rounded outline-none bg-input"
-              style={{ border: '1px solid color-mix(in srgb, var(--color-accent) 25%, transparent)' }}
-            />
-            <p className="text-[9px] text-muted-foreground mt-1">Clones “{selectedRecord?.name ?? 'Full SDLC'}”.</p>
-            <div className="flex gap-1.5 mt-1.5">
-              <Button size="xs" onClick={handleCreate} loading={createWorkflow.isPending} className="flex-1">
-                Create
-              </Button>
-              <Button size="xs" variant="subtle" onClick={() => setCreating(false)} className="flex-1">
-                Cancel
-              </Button>
-            </div>
-          </div>
-        )}
 
         <div className="flex-1 overflow-y-auto py-2">
           {workflows.map((wf) => {
@@ -316,7 +299,7 @@ export function Workflows() {
       <div className="flex-1 flex flex-col overflow-hidden min-w-[34rem]">
         {draft && selectedRecord ? (
           <>
-            <div className="shrink-0 flex items-center justify-between px-5 py-3 border-b border-border gap-3">
+            <div className="shrink-0 flex flex-wrap items-center justify-between px-5 py-3 border-b border-border gap-3">
               <div className="flex items-center gap-3 min-w-0">
                 <span className="text-xs text-muted-foreground font-mono shrink-0">Workflow:</span>
                 <input
@@ -332,6 +315,9 @@ export function Workflows() {
                     📌 {pinnedCount(draft.id)} task{pinnedCount(draft.id) !== 1 ? 's' : ''} pinned to this version
                   </span>
                 )}
+                <Button variant="ghost" onClick={() => beginCreate(selectedRecord)}>
+                  Clone workflow
+                </Button>
                 <Button variant="ghost" onClick={addStep}>
                   <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
                     <path d="M5 1v8M1 5h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -415,6 +401,7 @@ export function Workflows() {
               onChange={(patch) => updateStep(selectedStep.id, patch)}
               onEdgesChange={(edges: WorkflowEdge[]) => patchDraft({ edges })}
               onSetEntry={(stepId) => patchDraft({ entryStepId: stepId })}
+              onTypeChange={(type) => patchDraft(changeWorkflowStepType(draft, selectedStep.id, type))}
               onDelete={deleteStep}
             />
           ) : (
@@ -430,6 +417,40 @@ export function Workflows() {
           )}
         </div>
       </aside>
+
+      <Modal
+        open={creating}
+        title={cloneSource ? 'Clone workflow' : 'New workflow'}
+        onClose={() => !createWorkflow.isPending && setCreating(false)}
+        footer={
+          <>
+            <Button variant="subtle" className="flex-1" onClick={() => setCreating(false)} disabled={createWorkflow.isPending}>
+              Cancel
+            </Button>
+            <Button type="submit" form="create-workflow" className="flex-1" disabled={!newName.trim()} loading={createWorkflow.isPending}>
+              {cloneSource ? 'Clone' : 'Create'}
+            </Button>
+          </>
+        }
+      >
+        <form id="create-workflow" onSubmit={(event) => { event.preventDefault(); void handleCreate(); }}>
+          <p className="mb-3">
+            {cloneSource ? `Copies the saved version of “${cloneSource.name}”.` : 'Start with a start checkpoint and an end step, then add and connect your own steps.'}
+          </p>
+          <label htmlFor="new-workflow-name" className="block mb-1">Workflow name</label>
+          <input
+            id="new-workflow-name"
+            value={newName}
+            onChange={(event) => setNewName(event.target.value)}
+            maxLength={200}
+            required
+            disabled={createWorkflow.isPending}
+            placeholder="Workflow name…"
+            className="w-full text-xs text-foreground px-3 py-2 rounded outline-none bg-input border border-border focus:border-accent"
+          />
+          {createError && <p role="alert" className="mt-2 text-xs text-[#f87171]">{createError}</p>}
+        </form>
+      </Modal>
 
       <Modal
         open={confirmDelete !== null}

@@ -220,6 +220,7 @@ export interface TaskTransitionCommand {
   event: EventInsert;
   job?: JobInsert;
   cancelQueuedJobs?: boolean;
+  workflowAssignment?: { workflowId: string; platforms: Task['platforms'] };
 }
 
 export interface TaskTransitionResult {

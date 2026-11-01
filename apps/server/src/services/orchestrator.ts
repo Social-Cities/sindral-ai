@@ -17,6 +17,7 @@ import {
   type AppPlatform,
   type Project,
   mobileBddGate,
+  mobileTaskPlatformOptions,
   BDD_PLAN_ARTIFACT,
   BDD_PLAN_MARKDOWN,
   DOMAIN_DRIVEN_DESIGN_CONTRACT,
@@ -24,6 +25,11 @@ import {
   domainDrivenDesignGate,
   type BddPlanResult,
   transition,
+  transitionToWorkflowStep,
+  workflowPrerequisiteWarnings,
+  type WorkflowAssignmentPreview,
+  type AssignWorkflowInput,
+  type PreviewWorkflowAssignmentInput,
   type AgentResult,
   type AgentEngine,
   type CreateTaskInput,
@@ -43,7 +49,7 @@ import {
 } from '@sindral/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import { ConflictError, type JobOutcomeClaim, type Repository } from '../db/repository.js';
-import { badRequest, conflict, notFound, serviceUnavailable } from '../errors.js';
+import { HttpError, badRequest, conflict, notFound, serviceUnavailable } from '../errors.js';
 import type { Hub } from '../realtime/hub.js';
 import type { Metrics } from '../metrics.js';
 import { parsePrUrl } from './github.js';
@@ -239,6 +245,7 @@ export class Orchestrator {
     if (patch.description !== undefined) changes.description = patch.description;
     if (patch.repos !== undefined || patch.workflowId !== undefined || patch.projectId !== undefined || patch.platforms !== undefined) {
       if (task.state !== 'todo') throw conflict('Repositories and workflow can only be changed while the task is in todo');
+      if (patch.workflowId !== undefined && task.pinnedWorkflow) throw conflict('Workflow is pinned once work starts');
       if (patch.platforms !== undefined && task.pinnedWorkflow) throw conflict('Platforms are pinned once work starts; create a new task to change scope');
       let projectRepos: string[] | null = null;
       if (patch.projectId !== undefined) {
@@ -273,6 +280,8 @@ export class Orchestrator {
           if (!wf) throw badRequest('Unknown workflow');
           changes.workflowId = wf.id;
         }
+        // An unstarted task enters the selected workflow at its own entry step.
+        if (patch.workflowId !== task.workflowId) changes.currentStepId = null;
       }
       const projectId = changes.projectId !== undefined ? changes.projectId : task.projectId;
       const workflowId = changes.workflowId !== undefined ? changes.workflowId : task.workflowId;
@@ -390,6 +399,63 @@ export class Orchestrator {
         stepId: task.currentStepId,
         detail,
       },
+    });
+    this.hub.publish(userId, { type: 'task.updated', taskId: task.id });
+    return applied.task;
+  }
+
+  private async prepareWorkflowAssignment(userId: string, task: Task, input: PreviewWorkflowAssignmentInput): Promise<WorkflowAssignmentPreview> {
+    const live = await this.workflows.get(userId, input.workflowId);
+    if (!live) throw notFound('Workflow');
+    const project = task.projectId ? await this.repo.getProject(userId, task.projectId) : null;
+    const supported = live.mobilePlatforms ? mobileTaskPlatformOptions(live) : null;
+    const requested = supported && task.platforms?.every((platform) => supported.includes(platform)) ? task.platforms : undefined;
+    const platforms = this.resolveTaskPlatformSelection(live, requested, project);
+    const candidate = { ...task, workflowId: live.id, platforms, pinnedWorkflow: null };
+    const workflow = snapshotWorkflow(await this.specializeWorkflow(userId, candidate, toWorkflow(live)));
+    const stepId = input.stepId ?? workflow.entryStepId;
+    transitionToWorkflowStep(task, workflow, stepId);
+    const step = getStep(workflow, stepId)!;
+    const [context, jobs] = await Promise.all([
+      this.buildJobContext(userId, { ...candidate, pinnedWorkflow: workflow }),
+      this.repo.listJobsForTask(userId, task.id),
+    ]);
+    const outputs = jobs.flatMap((job) => job.status === 'completed' && job.payload.kind === 'agent' && job.payload.step.output ? [job.payload.step.output] : []);
+    return { workflow, step, warnings: workflowPrerequisiteWarnings(workflow, step, context, outputs, task.repos), expectedVersion: task.version };
+  }
+
+  async previewWorkflowAssignment(userId: string, taskId: string, input: PreviewWorkflowAssignmentInput): Promise<WorkflowAssignmentPreview> {
+    return this.prepareWorkflowAssignment(userId, await this.getTask(userId, taskId), input);
+  }
+
+  async assignWorkflow(userId: string, taskId: string, input: AssignWorkflowInput, idempotencyKey: string): Promise<Task> {
+    const task = await this.getTask(userId, taskId);
+    const detail = { actor: 'user', workflowId: input.workflowId, stepId: input.stepId, acknowledgeWarnings: input.acknowledgeWarnings };
+    const requestHash = transitionRequestHash(userId, task.id, input.expectedVersion, 'workflow-reassigned', 'user', detail);
+    const replay = await this.repo.getTaskTransitionReplay(userId, idempotencyKey, requestHash);
+    if (replay) return replay.task;
+    if (task.version !== input.expectedVersion) throw conflict('Task changed while choosing a workflow. Refresh and try again.');
+    const preview = await this.prepareWorkflowAssignment(userId, task, input);
+    if (preview.warnings.length && !input.acknowledgeWarnings) {
+      throw new HttpError(409, 'WORKFLOW_PREREQUISITES', 'Review and acknowledge the missing prerequisites before moving this task.', preview.warnings);
+    }
+    const jobs = await this.repo.listJobsForTask(userId, task.id);
+    if (jobs.some((job) => ['claimed', 'running', 'applying'].includes(job.status))) {
+      throw conflict('Stop the running agent and wait for it to finish before changing the workflow.');
+    }
+    const t = transitionToWorkflowStep(task, preview.workflow, preview.step.id);
+    const candidate: Task = { ...task, workflowId: preview.workflow.id, pinnedWorkflow: preview.workflow, platforms: preview.workflow.mobilePlatforms ?? null,
+      state: t.nextState, currentStepId: t.nextStepId, failedStepId: null };
+    const job = preview.step.type === 'agent'
+      ? preview.step.output === 'merge' ? await this.buildMergeJob(userId, candidate, preview.step.id) : await this.buildAgentJob(userId, candidate, preview.step)
+      : undefined;
+    const applied = await this.repo.applyTaskTransition(userId, {
+      taskId: task.id, expectedVersion: input.expectedVersion, idempotencyKey, requestHash,
+      patch: { state: t.nextState, currentStepId: t.nextStepId, failedStepId: null, pinnedWorkflow: preview.workflow },
+      workflowAssignment: { workflowId: preview.workflow.id, platforms: candidate.platforms },
+      event: { taskId: task.id, type: 'workflow-reassigned', fromState: task.state, toState: t.nextState, stepId: t.nextStepId,
+        detail: { ...detail, previousWorkflowId: task.workflowId, previousStepId: task.currentStepId, workflowName: preview.workflow.name, warnings: preview.warnings } },
+      job, cancelQueuedJobs: true,
     });
     this.hub.publish(userId, { type: 'task.updated', taskId: task.id });
     return applied.task;

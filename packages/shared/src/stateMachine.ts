@@ -44,6 +44,16 @@ function enterStep(step: WorkflowStep): { state: string; effects: TransitionEffe
   return { state: step.state, effects: [] };
 }
 
+/** Explicit user-directed entry into a saved workflow, with the usual dispatch effects. */
+export function transitionToWorkflowStep(task: TaskLike, workflow: Workflow, stepId: string): Transition {
+  if (task.state === 'done' || task.state === 'wont-do') throw new TransitionError('Reopen the task before changing its workflow');
+  const step = getStep(workflow, stepId);
+  if (!step) throw new TransitionError('Selected step does not exist in the workflow', 'NO_STEP');
+  if (step.type === 'end') throw new TransitionError('Choose a human or agent step');
+  const entered = enterStep(step);
+  return { nextState: entered.state, nextStepId: step.id, failedStepId: null, effects: entered.effects, event: 'workflow-reassigned' };
+}
+
 /**
  * Pure transition function. Given the task, its pinned workflow and an event,
  * returns the next state and side effects the orchestrator must perform.

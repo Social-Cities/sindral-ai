@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_TROUBLESHOOT_STEP, TransitionError, type AgentJobPayload, type Task } from '@sindral/shared';
+import { DEFAULT_TROUBLESHOOT_STEP, FULL_SDLC_WORKFLOW, TransitionError, type AgentJobPayload, type Task } from '@sindral/shared';
 import { claimNext, completeMerge, completeNext, createTestApp, implementation, plan, pr, reload, review, reviewSlice, verdict, type TestContext } from '../test/helpers.js';
 import { HttpError } from '../errors.js';
 
@@ -412,7 +412,7 @@ describe('feedback loops', () => {
 describe('task contracts outside planning workflows', () => {
   it('blocks a custom plan-review transition with a nonstandard event until the contract exists', async () => {
     const service = ctx.app.ctx.workflows;
-    const custom = await service.create(userId, 'Custom review');
+    const custom = await service.create(userId, 'Custom review', FULL_SDLC_WORKFLOW.id);
     await service.update(userId, custom.id, {
       ...custom,
       edges: custom.edges.map((edge) => (edge.from === 'plan-review' && edge.event === 'approve' ? { ...edge, event: 'ship' } : edge)),
@@ -428,7 +428,7 @@ describe('task contracts outside planning workflows', () => {
 
   it('repairs a legacy plan contract before a custom review transition', async () => {
     const service = ctx.app.ctx.workflows;
-    const custom = await service.create(userId, 'Legacy review');
+    const custom = await service.create(userId, 'Legacy review', FULL_SDLC_WORKFLOW.id);
     await service.update(userId, custom.id, {
       ...custom,
       edges: custom.edges.map((edge) => (edge.from === 'plan-review' && edge.event === 'approve' ? { ...edge, event: 'ship' } : edge)),

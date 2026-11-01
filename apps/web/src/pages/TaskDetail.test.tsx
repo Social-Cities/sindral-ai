@@ -13,6 +13,9 @@ vi.mock('@/lib/api', async (importOriginal) => {
   return {
     ...actual,
     getTask: vi.fn(),
+    updateTask: vi.fn(),
+    previewTaskWorkflowAssignment: vi.fn(),
+    assignTaskWorkflow: vi.fn(),
     listWorkflows: vi.fn(),
     runTaskAction: vi.fn(),
     repinTaskWorkflow: vi.fn(),
@@ -34,6 +37,9 @@ function setup(task: TaskWithRelations, workflows = [workflowRecord()], route = 
 describe('TaskDetail', () => {
   beforeEach(() => {
     vi.mocked(api.runTaskAction).mockReset();
+    vi.mocked(api.updateTask).mockReset();
+    vi.mocked(api.previewTaskWorkflowAssignment).mockReset();
+    vi.mocked(api.assignTaskWorkflow).mockReset();
     vi.mocked(api.repinTaskWorkflow).mockReset();
     vi.mocked(api.sendMessage).mockReset();
     vi.mocked(api.stopAgent).mockReset();
@@ -45,6 +51,26 @@ describe('TaskDetail', () => {
     const button = await screen.findByRole('button', { name: 'Start Planning' });
     expect(button).toHaveClass('bg-primary');
     expect(screen.queryByText('Agent working…')).not.toBeInTheDocument();
+  });
+
+  it('offers workflow changes on a started task and waits at the chosen human step', async () => {
+    const user = userEvent.setup();
+    const task = makeTaskWithRelations({ id: 'reassign-me', state: 'plan-review', currentStepId: 'plan-review', pinnedWorkflow: snapshotWorkflow(FULL_SDLC_WORKFLOW), version: 3 });
+    const target = workflowRecord(FULL_SDLC_WORKFLOW, { id: 'custom', name: 'Custom', isDefault: false });
+    vi.mocked(api.previewTaskWorkflowAssignment).mockImplementation(async (_id, input) => {
+      const workflow = input.workflowId === target.id ? target : workflowRecord();
+      return { workflow, step: workflow.steps.find((step) => step.id === (input.stepId ?? workflow.entryStepId))!, warnings: [], expectedVersion: 3 };
+    });
+    const moved = { ...task, workflowId: target.id, pinnedWorkflow: target, state: 'plan-review', currentStepId: 'plan-review', version: 4 };
+    vi.mocked(api.assignTaskWorkflow).mockImplementation(async () => { vi.mocked(api.getTask).mockResolvedValue({ task: moved }); return { task: moved }; });
+    setup(task, [workflowRecord(), target]);
+    await user.click(await screen.findByRole('button', { name: 'Change workflow' }));
+    const dialog = screen.getByRole('dialog', { name: 'Change workflow' });
+    await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Destination workflow' }), 'custom');
+    await user.selectOptions(await within(dialog).findByRole('combobox', { name: 'Destination step' }), 'plan-review');
+    await user.click(await within(dialog).findByRole('button', { name: 'Move to step' }));
+    await waitFor(() => expect(api.assignTaskWorkflow).toHaveBeenCalledWith('reassign-me', { workflowId: 'custom', stepId: 'plan-review', expectedVersion: 3, acknowledgeWarnings: false }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('offers "Approve Plan" on plan review and shows the plan', async () => {

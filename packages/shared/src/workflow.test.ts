@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FULL_SDLC_WORKFLOW } from './defaultWorkflows.js';
 import type { Workflow } from './types.js';
-import { acceptsFeedback, humanActions, snapshotWorkflow, validateWorkflow } from './workflow.js';
+import { acceptsFeedback, changeWorkflowStepType, humanActions, snapshotWorkflow, validateWorkflow } from './workflow.js';
 import { workflowSchema } from './schemas.js';
 
 function minimal(): Workflow {
@@ -83,5 +83,30 @@ describe('graph helpers', () => {
 
   it('bundled workflows satisfy the zod schema', () => {
     expect(workflowSchema.safeParse(FULL_SDLC_WORKFLOW).success).toBe(true);
+  });
+});
+
+describe('changing workflow step types', () => {
+  it('protects the human entry step', () => {
+    expect(() => changeWorkflowStepType(minimal(), 'todo', 'agent')).toThrow('Entry step must be a human step');
+    expect(() => changeWorkflowStepType(minimal(), 'todo', 'end')).toThrow('Entry step must be a human step');
+  });
+
+  it('removes agent settings and outgoing edges when converting to an end step', () => {
+    const original = minimal();
+    const changed = changeWorkflowStepType(original, 'work', 'end');
+    expect(changed.steps[1]).toEqual({ id: 'work', type: 'end', label: 'Work', state: 'done' });
+    expect(changed.edges).toEqual([{ from: 'todo', to: 'work', event: 'start' }]);
+    expect(validateWorkflow(changed)).toEqual([]);
+    expect(original.steps[1]?.type).toBe('agent');
+    expect(original.edges).toHaveLength(2);
+  });
+
+  it('allows a human checkpoint to become an agent with required configuration highlighted', () => {
+    const human = changeWorkflowStepType(minimal(), 'work', 'human');
+    expect(human.steps[1]).not.toHaveProperty('engine');
+    const agent = changeWorkflowStepType(human, 'work', 'agent');
+    expect(agent.steps[1]).toMatchObject({ type: 'agent', engine: 'claude', output: 'document' });
+    expect(validateWorkflow(agent).map((issue) => issue.message)).toEqual(['Agent steps need a prompt']);
   });
 });
