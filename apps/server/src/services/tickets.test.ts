@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { adfToText, MAX_TICKET_RESPONSE_BYTES } from './tickets.js';
 import { createTestApp, type TestContext } from '../test/helpers.js';
+import { encryptSecret } from './crypto.js';
 
 const fetchMock = vi.fn<typeof fetch>();
 let ctx: TestContext;
@@ -44,6 +45,87 @@ describe('ticket import', () => {
     expect(url).toBe('https://api.linear.app/graphql');
     expect((init?.headers as Record<string, string>).Authorization).toBe('lin_api_xxxxxxxx');
     expect(JSON.parse(String(init?.body))).toMatchObject({ variables: { id: 'ENG-12' } });
+  });
+
+  it('lets the user replace an unreadable Linear key and retry the reported URL', async () => {
+    const url = 'https://linear.app/social-cities/issue/SOC-79/setup-supabase-for-project';
+    await ctx.repo.upsertSecret(ctx.userA, 'linear', {
+      ...encryptSecret('lin_api_old_key', Buffer.from('cd'.repeat(32), 'hex')),
+      hint: null,
+      metadata: {},
+    });
+
+    const failed = await importTicket(url);
+    expect(failed.statusCode).toBe(400);
+    expect(failed.json()).toEqual({ error: {
+      code: 'CREDENTIAL_UNREADABLE',
+      message: 'The saved Linear credential could not be read. Save it again in Settings and retry.',
+    } });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    const saved = await ctx.app.inject({
+      method: 'PUT', url: '/api/settings/secrets',
+      headers: { authorization: `Bearer ${ctx.tokenA}` },
+      payload: { provider: 'linear', token: 'lin_api_replacement' },
+    });
+    expect(saved.statusCode).toBe(200);
+    fetchMock.mockResolvedValueOnce(json({ data: { issue: {
+      identifier: 'SOC-79', title: 'Setup Supabase for project', description: null, url,
+    } } }));
+    const imported = await importTicket(url);
+    expect(imported.statusCode).toBe(200);
+    expect(imported.json().ticket).toEqual({
+      provider: 'linear', id: 'SOC-79', title: 'Setup Supabase for project', description: '', url,
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]![1]?.body))).toMatchObject({ variables: { id: 'SOC-79' } });
+  });
+
+  it.each([
+    ['authentication error', 'AUTHENTICATION_ERROR', 400, 'TICKET_AUTH_FAILED'],
+    ['forbidden', 'FORBIDDEN', 400, 'TICKET_AUTH_FAILED'],
+    ['ratelimited', 'RATELIMITED', 429, 'TICKET_RATE_LIMITED'],
+    ['internal error', 'INTERNAL_SERVER_ERROR', 502, 'TICKET_FETCH_FAILED'],
+  ])('handles Linear GraphQL %s errors, including partial data', async (type, code, status, expectedCode) => {
+    await ctx.app.ctx.secrets.set(ctx.userA, 'linear', 'lin_api_xxxxxxxx');
+    for (const extensions of [{ type }, { code }]) {
+      fetchMock.mockResolvedValueOnce(json({ errors: [{ extensions }] }));
+      const failed = await importTicket('https://linear.app/social-cities/issue/SOC-79');
+      expect(failed.statusCode).toBe(status);
+      expect(failed.json().error.code).toBe(expectedCode);
+
+      fetchMock.mockResolvedValueOnce(json({
+        data: { issue: { identifier: 'SOC-79', title: 'Partial issue', description: null } },
+        errors: [{ message: 'Upstream error details', extensions }],
+      }));
+      const response = await importTicket('https://linear.app/social-cities/issue/SOC-79/setup-supabase-for-project');
+      expect(response.statusCode).toBe(status);
+      expect(response.json().error.code).toBe(expectedCode);
+      expect(response.body).not.toContain('Upstream error details');
+    }
+  });
+
+  it.each([null, {}, { data: { issue: { title: 42 } } }])('rejects malformed Linear response %j', async (body) => {
+    await ctx.app.ctx.secrets.set(ctx.userA, 'linear', 'lin_api_xxxxxxxx');
+    fetchMock.mockResolvedValueOnce(json(body));
+    const response = await importTicket('https://linear.app/social-cities/issue/SOC-79');
+    expect(response.statusCode).toBe(502);
+    expect(response.json().error.code).toBe('TICKET_RESPONSE_INVALID');
+  });
+
+  it('returns not found for a missing Linear issue', async () => {
+    await ctx.app.ctx.secrets.set(ctx.userA, 'linear', 'lin_api_xxxxxxxx');
+    fetchMock.mockResolvedValueOnce(json({ data: { issue: null } }));
+    const response = await importTicket('https://linear.app/social-cities/issue/SOC-79');
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.code).toBe('TICKET_NOT_FOUND');
+  });
+
+  it('reports Linear HTTP rate limits as retryable', async () => {
+    await ctx.app.ctx.secrets.set(ctx.userA, 'linear', 'lin_api_xxxxxxxx');
+    fetchMock.mockResolvedValueOnce(json({}, 429));
+    const response = await importTicket('https://linear.app/social-cities/issue/SOC-79');
+    expect(response.statusCode).toBe(429);
+    expect(response.json().error.code).toBe('TICKET_RATE_LIMITED');
   });
 
   it('imports from Jira with basic auth and renders ADF', async () => {

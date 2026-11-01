@@ -1,4 +1,5 @@
 import { detectTicket, type DetectedTicket, type TicketImport } from '@sindral/shared';
+import { z } from 'zod';
 import { badRequest, HttpError } from '../errors.js';
 import type { FetchLike } from './github.js';
 import type { GitHubOAuthService } from './githubOAuth.js';
@@ -6,6 +7,33 @@ import type { SecretService } from './secrets.js';
 
 const REQUEST_TIMEOUT_MS = 10_000;
 export const MAX_TICKET_RESPONSE_BYTES = 1024 * 1024;
+
+const linearResponseSchema = z.object({
+  data: z.object({
+    issue: z.object({
+      identifier: z.string().min(1),
+      title: z.string().min(1),
+      description: z.string().nullish(),
+      url: z.string().url().optional(),
+    }).nullable(),
+  }).nullish(),
+  errors: z.array(z.object({
+    extensions: z.object({ code: z.string().nullish(), type: z.string().nullish() }).nullish(),
+  })).optional(),
+});
+
+function linearGraphQLError(errors: NonNullable<z.infer<typeof linearResponseSchema>['errors']>): HttpError {
+  const kinds = new Set(errors.flatMap(({ extensions }) => [extensions?.code, extensions?.type])
+    .filter((kind): kind is string => typeof kind === 'string')
+    .map((kind) => kind.toLowerCase().replaceAll('_', ' ')));
+  if (kinds.has('authentication error') || kinds.has('unauthenticated') || kinds.has('forbidden')) {
+    return new HttpError(400, 'TICKET_AUTH_FAILED', 'Linear rejected the configured credentials. Check your API key and its access to this issue in Settings.');
+  }
+  if (kinds.has('ratelimited') || kinds.has('rate limited')) {
+    return new HttpError(429, 'TICKET_RATE_LIMITED', 'Linear rate limit reached. Please try again later.');
+  }
+  return new HttpError(502, 'TICKET_FETCH_FAILED', 'Linear could not return the issue. Please try again later.');
+}
 
 async function readJsonResponse(res: Response, provider: string): Promise<unknown> {
   const contentType = (res.headers.get('content-type') ?? '').split(';', 1)[0]!.trim().toLowerCase();
@@ -83,6 +111,7 @@ async function request(fetchImpl: FetchLike, url: string, init: RequestInit, pro
   }
   if (res.status === 401 || res.status === 403) throw new HttpError(400, 'TICKET_AUTH_FAILED', `${provider} rejected the configured credentials`);
   if (res.status === 404) throw new HttpError(404, 'TICKET_NOT_FOUND', `Ticket not found on ${provider}`);
+  if (res.status === 429) throw new HttpError(429, 'TICKET_RATE_LIMITED', `${provider} rate limit reached. Please try again later.`);
   if (!res.ok) throw new HttpError(502, 'TICKET_FETCH_FAILED', `${provider} responded with ${res.status}`);
   try {
     return await readJsonResponse(res, provider);
@@ -116,7 +145,7 @@ export class TicketService {
     const secret = await this.secrets.get(userId, 'linear');
     if (!secret) throw badRequest('Linear API key is not configured');
     const query = 'query Issue($id: String!) { issue(id: $id) { identifier title description url } }';
-    const body = (await request(
+    const body = await request(
       this.fetchImpl,
       'https://api.linear.app/graphql',
       {
@@ -125,13 +154,17 @@ export class TicketService {
         body: JSON.stringify({ query, variables: { id: ticket.id } }),
       },
       'Linear',
-    )) as { data?: { issue?: { identifier?: string; title?: string; description?: string | null; url?: string } | null }; errors?: unknown[] };
-    const issue = body.data?.issue;
+    );
+    const parsed = linearResponseSchema.safeParse(body);
+    if (!parsed.success) throw new HttpError(502, 'TICKET_RESPONSE_INVALID', 'Linear returned an invalid issue response');
+    if (parsed.data.errors?.length) throw linearGraphQLError(parsed.data.errors);
+    if (!parsed.data.data) throw new HttpError(502, 'TICKET_RESPONSE_INVALID', 'Linear returned an invalid issue response');
+    const issue = parsed.data.data.issue;
     if (!issue) throw new HttpError(404, 'TICKET_NOT_FOUND', 'Linear issue not found');
     return {
       provider: 'linear',
-      id: issue.identifier ?? ticket.id,
-      title: issue.title ?? ticket.id,
+      id: issue.identifier,
+      title: issue.title,
       description: issue.description ?? '',
       url: issue.url ?? `https://linear.app/${ticket.ref.org}/issue/${ticket.id}`,
     };

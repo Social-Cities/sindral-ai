@@ -1,5 +1,6 @@
 import type { SecretProvider, SecretStatus } from '@sindral/shared';
 import type { Repository } from '../db/repository.js';
+import { HttpError } from '../errors.js';
 import { decryptSecret, encryptSecret, secretHint } from './crypto.js';
 
 export const SECRET_PROVIDERS: SecretProvider[] = ['github', 'linear', 'jira'];
@@ -48,10 +49,17 @@ export class SecretService {
   async get(userId: string, provider: SecretProvider): Promise<DecryptedSecret | null> {
     const stored = await this.repo.getSecret(userId, provider);
     if (!stored) return null;
-    const plaintext = decryptSecret(stored, this.key);
-    if (!plaintext.startsWith(CREDENTIAL_PREFIX)) return { token: plaintext, metadata: stored.metadata };
-    const credential = parseCredential(plaintext.slice(CREDENTIAL_PREFIX.length));
-    return { ...credential, metadata: stored.metadata };
+    try {
+      const plaintext = decryptSecret(stored, this.key);
+      if (!plaintext.startsWith(CREDENTIAL_PREFIX)) return { token: plaintext, metadata: stored.metadata };
+      const credential = parseCredential(plaintext.slice(CREDENTIAL_PREFIX.length));
+      return { ...credential, metadata: stored.metadata };
+    } catch {
+      // A changed encryption key or damaged credential requires replacement in Settings.
+      // Keep repository failures outside this catch and never include credential data.
+      const label = { github: 'GitHub', linear: 'Linear', jira: 'Jira' }[provider];
+      throw new HttpError(400, 'CREDENTIAL_UNREADABLE', `The saved ${label} credential could not be read. Save it again in Settings and retry.`);
+    }
   }
 
   async statuses(userId: string): Promise<SecretStatus[]> {
