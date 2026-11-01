@@ -66,6 +66,37 @@ test('core task screens reflow at tablet width without document overflow', async
   await expect(page.getByRole('tab', { name: 'Summary' })).toBeVisible();
 });
 
+test('workflow action is fully readable as soon as workflow loading enables it', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'light' });
+  const task = makeTask({ state: 'plan-review', currentStepId: 'plan-review', pinnedWorkflow: snapshotWorkflow(FULL_SDLC_WORKFLOW) });
+  await installMockBackend(page, { tasks: [task] });
+  await signIn(page);
+  let releaseWorkflows!: () => void;
+  const workflowsReady = new Promise<void>((resolve) => { releaseWorkflows = resolve; });
+  await page.route('**/api/workflows', async (route) => { await workflowsReady; await route.fallback(); });
+  try {
+    await page.goto(`/tasks/${task.id}`);
+    const button = page.getByRole('button', { name: 'Change workflow' });
+    await expect(button).toBeDisabled();
+    // Capture the first enabled frame, before an opacity transition could finish.
+    await button.evaluate((element) => {
+      const observer = new MutationObserver(() => {
+        if (element.hasAttribute('disabled')) return;
+        element.setAttribute('data-enabled-opacity', getComputedStyle(element).opacity);
+        observer.disconnect();
+      });
+      observer.observe(element, { attributes: true, attributeFilter: ['disabled'] });
+      void getComputedStyle(element).opacity;
+    });
+    releaseWorkflows();
+    await expect(button).toBeEnabled();
+    await expect(button).toHaveAttribute('data-enabled-opacity', '1');
+    await expectNoSeriousViolations(page);
+  } finally {
+    releaseWorkflows();
+  }
+});
+
 test('reduced-motion preference suppresses repeating status animation', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   const task = makeTask({ state: 'planning', currentStepId: 'planning', pinnedWorkflow: snapshotWorkflow(FULL_SDLC_WORKFLOW) });
