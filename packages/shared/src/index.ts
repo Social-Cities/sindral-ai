@@ -1,6 +1,7 @@
 export * from './types.js';
 export * from './states.js';
 export * from './workflow.js';
+export * from './workflowAssignment.js';
 export * from './stateMachine.js';
 export * from './prompts.js';
 export * from './tickets.js';

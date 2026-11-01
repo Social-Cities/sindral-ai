@@ -21,6 +21,7 @@ import type {
   WorkflowRecord,
 } from './types.js';
 import type { DesignCheckpoint, DesignHandoff, DesignOverview, DesignRevision, DesignRevisionView, PortableSessionEntry } from './design.js';
+import type { WorkflowAssignmentPreview } from './workflowAssignment.js';
 
 export interface ApiError {
   error: { code: string; message: string; details?: unknown };
@@ -42,6 +43,8 @@ export interface ApiRoutes {
   'POST /api/tasks/:id/actions': { response: { task: Task } };
   'POST /api/tasks/:id/agent/stop': { response: { task: Task } };
   'POST /api/tasks/:id/workflow-pin': { response: { task: Task } };
+  'POST /api/tasks/:id/workflow-assignment/preview': { response: WorkflowAssignmentPreview };
+  'POST /api/tasks/:id/workflow-assignment': { response: { task: Task } };
   'GET /api/tasks/:id/messages': { response: { messages: Message[] } };
   'POST /api/tasks/:id/messages': { response: { message: Message; task: Task } };
   'GET /api/tasks/:id/events': { response: { events: TaskEvent[] } };

@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { CreateTaskInput, Message, Task, TaskWithRelations, UpdateTaskInput, Workflow } from '@sindral/shared';
+import type { AssignWorkflowInput, CreateTaskInput, Message, Task, TaskWithRelations, UpdateTaskInput, Workflow } from '@sindral/shared';
 import { chatTriggersFeedback, transition } from '@sindral/shared';
 import {
   ApiError,
+  assignTaskWorkflow,
   createTask,
   deleteTask,
   getJobLogs,
@@ -141,6 +142,21 @@ export function useRepinTaskWorkflow(taskId: string) {
     },
     onSuccess: ({ task }) => {
       qc.setQueryData<TaskWithRelations>(key, (prev) => (prev ? { ...prev, ...task } : prev));
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: key });
+      void qc.invalidateQueries({ queryKey: queryKeys.tasks });
+    },
+  });
+}
+
+export function useAssignTaskWorkflow(taskId: string) {
+  const qc = useQueryClient();
+  const key = queryKeys.task(taskId);
+  return useMutation({
+    mutationFn: (input: AssignWorkflowInput) => assignTaskWorkflow(taskId, input),
+    onSuccess: ({ task }) => {
+      qc.setQueryData<TaskWithRelations>(key, (prev) => prev ? { ...prev, ...task } : prev);
     },
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: key });

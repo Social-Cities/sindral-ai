@@ -1,4 +1,4 @@
-import { createTaskSchema, listTasksQuerySchema, repinWorkflowSchema, sendMessageSchema, taskActionSchema, updateTaskSchema } from '@sindral/shared';
+import { assignWorkflowSchema, previewWorkflowAssignmentSchema, createTaskSchema, listTasksQuerySchema, repinWorkflowSchema, sendMessageSchema, taskActionSchema, updateTaskSchema } from '@sindral/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../auth/user.js';
@@ -84,6 +84,20 @@ export const taskRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx })
     }
     const task = await orchestrator.repinWorkflow(request.user!.id, id, expectedVersion, idempotencyKey);
     return { task };
+  });
+
+  app.post('/api/tasks/:id/workflow-assignment/preview', async (request) => {
+    const { id } = validate(idParamsSchema, request.params);
+    const input = validate(previewWorkflowAssignmentSchema, request.body);
+    return orchestrator.previewWorkflowAssignment(request.user!.id, id, input);
+  });
+
+  app.post('/api/tasks/:id/workflow-assignment', async (request) => {
+    const { id } = validate(idParamsSchema, request.params);
+    const input = validate(assignWorkflowSchema, request.body);
+    const key = request.headers['idempotency-key'];
+    if (typeof key !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,199}$/.test(key)) throw badRequest('A valid Idempotency-Key header is required');
+    return { task: await orchestrator.assignWorkflow(request.user!.id, id, input, key) };
   });
 
   app.get('/api/tasks/:id/messages', async (request) => {

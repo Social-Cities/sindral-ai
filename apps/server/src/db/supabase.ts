@@ -77,7 +77,7 @@ export function createSupabaseClient(url: string, serviceRoleKey: string): Supab
   });
 }
 
-export const EXPECTED_SCHEMA_VERSION = '20261031173740';
+export const EXPECTED_SCHEMA_VERSION = '20261101180627';
 
 interface DesignRevisionRow {
   id: string; task_id: string; job_id: string; result: DesignResult; created_at: string; approved_at: string | null;
@@ -925,29 +925,34 @@ export class SupabaseRepository implements Repository {
   async applyTaskTransition(userId: string, command: TaskTransitionCommand): Promise<TaskTransitionResult> {
     const event = command.event;
     const job = command.job;
+    const transitionArgs = {
+      p_user_id: userId,
+      p_task_id: command.taskId,
+      p_expected_version: command.expectedVersion,
+      p_idempotency_key: command.idempotencyKey,
+      p_request_hash: command.requestHash,
+      p_next_state: command.patch.state,
+      p_next_step_id: command.patch.currentStepId,
+      p_failed_step_id: command.patch.failedStepId,
+      p_pin_workflow: command.patch.pinnedWorkflow !== undefined,
+      p_pinned_workflow: command.patch.pinnedWorkflow ?? null,
+      p_event: {
+        type: event.type,
+        fromState: event.fromState ?? null,
+        toState: event.toState ?? null,
+        stepId: event.stepId ?? null,
+        detail: event.detail ?? null,
+      },
+      p_job: job ? { kind: job.kind, stepId: job.stepId, payload: job.payload } : null,
+      p_cancel_queued: command.cancelQueuedJobs ?? false,
+    };
     try {
       const response = await run<{ task: TaskRow; job: JobRow | null; replayed: boolean }>(
-        this.client.rpc('apply_task_transition', {
-          p_user_id: userId,
-          p_task_id: command.taskId,
-          p_expected_version: command.expectedVersion,
-          p_idempotency_key: command.idempotencyKey,
-          p_request_hash: command.requestHash,
-          p_next_state: command.patch.state,
-          p_next_step_id: command.patch.currentStepId,
-          p_failed_step_id: command.patch.failedStepId,
-          p_pin_workflow: command.patch.pinnedWorkflow !== undefined,
-          p_pinned_workflow: command.patch.pinnedWorkflow ?? null,
-          p_event: {
-            type: event.type,
-            fromState: event.fromState ?? null,
-            toState: event.toState ?? null,
-            stepId: event.stepId ?? null,
-            detail: event.detail ?? null,
-          },
-          p_job: job ? { kind: job.kind, stepId: job.stepId, payload: job.payload } : null,
-          p_cancel_queued: command.cancelQueuedJobs ?? false,
-        }),
+        this.client.rpc(command.workflowAssignment ? 'reassign_task_workflow' : 'apply_task_transition', command.workflowAssignment ? {
+          ...transitionArgs,
+          p_workflow_id: command.workflowAssignment.workflowId,
+          p_platforms: command.workflowAssignment.platforms,
+        } : transitionArgs),
       );
       return { task: mapTask(response.task), job: response.job ? mapJob(response.job) : null, replayed: response.replayed };
     } catch (error) {

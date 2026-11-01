@@ -1,4 +1,5 @@
 import type { Workflow, WorkflowEdge, WorkflowStep } from './types.js';
+import { MODEL_OPTIONS } from './defaultWorkflows.js';
 
 export interface WorkflowValidationIssue {
   path: string;
@@ -125,6 +126,24 @@ export function validateWorkflow(workflow: Workflow): WorkflowValidationIssue[] 
 /** Structured deep copy used when pinning a workflow to a task. */
 export function snapshotWorkflow(workflow: Workflow): Workflow {
   return JSON.parse(JSON.stringify(workflow)) as Workflow;
+}
+
+/** Change a step's role while keeping its identity and connections consistent. */
+export function changeWorkflowStepType(workflow: Workflow, stepId: string, type: WorkflowStep['type']): Workflow {
+  const step = getStep(workflow, stepId);
+  if (!step) throw new Error('Step does not exist');
+  if (step.type === type) return workflow;
+  if (step.id === workflow.entryStepId && type !== 'human') throw new Error('Entry step must be a human step');
+  const replacement: WorkflowStep = { id: step.id, label: step.label, state: type === 'end' ? 'done' : step.state, type };
+  if (step.position) replacement.position = { ...step.position };
+  if (type === 'agent') {
+    Object.assign(replacement, { engine: 'claude', model: MODEL_OPTIONS.claude[0], mode: 'normal', output: 'document', prompt: '' });
+  }
+  return {
+    ...workflow,
+    steps: workflow.steps.map((item) => item.id === stepId ? replacement : item),
+    edges: type === 'end' ? workflow.edges.filter((edge) => edge.from !== stepId) : workflow.edges,
+  };
 }
 
 export function stepState(workflow: Workflow, stepId: string | null): string | null {

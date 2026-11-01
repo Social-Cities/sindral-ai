@@ -557,7 +557,7 @@ private struct NewWorkflowSheet: View {
         NavigationStack {
             Form {
                 TextField("Workflow name", text: $name)
-                Picker("Clone from", selection: $cloneFrom) { Text("Full SDLC default").tag(""); ForEach(store.workflows) { Text($0.name).tag($0.id) } }
+                Picker("Start from", selection: $cloneFrom) { Text("Scratch").tag(""); ForEach(store.workflows) { Text($0.name).tag($0.id) } }
             }
             .themedList()
             .navigationTitle("New workflow").navigationBarTitleDisplayMode(.inline)

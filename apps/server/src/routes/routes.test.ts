@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { WORKER_PROTOCOL_HEADER, WORKER_PROTOCOL_VERSION, type Project, type Task, type WorkflowRecord } from '@sindral/shared';
+import { WORKER_PROTOCOL_HEADER, WORKER_PROTOCOL_VERSION, validateWorkflow, type Project, type Task, type WorkflowRecord } from '@sindral/shared';
 import { claimNext, completeMerge, completeNext, createTestApp, implementation, plan, review, reviewSlice, testConfig, verdict, type TestContext } from '../test/helpers.js';
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -83,6 +83,38 @@ describe('tasks API', () => {
     const listB = await ctx.app.inject({ method: 'GET', url: '/api/tasks', headers: asB() });
     expect(listB.json()).toEqual({ tasks: [] });
     expect((await ctx.repo.getTask(ctx.userA, task.id))?.title).toBe('Task');
+  });
+
+  it('reassigns an unstarted task to a different workflow entry point', async () => {
+    const task = await createTask();
+    // Custom workflows need not share the bundled entry step id.
+    const created = await ctx.app.ctx.workflows.create(ctx.userA, 'Custom');
+    await ctx.app.ctx.workflows.update(ctx.userA, created.id, {
+      name: 'Custom', entryStepId: 'ready',
+      steps: [{ id: 'ready', type: 'human', label: 'Ready', state: 'todo' }, { id: 'done', type: 'end', label: 'Done', state: 'done' }],
+      edges: [{ from: 'ready', to: 'done', event: 'complete', label: 'Finish' }],
+    });
+    await ctx.repo.updateTask(ctx.userA, task.id, { currentStepId: 'todo' });
+    const patch = (workflowId: string) => ctx.app.inject({ method: 'PATCH', url: `/api/tasks/${task.id}`, headers: asA(), payload: { workflowId } });
+    const foreign = await ctx.app.ctx.workflows.create(ctx.userB, 'Private');
+    expect((await patch(foreign.id)).statusCode).toBe(400);
+    expect((await patch('missing')).statusCode).toBe(400);
+    expect((await ctx.repo.getTask(ctx.userA, task.id))?.workflowId).toBe(task.workflowId);
+    const response = await patch(created.id);
+    expect(response.statusCode).toBe(200);
+    expect(response.json<{ task: Task }>().task).toMatchObject({ workflowId: created.id, currentStepId: null, pinnedWorkflow: null, state: 'todo' });
+    expect((await taskAction(task.id, 'complete')).statusCode).toBe(200);
+    expect((await ctx.repo.getTask(ctx.userA, task.id))?.state).toBe('done');
+    expect((await patch(task.workflowId!)).statusCode).toBe(409);
+  });
+
+  it('rejects workflow reassignment after work starts', async () => {
+    const task = await createTask();
+    await taskAction(task.id, 'start');
+    const copy = await ctx.app.ctx.workflows.create(ctx.userA, 'Other');
+    const response = await ctx.app.inject({ method: 'PATCH', url: `/api/tasks/${task.id}`, headers: asA(), payload: { workflowId: copy.id } });
+    expect(response.statusCode).toBe(409);
+    expect((await ctx.repo.getTask(ctx.userA, task.id))?.workflowId).toBe(task.workflowId);
   });
 
   it('updates a task pinned workflow to the latest live workflow version', async () => {
@@ -357,6 +389,38 @@ describe('tasks API', () => {
 });
 
 describe('workflows API', () => {
+  it('creates a minimal valid workflow from scratch, preserving bundled defaults', async () => {
+    const response = await ctx.app.inject({ method: 'POST', url: '/api/workflows', headers: asA(), payload: { name: 'From scratch' } });
+    expect(response.statusCode).toBe(201);
+    const workflow = response.json<{ workflow: WorkflowRecord }>().workflow;
+    expect(workflow).toMatchObject({ name: 'From scratch', userId: ctx.userA, isDefault: false });
+    expect(workflow.steps.map((step) => step.type)).toEqual(['human', 'end']);
+    expect(validateWorkflow(workflow)).toEqual([]);
+    const list = await ctx.app.ctx.workflows.list(ctx.userA);
+    expect(list).toHaveLength(7);
+    expect(list.find((item) => item.isDefault)?.name).toBe('Full SDLC');
+  });
+
+  it('clones saved definitions independently and rejects inaccessible sources', async () => {
+    const [source] = await ctx.app.ctx.workflows.list(ctx.userA);
+    const response = await ctx.app.inject({ method: 'POST', url: '/api/workflows', headers: asA(), payload: { name: 'Copy', cloneFrom: source!.id } });
+    expect(response.statusCode).toBe(201);
+    const copy = response.json<{ workflow: WorkflowRecord }>().workflow;
+    expect(copy.id).not.toBe(source!.id);
+    expect(copy.steps).toEqual(source!.steps);
+    expect(copy.edges).toEqual(source!.edges);
+    expect(copy.troubleshootStep).toEqual(source!.troubleshootStep);
+    await ctx.app.ctx.workflows.update(ctx.userA, copy.id, {
+      ...copy, steps: copy.steps.map((step, index) => index === 0 ? { ...step, label: 'Changed copy' } : step),
+    });
+    expect((await ctx.app.ctx.workflows.get(ctx.userA, source!.id))?.steps).toEqual(source!.steps);
+    const foreign = await ctx.app.ctx.workflows.create(ctx.userB, 'Private');
+    for (const cloneFrom of [foreign.id, 'missing']) {
+      expect((await ctx.app.inject({ method: 'POST', url: '/api/workflows', headers: asA(), payload: { name: 'Denied', cloneFrom } })).statusCode).toBe(404);
+    }
+    expect((await ctx.app.inject({ method: 'POST', url: '/api/workflows', headers: asA(), payload: { name: '   ' } })).statusCode).toBe(400);
+  });
+
   it('seeds bundled workflows per user and validates updates', async () => {
     const list = await ctx.app.inject({ method: 'GET', url: '/api/workflows', headers: asA() });
     const workflows = list.json<{ workflows: WorkflowRecord[] }>().workflows;

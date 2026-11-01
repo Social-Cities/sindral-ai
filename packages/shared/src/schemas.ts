@@ -46,8 +46,8 @@ export const workflowSchema = z.object({
 
 export const createWorkflowSchema = z.object({
   name: shortText,
-  /** Optional workflow id to clone; defaults to the Full SDLC workflow. */
-  cloneFrom: z.string().max(64).optional(),
+  /** Optional workflow id to clone; omit to start with a minimal workflow. */
+  cloneFrom: z.string().min(1).max(64).optional(),
 });
 
 export const updateWorkflowSchema = workflowSchema.omit({ id: true });
@@ -124,6 +124,17 @@ export const taskActionSchema = z.object({
 
 export const repinWorkflowSchema = z.object({
   expectedVersion: z.number().int().nonnegative(),
+});
+
+export const previewWorkflowAssignmentSchema = z.object({
+  workflowId: id,
+  stepId: id.optional(),
+});
+
+export const assignWorkflowSchema = previewWorkflowAssignmentSchema.extend({
+  stepId: id,
+  expectedVersion: z.number().int().nonnegative(),
+  acknowledgeWarnings: z.boolean().default(false),
 });
 
 export const sendMessageSchema = z.object({
@@ -385,6 +396,8 @@ export type CreateGitHubRepositoryInput = z.infer<typeof createGitHubRepositoryS
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;
 export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
 export type UpdateTaskInput = z.infer<typeof updateTaskSchema>;
+export type AssignWorkflowInput = z.infer<typeof assignWorkflowSchema>;
+export type PreviewWorkflowAssignmentInput = z.infer<typeof previewWorkflowAssignmentSchema>;
 export type RepinWorkflowInput = z.infer<typeof repinWorkflowSchema>;
 export type CreateWorkflowInput = z.infer<typeof createWorkflowSchema>;
 export type UpdateWorkflowInput = z.infer<typeof updateWorkflowSchema>;

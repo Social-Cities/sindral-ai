@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { BUNDLED_WORKFLOWS, FULL_SDLC_WORKFLOW, snapshotWorkflow, type Workflow, type WorkflowRecord } from '@sindral/shared';
+import { BUNDLED_WORKFLOWS, snapshotWorkflow, type Workflow, type WorkflowRecord } from '@sindral/shared';
 import type { Repository } from '../db/repository.js';
 import { conflict, notFound } from '../errors.js';
 
@@ -37,9 +37,19 @@ export class WorkflowService {
   }
 
   async create(userId: string, name: string, cloneFrom?: string): Promise<WorkflowRecord> {
-    const source = await this.resolveCloneSource(userId, cloneFrom);
+    // Ensure creating a first custom workflow does not suppress bundled defaults.
+    await this.list(userId);
     const id = randomUUID();
-    const definition: Workflow = { ...snapshotWorkflow(source), id, name };
+    const definition: Workflow = cloneFrom
+      ? { ...snapshotWorkflow(await this.resolveCloneSource(userId, cloneFrom)), id, name }
+      : {
+          id, name, entryStepId: 'todo',
+          steps: [
+            { id: 'todo', type: 'human', label: 'Start', state: 'todo', position: { x: 40, y: 150 } },
+            { id: 'done', type: 'end', label: 'Done', state: 'done', position: { x: 280, y: 150 } },
+          ],
+          edges: [{ from: 'todo', to: 'done', event: 'complete', label: 'Complete' }],
+        };
     return this.repo.createWorkflow(userId, { id, definition, isDefault: false });
   }
 
@@ -63,8 +73,7 @@ export class WorkflowService {
     }
   }
 
-  private async resolveCloneSource(userId: string, cloneFrom?: string): Promise<Workflow> {
-    if (!cloneFrom) return FULL_SDLC_WORKFLOW;
+  private async resolveCloneSource(userId: string, cloneFrom: string): Promise<Workflow> {
     const own = await this.get(userId, cloneFrom);
     if (own) return toWorkflow(own);
     const bundled = BUNDLED_WORKFLOWS.find((w) => w.id === cloneFrom);

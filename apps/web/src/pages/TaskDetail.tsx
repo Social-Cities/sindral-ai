@@ -11,6 +11,7 @@ import { Modal } from '@/components/Modal';
 import { PageLoader, Spinner } from '@/components/Spinner';
 import { StatusBadge } from '@/components/StatusBadge';
 import { TaskPlatformSelector } from '@/components/TaskPlatformSelector';
+import { WorkflowAssignment } from '@/components/WorkflowAssignment';
 import { useDeleteTask, useRepinTaskWorkflow, useSendMessage, useStopAgent, useTask, useTaskAction, useUpdateTask } from '@/hooks/useTasks';
 import { useWorkflows } from '@/hooks/useWorkflows';
 import { ApiError } from '@/lib/api';
@@ -298,6 +299,9 @@ export function TaskDetail() {
         <div className="flex-1 overflow-hidden flex flex-col min-w-0">
           <div className="shrink-0 px-4 sm:px-6 pt-4 sm:pt-5 pb-4 border-b border-border">
             <h1 className="text-lg font-semibold text-foreground tracking-tight leading-snug">{task.title}</h1>
+            <WorkflowAssignment task={task} workflows={workflows} disabled={action.isPending || updateTask.isPending || workflowsQuery.isLoading || workflowsQuery.isError} />
+            {workflowsQuery.isError && <p role="alert" className="mt-2 text-xs text-[#f87171]">Could not load workflows.</p>}
+            {updateTask.error && <p role="alert" className="mt-2 text-xs text-[#f87171]">{errorMessage(updateTask.error)}</p>}
             <Pipeline task={task} workflow={workflow} />
           </div>
 
@@ -313,7 +317,6 @@ export function TaskDetail() {
                 onViewPlan={() => setTab('plan')}
                 platformSelector={workflow?.mobilePlatforms && <div className="border-b border-border pb-4">
                   <TaskPlatformSelector value={task.platforms ?? workflow.mobilePlatforms} available={task.pinnedWorkflow ? workflow.mobilePlatforms : mobileTaskPlatformOptions(workflows.find((item) => item.id === task.workflowId))} onChange={(platforms) => updateTask.mutate({ platforms })} disabled={task.state !== 'todo' || Boolean(task.pinnedWorkflow) || updateTask.isPending} requireOne />
-                  {updateTask.error && <p role="alert" className="text-xs text-[#f87171]">{errorMessage(updateTask.error)}</p>}
                 </div>}
               />
             )}
