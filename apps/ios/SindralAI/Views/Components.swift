@@ -23,7 +23,16 @@ struct TaskCard: View {
                 .multilineTextAlignment(.leading)
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
-            StatusBadge(state: task.state, step: step)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    StatusBadge(state: task.state, step: step)
+                    platformScope
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    StatusBadge(state: task.state, step: step)
+                    platformScope
+                }
+            }
         }
         .padding(.horizontal, 16).padding(.vertical, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -31,6 +40,13 @@ struct TaskCard: View {
         .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.row))
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    @ViewBuilder private var platformScope: some View {
+        if let platforms = task.platforms ?? task.pinnedWorkflow?.mobilePlatforms, !platforms.isEmpty {
+            Text(platforms.map(TaskPlatformSelection.label).joined(separator: " · "))
+                .font(Theme.mono(11)).foregroundStyle(Theme.mutedForeground)
+        }
     }
 }
 
@@ -158,12 +174,14 @@ struct TaskPlatformSelector: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Platforms for this task").font(Theme.bodyMedium)
             ForEach(TaskPlatformSelection.options(workflow: workflow, project: project), id: \.self) { platform in
-                Toggle(platform == "ios" ? "iOS" : platform.capitalized, isOn: Binding(get: {
+                Toggle(TaskPlatformSelection.label(platform), isOn: Binding(get: {
                     TaskPlatformSelection.values(selection, workflow: workflow, project: project).contains(platform)
                 }, set: { enabled in
                     let current = TaskPlatformSelection.values(selection, workflow: workflow, project: project)
-                    selection = enabled ? current + [platform] : current.filter { $0 != platform }
+                    selection = TaskPlatformSelection.updating(current, platform: platform, enabled: enabled)
                 }))
+                .disabled(TaskPlatformSelection.values(selection, workflow: workflow, project: project) == [platform])
+                .accessibilityIdentifier("task-platform-\(platform)")
             }
             Text("Only selected platforms run, in iOS → Android → Web order. Selection is locked when work starts.")
                 .font(Theme.secondaryBody).foregroundStyle(Theme.mutedForeground)

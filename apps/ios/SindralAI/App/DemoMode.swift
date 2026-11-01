@@ -81,8 +81,8 @@ enum DemoFixtures {
         case ("POST", "/auth/v1/token"), ("POST", "/auth/v1/signup"):
             return Data(#"{"access_token":"demo","refresh_token":"demo","expires_in":86400,"user":{"id":"demo-user","email":"luc@example.com"}}"#.utf8)
         case ("GET", "/api/tasks"): return json(["tasks": tasks])
-        case ("GET", "/api/workflows"): return json(["workflows": [fullSDLC, designWorkflow]])
-        case ("GET", "/api/projects"): return json(["projects": [Project]()])
+        case ("GET", "/api/workflows"): return json(["workflows": [fullSDLC, mobileSDLC, designWorkflow]])
+        case ("GET", "/api/projects"): return json(["projects": [mobileProject]])
         case ("GET", "/api/github/catalog"): return json(GitHubCatalog(connected: true, source: "oauth", repositories: [], owners: []))
         case ("GET", "/api/tasks/d1/design"):
             let revision = designRevision
@@ -160,6 +160,60 @@ enum DemoFixtures {
         )
     }()
 
+    static let mobileProject = Project(projectType: "mobile-app", platforms: ["ios", "android"],
+        id: "project-mobile", userId: "demo-user", name: "Mobile workspace", description: "One app across iOS, Android and Web.",
+        createdAt: ago(days: 3), updatedAt: ago(days: 1), repositories: [
+            .init(id: "repo-mobile", userId: "demo-user", projectId: "project-mobile", repository: "social-cities/sindral-ai", createdAt: ago(days: 3), updatedAt: ago(days: 1))
+        ])
+
+    static let mobileSDLC: Workflow = {
+        var workflow = fullSDLC
+        workflow.id = "wf-mobile-app"; workflow.name = "Mobile App SDLC"; workflow.isDefault = false
+        workflow.mobilePlatforms = ["ios", "android"]
+        workflow.description = "Review BDD and implementation plans, implement selected clients, then verify readiness."
+        let implementation = workflow.step("implement")!
+        workflow.steps.removeAll { ["implement", "implement-feedback"].contains($0.id) }
+        workflow.edges.removeAll { ["implement", "implement-feedback"].contains($0.from) }
+        for index in workflow.edges.indices {
+            if workflow.edges[index].from == "todo" { workflow.edges[index].to = "bdd" }
+            if workflow.edges[index].to == "implement" {
+                workflow.edges[index].to = "implement-ios"; workflow.edges[index].label = "Approve Both Plans"
+            }
+            if workflow.edges[index].to == "implement-feedback" { workflow.edges[index].to = "implement-feedback-ios" }
+        }
+        for (id, label) in [("bdd", "Behavior Driven Design"), ("bdd-feedback", "Revise BDD Plan")] {
+            var step = implementation
+            step.id = id; step.state = id; step.label = label; step.output = "bdd-plan"; step.resumeSessionKey = "bdd"
+            workflow.steps.append(step)
+        }
+        workflow.edges += [
+            .init(from: "bdd", to: "planning", event: "complete"),
+            .init(from: "plan-review", to: "bdd-feedback", event: "bdd-feedback", label: "Revise BDD Plan"),
+            .init(from: "bdd-feedback", to: "planning-feedback", event: "complete")
+        ]
+        for revision in [false, true] {
+            let prefix = revision ? "implement-feedback" : "implement"
+            for (index, platform) in TaskPlatformSelection.all.enumerated() {
+                var step = implementation
+                step.id = "\(prefix)-\(platform)"; step.state = step.id; step.platform = platform
+                step.label = "\(revision ? "Revise" : "Implement") \(TaskPlatformSelection.label(platform))"
+                step.resumeSessionKey = "implementation-\(platform)"
+                workflow.steps.append(step)
+                let next = index + 1 < TaskPlatformSelection.all.count ? "\(prefix)-\(TaskPlatformSelection.all[index + 1])" : "review-slice"
+                workflow.edges.append(.init(from: step.id, to: next, event: "complete"))
+            }
+        }
+        if let index = workflow.steps.firstIndex(where: { $0.id == "in-review" }) { workflow.steps[index].label = "Ready for Release" }
+        // Let the demo canvas lay out the longer mobile workflow without inherited node overlaps.
+        workflow.steps = workflow.steps.map { var step = $0; step.position = nil; return step }
+        return workflow
+    }()
+
+    static let mobileBddPlan = BddPlan(plan: "## BDD test plan\nCover the task lifecycle on every selected client, including offline and error states.", scenarios: [
+        .init(id: "TASK-001", given: "a signed-in user", when: "they create a task targeting iOS and Web", then: "only those clients appear in the task pipeline"),
+        .init(id: "TASK-002", given: "both plans are approved and work has started", when: "the user edits the task", then: "the title can change while platform scope stays locked")
+    ])
+
     static let workers = [Worker(id: "w1", name: "MacBook Pro", hostname: "lucs-mbp.local", version: "0.1.0", status: "online", runningJobs: 1, lastSeenAt: ago(minutes: 1))]
 
     private static func task(_ id: String, key: String, title: String, state: String, step: String?, updated: String, description: String = "", outcome: String = "", criteria: String = "", ticket: String? = nil, pr: String? = nil, plan: String? = nil, lastError: String? = nil, workflowID: String = "wf-default") -> SindralTask {
@@ -167,6 +221,8 @@ enum DemoFixtures {
     }
 
     static let tasks: [SindralTask] = [
+        mobileTask("m1", key: "SIN-63", state: "todo", step: "todo", platforms: ["ios", "web"]),
+        mobileTask("m2", key: "SIN-64", state: "plan-review", step: "plan-review", platforms: ["ios", "android"]),
         task("d1", key: "SIN-62", title: "Design a calmer workspace", state: "design-review", step: "design-review", updated: ago(minutes: 1),
              description: "A focused workspace for reviewing agent work, decisions and next steps.", workflowID: "wf-design"),
         task("t51", key: "SIN-51", title: "Add rate limiting to the worker job API", state: "in-review", step: "in-review", updated: ago(minutes: 4),
@@ -189,6 +245,14 @@ enum DemoFixtures {
         task("t48", key: "SIN-48", title: "Add the Artifacts tab", state: "done", step: "done", updated: ago(days: 5)),
     ]
 
+    private static func mobileTask(_ id: String, key: String, state: String, step: String, platforms: [String]) -> SindralTask {
+        .init(id: id, userId: "demo-user", version: 1, key: key, title: "Build the mobile task workspace", description: "Create and review tasks across selected clients with a shared behavior contract.",
+              projectId: mobileProject.id, outcome: "Consistent task behavior across selected clients.", acceptanceCriteria: "Every approved BDD scenario passes on each selected platform.", state: state,
+              currentStepId: step, workflowId: mobileSDLC.id, pinnedWorkflow: state == "todo" ? nil : mobileSDLC.selectingPlatforms(platforms), repos: mobileProject.repositories.map(\.repository),
+              ticketUrl: nil, prUrl: nil, branch: nil, baseBranch: "main", plan: state == "todo" ? nil : "## Summary\nBuild native task creation and review flows.\n\n## Domain model\nTask scope is selected before start and pinned during execution.\n\n## Verification\nRun TASK-001 and TASK-002 on every selected client.",
+              parentTaskId: nil, sequence: nil, failedStepId: nil, lastError: nil, createdAt: ago(days: 1), updatedAt: ago(minutes: 2), platforms: platforms)
+    }
+
     static func detail(_ id: String) -> TaskDetail? {
         guard let t = tasks.first(where: { $0.id == id }) else { return nil }
         let messages: [Message]
@@ -204,7 +268,7 @@ enum DemoFixtures {
             messages = []
         }
         let prs = t.prUrl.map { [PullRequest(id: "pr-\(id)", repository: "social-cities/sindral-ai", url: $0, number: 51, branch: t.branch ?? "", baseBranch: "main", status: "open", mergedAt: nil)] } ?? []
-        return TaskDetail(id: t.id, userId: t.userId, version: t.version, key: t.key, title: t.title, description: t.description, projectId: t.projectId, outcome: t.outcome, acceptanceCriteria: t.acceptanceCriteria, state: t.state, currentStepId: t.currentStepId, workflowId: t.workflowId, pinnedWorkflow: t.pinnedWorkflow, repos: t.repos, ticketUrl: t.ticketUrl, prUrl: t.prUrl, branch: t.branch, baseBranch: t.baseBranch, plan: t.plan, parentTaskId: t.parentTaskId, sequence: t.sequence, failedStepId: t.failedStepId, lastError: t.lastError, createdAt: t.createdAt, updatedAt: t.updatedAt, messages: messages, events: [], artifacts: artifacts(for: id), repositories: [], pullRequests: prs)
+        return TaskDetail(id: t.id, userId: t.userId, version: t.version, key: t.key, title: t.title, description: t.description, projectId: t.projectId, outcome: t.outcome, acceptanceCriteria: t.acceptanceCriteria, state: t.state, currentStepId: t.currentStepId, workflowId: t.workflowId, pinnedWorkflow: t.pinnedWorkflow, repos: t.repos, ticketUrl: t.ticketUrl, prUrl: t.prUrl, branch: t.branch, baseBranch: t.baseBranch, plan: t.plan, parentTaskId: t.parentTaskId, sequence: t.sequence, failedStepId: t.failedStepId, lastError: t.lastError, createdAt: t.createdAt, updatedAt: t.updatedAt, platforms: t.platforms, messages: messages, events: [], artifacts: artifacts(for: id), repositories: [], pullRequests: prs, bddPlan: id == "m2" ? mobileBddPlan : nil)
     }
 
     static func artifacts(for id: String) -> [Artifact] {

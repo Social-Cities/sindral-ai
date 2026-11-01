@@ -249,15 +249,13 @@ struct CreateTaskCard: View {
             .padding(20)
         }
         .surface(Theme.card, radius: Theme.Radius.card)
-        .onAppear { pickDefaultWorkflow(); pickDefaultProject() }
+        .onAppear { pickDefaultProject(); pickDefaultWorkflow() }
         .onChange(of: store.workflows) { pickDefaultWorkflow() }
         .onChange(of: store.projects) { pickDefaultProject() }
         .onChange(of: workflowID) { platforms = nil }
         .onChange(of: projectID) {
             platforms = nil
-            workflowID = (selectedProject?.projectType == "mobile-app"
-                ? store.workflows.first { $0.mobilePlatforms != nil }
-                : store.workflows.first { $0.isDefault == true })?.id ?? ""
+            workflowID = TaskWorkflowSelection.preferred(store.workflows, project: selectedProject)?.id ?? ""
         }
         .onChange(of: mode) { _, mode in
             formError = nil
@@ -467,8 +465,7 @@ struct CreateTaskCard: View {
 
     private func pickDefaultWorkflow() {
         guard workflowID.isEmpty || !store.workflows.contains(where: { $0.id == workflowID }) else { return }
-        let preferred = selectedProject?.projectType == "mobile-app" ? store.workflows.first { $0.mobilePlatforms != nil } : nil
-        workflowID = (preferred ?? store.workflows.first { $0.isDefault == true } ?? store.workflows.first)?.id ?? ""
+        workflowID = TaskWorkflowSelection.preferred(store.workflows, project: selectedProject)?.id ?? ""
     }
 
     private func pickDefaultProject() {

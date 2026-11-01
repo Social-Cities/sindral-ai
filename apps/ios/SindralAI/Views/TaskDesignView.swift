@@ -367,6 +367,7 @@ private struct DesignImplementationSheet: View {
                     .onChange(of: projectID) { _, id in
                         platforms = nil
                         if let project = store.projects.first(where: { $0.id == id }) { repos = project.repositories.map(\.repository).joined(separator: ", ") }
+                        workflowID = TaskWorkflowSelection.preferred(workflows, project: selectedProject)?.id ?? ""
                     }
                     TextField("Repositories: owner/app, owner/api", text: $repos)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -394,7 +395,7 @@ private struct DesignImplementationSheet: View {
                 title = String("Implement \(task.title)".prefix(200))
                 repos = task.repos.joined(separator: ", ")
                 projectID = task.projectId ?? ""
-                workflowID = (selectedProject?.projectType == "mobile-app" ? workflows.first { $0.mobilePlatforms != nil } : workflows.first)?.id ?? ""
+                workflowID = TaskWorkflowSelection.preferred(workflows, project: selectedProject)?.id ?? ""
             }
         }
         .interactiveDismissDisabled(creating)

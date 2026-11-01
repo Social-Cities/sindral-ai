@@ -19,6 +19,7 @@
 		7BD78C5B750D49F9D2DB4B2B /* DesignAPITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64BD3B718F065DF3380D69C1 /* DesignAPITests.swift */; };
 		7F0A06993FC0FB1076AEE611 /* WorkflowsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E1C7F1F6F08487721C917BD /* WorkflowsView.swift */; };
 		86F90861EA628B65D28D6CD3 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B441AB9AFABE1F518FF1C407 /* DashboardView.swift */; };
+		8AFE3F759E2B7A2FCD5D81F5 /* TaskAPITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0462B7FAF85EDC366A9F3657 /* TaskAPITests.swift */; };
 		8EFF8B2D5A8BBFA7950C4697 /* TasksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89B8B6F40E26E631F9E6190D /* TasksView.swift */; };
 		906D267BFBCB4DD007C2D945 /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10CEE358E7DCF93C2A0B9FF /* Components.swift */; };
 		90F9CF17DA30BC1D89F01C65 /* TaskLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4874CC3FE96E740ED22DCE17 /* TaskLogicTests.swift */; };
@@ -49,6 +50,7 @@
 
 /* Begin PBXFileReference section */
 		02C1A1F70F0D46A81C45B320 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
+		0462B7FAF85EDC366A9F3657 /* TaskAPITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskAPITests.swift; sourceTree = "<group>"; };
 		086A16A207C8B1201120E44A /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		1184E4C9C723D363B96B0853 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		1F76D4E5B912583AEC05E83F /* AuthServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthServiceTests.swift; sourceTree = "<group>"; };
@@ -194,6 +196,7 @@
 				64BD3B718F065DF3380D69C1 /* DesignAPITests.swift */,
 				F5DA3551ED526D500E668602 /* PushNotificationTests.swift */,
 				E983AFB1F4E8B448F0E649C4 /* SharedLogicTests.swift */,
+				0462B7FAF85EDC366A9F3657 /* TaskAPITests.swift */,
 				4874CC3FE96E740ED22DCE17 /* TaskLogicTests.swift */,
 			);
 			path = SindralAITests;
@@ -297,6 +300,7 @@
 				7BD78C5B750D49F9D2DB4B2B /* DesignAPITests.swift in Sources */,
 				C692EFFD6E7805E22A838F97 /* PushNotificationTests.swift in Sources */,
 				1E1C9DC249A3B71707D44CCC /* SharedLogicTests.swift in Sources */,
+				8AFE3F759E2B7A2FCD5D81F5 /* TaskAPITests.swift in Sources */,
 				90F9CF17DA30BC1D89F01C65 /* TaskLogicTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

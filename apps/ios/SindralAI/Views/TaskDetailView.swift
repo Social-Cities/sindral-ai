@@ -116,7 +116,8 @@ struct TaskDetailView: View {
                     HStack(spacing: 10) {
                         ForEach(task.summary.availableActions(workflows: store.workflows)) { action in
                             Button(action.label) { Task { await run(action.event) } }
-                                .buttonStyle(.sindral(ButtonVariant.forEvent(action.event))).disabled(isActing)
+                                .buttonStyle(.sindral(ButtonVariant.forEvent(action.event)))
+                                .disabled(isActing || (action.event == "approve" && TaskPlanReview(task: task, workflows: store.workflows).approvalBlocked))
                         }
                         if task.isAgentActive(store.workflows) {
                             Button("Stop agent") { Task { await stopAgent() } }.buttonStyle(.sindral(.warning)).disabled(isActing)
@@ -155,7 +156,7 @@ struct TaskDetailView: View {
             ForEach(actions) { action in
                 Button(action.label) { Task { await run(action.event) } }
                     .buttonStyle(.sindral(ButtonVariant.forEvent(action.event)))
-                    .disabled(isActing)
+                    .disabled(isActing || (action.event == "approve" && TaskPlanReview(task: task, workflows: store.workflows).approvalBlocked))
             }
             if agentActive {
                 Button("Stop agent") { Task { await stopAgent() } }
@@ -318,6 +319,7 @@ struct TaskDetailView: View {
 
     private func run(_ event: String) async {
         guard let task else { return }
+        guard event != "approve" || !TaskPlanReview(task: task, workflows: store.workflows).approvalBlocked else { return }
         isActing = true; actionError = nil; defer { isActing = false }
         do { _ = try await api.runAction(task: task.summary, event: event); await load(); await store.refreshTasks() }
         catch { actionError = error.localizedDescription; store.present(error) }
@@ -514,6 +516,17 @@ private struct TaskSummaryView: View {
                 else { MarkdownText(source: task.description) }
             }
 
+            if let platforms = task.resolvedWorkflow(store.workflows)?.mobilePlatforms {
+                section("Platforms for this task") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(platforms.map(TaskPlatformSelection.label).joined(separator: " → "))
+                            .font(Theme.bodyMedium).foregroundStyle(Theme.foreground)
+                        Text(task.canEditScope ? "Edit this task to change its platforms before starting." : "Platform scope is locked for this task.")
+                            .font(Theme.secondaryBody).foregroundStyle(Theme.mutedForeground)
+                    }
+                }
+            }
+
             if let project = task.projectId.flatMap({ id in store.projects.first { $0.id == id } }) {
                 section("Project") {
                     VStack(alignment: .leading, spacing: 6) {
@@ -559,7 +572,12 @@ private struct TaskSummaryView: View {
                     contractBox("Summary", overview.summary, empty: "No summary section.")
                     contractBox("Assumptions", overview.assumptions, empty: "No assumptions section.")
                     if canApprove {
-                        HStack { Spacer(); Button(task.bddPlan != nil ? "Approve Both Plans" : "Approve Plan", action: onApprove).buttonStyle(.sindral(.success)).disabled(approving) }
+                        let review = TaskPlanReview(task: task, workflows: store.workflows)
+                        if review.requiresBothPlans {
+                            Text("Review the BDD test plan and implementation plan in the Plan tab before approving.")
+                                .font(Theme.secondaryBody).foregroundStyle(Theme.mutedForeground)
+                        }
+                        HStack { Spacer(); Button(review.approvalLabel, action: onApprove).buttonStyle(.sindral(.success)).disabled(approving || review.approvalBlocked) }
                     }
                 }
             }
@@ -821,6 +839,7 @@ private struct ChatMessageView: View {
 // MARK: - Other tabs
 
 private struct TaskPlanView: View {
+    @Environment(AppStore.self) private var store
     @Environment(APIClient.self) private var api
     let task: TaskDetail; let canApprove: Bool; let approving: Bool; var scrolls = true
     var onFeedbackSent: (() async -> Void)? = nil
@@ -830,7 +849,8 @@ private struct TaskPlanView: View {
     @State private var feedback = ""
     @State private var sending = false
     @State private var feedbackError: String?
-    private var isMobile: Bool { task.bddPlan != nil || task.pinnedWorkflow?.mobilePlatforms != nil }
+    private var review: TaskPlanReview { TaskPlanReview(task: task, workflows: store.workflows) }
+    private var isMobile: Bool { review.requiresBothPlans }
     var body: some View {
         Group {
             if scrolls { ScrollView { content } }
@@ -847,14 +867,18 @@ private struct TaskPlanView: View {
                     Text("BDD test plan").tag("bdd")
                 }.pickerStyle(.segmented)
             }
-            if canApprove { HStack { Spacer(); Button(isMobile ? "Approve Both Plans" : "Approve Plan", action: onApprove).buttonStyle(.sindral(.success)).disabled(approving || (isMobile && task.bddPlan == nil)) } }
-            if selectedPlan == "bdd", let bdd = task.bddPlan {
-                MarkdownText(source: bdd.plan)
-                ForEach(bdd.scenarios) { scenario in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(scenario.id).font(Theme.bodyMedium)
-                        Text("Given \(scenario.given)\nWhen \(scenario.when)\nThen \(scenario.then)").font(Theme.secondaryBody)
-                    }.padding(12).surface(Theme.muted)
+            if canApprove { HStack { Spacer(); Button(review.approvalLabel, action: onApprove).buttonStyle(.sindral(.success)).disabled(approving || sending || review.approvalBlocked) } }
+            if selectedPlan == "bdd" {
+                if let bdd = task.bddPlan {
+                    MarkdownText(source: bdd.plan)
+                    ForEach(bdd.scenarios) { scenario in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(scenario.id).font(Theme.bodyMedium)
+                            Text("Given \(scenario.given)\nWhen \(scenario.when)\nThen \(scenario.then)").font(Theme.secondaryBody)
+                        }.padding(12).surface(Theme.muted)
+                    }
+                } else {
+                    EmptyPane(title: "No BDD plan yet", systemImage: "checklist", message: "The BDD agent writes the test plan and scenarios here.")
                 }
             } else if let plan = task.plan, !plan.isEmpty { MarkdownText(source: plan) }
             else { EmptyPane(title: "No plan yet", systemImage: "doc.text", message: "The planning agent writes the plan here.").padding(.top, 60) }
@@ -864,9 +888,11 @@ private struct TaskPlanView: View {
                     Text("BDD test plan").tag("bdd")
                 }
                 TextField("Plan feedback", text: $feedback, axis: .vertical).lineLimit(3...6).fieldChrome(height: 80)
+                Text("BDD revisions also update the implementation plan so both remain consistent.")
+                    .font(Theme.secondaryBody).foregroundStyle(Theme.mutedForeground)
                 if let feedbackError { Text(feedbackError).foregroundStyle(Theme.dangerText) }
                 Button("Request plan changes") { Task { await requestChanges() } }
-                    .buttonStyle(.sindral(.primary)).disabled(sending || feedback.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .buttonStyle(.sindral(.primary)).disabled(approving || sending || feedback.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(24).frame(maxWidth: 980, alignment: .leading)
@@ -874,6 +900,7 @@ private struct TaskPlanView: View {
     }
 
     private func requestChanges() async {
+        guard !sending, !approving else { return }
         sending = true; feedbackError = nil; defer { sending = false }
         do {
             _ = try await api.sendMessage(taskId: task.id, content: feedback, feedbackTarget: feedbackTarget)
@@ -1227,20 +1254,35 @@ private struct EditTaskView: View {
     @State private var platforms: [String]?
     @State private var title: String; @State private var description: String; @State private var projectID: String; @State private var repos: String; @State private var workflowID: String; @State private var saving = false
     init(task: SindralTask, didSave: @escaping () async -> Void) { self.task = task; self.didSave = didSave; _title = State(initialValue: task.title); _description = State(initialValue: task.description); _projectID = State(initialValue: task.projectId ?? ""); _repos = State(initialValue: task.repos.joined(separator: ", ")); _workflowID = State(initialValue: task.workflowId ?? ""); _platforms = State(initialValue: task.platforms) }
+    private var selectedProject: Project? { store.projects.first { $0.id == projectID } }
+    private var selectedWorkflow: Workflow? {
+        task.pinnedWorkflow ?? store.workflows.first { $0.id == workflowID }
+    }
+    private var selectedPlatforms: [String]? {
+        guard selectedWorkflow?.mobilePlatforms != nil else { return nil }
+        if !task.canEditScope { return task.platforms ?? selectedWorkflow?.mobilePlatforms }
+        return TaskPlatformSelection.values(platforms, workflow: selectedWorkflow, project: selectedProject)
+    }
     var body: some View {
         NavigationStack {
             Form {
                 TextField("Title", text: $title)
                 TextEditor(text: $description).frame(minHeight: 130)
-                Picker("Project", selection: $projectID) {
-                    Text("No project").tag("")
-                    ForEach(store.projects) { Text($0.name).tag($0.id) }
+                Section("Task scope") {
+                    Picker("Project", selection: $projectID) {
+                        Text("No project").tag("")
+                        ForEach(store.projects) { Text($0.name).tag($0.id) }
+                    }
+                    TextField("Repositories", text: $repos).font(Theme.mono(14)).textInputAutocapitalization(.never)
+                    Picker("Workflow", selection: $workflowID) { Text("Default").tag(""); ForEach(store.workflows) { Text($0.name).tag($0.id) } }
+                    if selectedWorkflow?.mobilePlatforms != nil {
+                        TaskPlatformSelector(selection: Binding(get: { selectedPlatforms }, set: { platforms = $0 }), workflow: selectedWorkflow, project: selectedProject)
+                    }
                 }
-                TextField("Repositories", text: $repos).font(Theme.mono(14)).textInputAutocapitalization(.never)
-                Picker("Workflow", selection: $workflowID) { Text("Default").tag(""); ForEach(store.workflows) { Text($0.name).tag($0.id) } }
-                if let workflow = store.workflows.first(where: { $0.id == workflowID }), workflow.mobilePlatforms != nil {
-                    TaskPlatformSelector(selection: $platforms, workflow: workflow, project: store.projects.first { $0.id == projectID })
-                        .disabled(task.state != "todo" || task.pinnedWorkflow != nil)
+                .disabled(!task.canEditScope)
+                if !task.canEditScope {
+                    Text("Project, repositories, workflow and platforms are locked once work starts. You can still edit the title and description.")
+                        .font(Theme.secondaryBody).foregroundStyle(Theme.mutedForeground)
                 }
             }
             .onChange(of: projectID) { platforms = nil }
@@ -1249,18 +1291,20 @@ private struct EditTaskView: View {
             .navigationTitle("Edit task")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Save") { Task { await save() } }.disabled(title.isEmpty || saving || platforms?.isEmpty == true) }
+                ToolbarItem(placement: .confirmationAction) { Button("Save") { Task { await save() } }.disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || saving || selectedPlatforms?.isEmpty == true) }
             }
         }
     }
     private func save() async {
+        guard !saving, selectedPlatforms?.isEmpty != true else { return }
         saving = true; defer { saving = false }
         do {
             var resolvedRepos = repos.commaSeparated
             if let project = store.projects.first(where: { $0.id == projectID }), resolvedRepos.isEmpty {
                 resolvedRepos = project.repositories.map(\.repository)
             }
-            _ = try await api.updateTask(task.id, title: title, description: description, projectId: projectID.isEmpty ? nil : projectID, repos: resolvedRepos, workflowId: workflowID.isEmpty ? nil : workflowID, platforms: task.state == "todo" ? platforms : nil)
+            let scope = task.canEditScope ? TaskScopeUpdate(projectId: projectID.isEmpty ? nil : projectID, repos: resolvedRepos, workflowId: workflowID.isEmpty ? nil : workflowID, platforms: selectedPlatforms) : nil
+            _ = try await api.updateTask(task.id, title: title, description: description, scope: scope)
             await store.refreshTasks()
             await didSave()
             dismiss()

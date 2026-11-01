@@ -272,12 +272,29 @@ struct DiffFile: Codable, Identifiable, Hashable, Sendable { let filename: Strin
 
 struct TaskAction: Identifiable, Hashable { let event: String; let label: String; var id: String { event } }
 
+/// Included only while scope is editable. Null explicitly clears a project or workflow.
+struct TaskScopeUpdate: Encodable, Equatable {
+    let projectId: String?
+    let repos: [String]
+    let workflowId: String?
+    let platforms: [String]?
+
+    private enum CodingKeys: String, CodingKey { case projectId, repos, workflowId, platforms }
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(projectId, forKey: .projectId)
+        try container.encode(repos, forKey: .repos)
+        try container.encode(workflowId, forKey: .workflowId)
+        try container.encodeIfPresent(platforms, forKey: .platforms)
+    }
+}
+
 extension SindralTask {
-    func workflow(from workflows: [Workflow]) -> Workflow? { pinnedWorkflow ?? workflows.first { $0.id == workflowId } }
+    func workflow(from workflows: [Workflow]) -> Workflow? { resolvedWorkflow(workflows) }
     func availableActions(workflows: [Workflow]) -> [TaskAction] {
         if state == "failure" { return [.init(event: "troubleshoot", label: "Troubleshoot"), .init(event: "retry", label: "Retry step")] }
-        guard state != "troubleshoot", let workflow = workflow(from: workflows),
+        guard !TaskStates.terminal.contains(state), state != "troubleshoot", let workflow = workflow(from: workflows),
               let step = workflow.steps.first(where: { $0.id == (currentStepId ?? workflow.entryStepId) }), step.type == "human" else { return [] }
-        return workflow.edges.filter { $0.from == step.id && $0.event != "feedback" }.map { .init(event: $0.event, label: $0.label ?? $0.event.replacingOccurrences(of: "-", with: " ").capitalized) }
+        return workflow.edges.filter { $0.from == step.id && $0.event != "feedback" && $0.event != "bdd-feedback" }.map { .init(event: $0.event, label: $0.label ?? $0.event.replacingOccurrences(of: "-", with: " ").capitalized) }
     }
 }

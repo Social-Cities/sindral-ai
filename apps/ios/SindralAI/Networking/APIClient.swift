@@ -82,9 +82,18 @@ final class APIClient {
         let response: Response = try await request("api/tasks/\(taskId)/design/approve", method: "POST", body: Body(revisionId: revisionId, expectedVersion: expectedVersion))
         return response.revision
     }
-    func updateTask(_ id: String, title: String, description: String, projectId: String?, repos: [String], workflowId: String?, platforms: [String]? = nil) async throws -> SindralTask {
-        struct Body: Encodable { let title: String; let description: String; let projectId: String?; let repos: [String]; let workflowId: String?; let platforms: [String]? }
-        let response: TaskResponse<SindralTask> = try await request("api/tasks/\(id)", method: "PATCH", body: Body(title: title, description: description, projectId: projectId, repos: repos, workflowId: workflowId, platforms: platforms)); return response.task
+    func updateTask(_ id: String, title: String, description: String, scope: TaskScopeUpdate? = nil) async throws -> SindralTask {
+        struct Body: Encodable {
+            let title: String; let description: String; let scope: TaskScopeUpdate?
+            private enum CodingKeys: String, CodingKey { case title, description }
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encode(title, forKey: .title)
+                try container.encode(description, forKey: .description)
+                try scope?.encode(to: encoder)
+            }
+        }
+        let response: TaskResponse<SindralTask> = try await request("api/tasks/\(id)", method: "PATCH", body: Body(title: title, description: description, scope: scope)); return response.task
     }
     func deleteTask(_ id: String) async throws { let _: EmptyResponse = try await request("api/tasks/\(id)", method: "DELETE") }
     func runAction(task: SindralTask, event: String) async throws -> SindralTask {

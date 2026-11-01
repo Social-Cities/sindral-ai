@@ -58,6 +58,8 @@ extension SindralTask: TaskLike {}
 extension TaskDetail: TaskLike {}
 
 extension TaskLike {
+    var canEditScope: Bool { state == "todo" && pinnedWorkflow == nil }
+
     func resolvedWorkflow(_ workflows: [Workflow]) -> Workflow? {
         if let pinnedWorkflow { return pinnedWorkflow }
         guard let live = workflows.first(where: { $0.id == workflowId }) else { return nil }
@@ -161,6 +163,7 @@ enum Formatters {
 /// Pure platform scope helpers shared by task forms and pipeline previews.
 enum TaskPlatformSelection {
     static let all = ["ios", "android", "web"]
+    static func label(_ platform: String) -> String { platform == "ios" ? "iOS" : platform.capitalized }
     static func options(workflow: Workflow?, project _: Project?) -> [String] {
         guard let workflow, workflow.mobilePlatforms != nil else { return [] }
         return all.filter { platform in
@@ -170,6 +173,32 @@ enum TaskPlatformSelection {
     static func values(_ selected: [String]?, workflow: Workflow?, project: Project?) -> [String] {
         let preferred = selected ?? (project?.projectType == "mobile-app" ? project?.platforms : workflow?.mobilePlatforms) ?? []
         return options(workflow: workflow, project: project).filter { preferred.contains($0) }
+    }
+
+    static func updating(_ selection: [String], platform: String, enabled: Bool) -> [String] {
+        guard all.contains(platform) else { return selection }
+        let updated = all.filter { enabled ? selection.contains($0) || $0 == platform : selection.contains($0) && $0 != platform }
+        return updated.isEmpty ? selection : updated
+    }
+}
+
+enum TaskWorkflowSelection {
+    static func preferred(_ workflows: [Workflow], project: Project?) -> Workflow? {
+        let mobile = project?.projectType == "mobile-app" ? workflows.first { $0.mobilePlatforms != nil } : nil
+        return mobile ?? workflows.first { $0.isDefault == true } ?? workflows.first
+    }
+}
+
+/// The same plan gate is used by the toolbar, summary and full plan review.
+struct TaskPlanReview {
+    let requiresBothPlans: Bool
+    let approvalBlocked: Bool
+    var approvalLabel: String { requiresBothPlans ? "Approve Both Plans" : "Approve Plan" }
+
+    init(task: TaskDetail, workflows: [Workflow]) {
+        requiresBothPlans = task.bddPlan != nil || task.resolvedWorkflow(workflows)?.mobilePlatforms != nil
+        approvalBlocked = task.state == "plan-review" && requiresBothPlans
+            && (task.plan?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false || task.bddPlan == nil)
     }
 }
 

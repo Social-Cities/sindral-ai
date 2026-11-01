@@ -52,6 +52,10 @@ Previews use short-lived signed server URLs in an isolated web view without the 
 
 For a fixture-only interface review, launch a Debug or Staging simulator build with `-SindralDemo YES -SindralDemoSection tasks -SindralDemoTask d1`. This uses local sample data, including a design revision and preview, without modifying hosted tasks.
 
+Mobile fixtures include `m1` (Todo, iOS and Web) and `m2` (Plan Review, iOS and Android). Use `-SindralDemo YES -SindralDemoSection tasks -SindralDemoTask m2 -SindralDemoTab plan` to review both plans and Given/When/Then scenarios. Home also includes a mobile project and the Mobile App SDLC workflow.
+
 ## Task platform selection
 
 Mobile App SDLC tasks provide **Platforms for this task** toggles on Home, in the task editor, and when creating an implementation task from an approved design. Project settings supply defaults; each task can target any nonempty combination of iOS, Android, and Web. Todo tasks can change their selection before work starts. The pipeline shows only selected clients, in iOS → Android → Web order, and the server pins that selection on first start. BDD and DDD checks cover selected clients and the shared backend.
+
+Task cards and summaries show platform scope. The last selected platform stays enabled. Mobile plan approval requires both the BDD and implementation plans from every approval surface; the Plan tab provides separate feedback targets. Once work starts, the task editor locks project, repositories, workflow and platforms while allowing title and description updates.
