@@ -443,6 +443,32 @@ describe('worker API', () => {
     expect((await ctx.repo.listJobsForTask(ctx.userA, task.id))[0]?.status).toBe('queued');
   });
 
+  it.each(['Full SDLC', 'Fast Track'])('ignores mobile BDD fields for %s while retaining DDD verification', async (name) => {
+    const { headers, workerId } = await registeredWorker();
+    const workflow = (await ctx.app.ctx.workflows.list(ctx.userA)).find((workflow) => workflow.name === name)!;
+    const task = await createTask(asA(), { title: 'Server change', repos: ['acme/app'], workflowId: workflow.id });
+    await taskAction(task.id, 'start');
+    if (name === 'Full SDLC') {
+      await completeNext(ctx, ctx.userA, plan());
+      await taskAction(task.id, 'approve');
+    }
+    await completeNext(ctx, ctx.userA, implementation());
+    await completeNext(ctx, ctx.userA, reviewSlice());
+    await completeNext(ctx, ctx.userA, review());
+    const job = await claimNext(ctx, ctx.userA, workerId);
+    const complete = (result: unknown) => ctx.app.inject({
+      method: 'POST', url: `/api/worker/jobs/${job!.id}/complete`, headers,
+      payload: { attempt: job!.attempt, leaseToken: job!.leaseToken, result },
+    });
+    const bddChecks = [{ scenarioId: 'BDD-1', platform: 'server', command: 'pnpm test', status: 'PASS', evidence: 'Tests passed' }];
+    const missingDdd = await complete({ kind: 'verdict', summary: 'Ready', report: '# Readiness', verdict: 'GO', bddChecks });
+    expect(missingDdd.statusCode).toBe(400);
+    expect(missingDdd.body).toContain('DDD criterion');
+    expect((await complete({ ...verdict(true), bddChecks })).statusCode).toBe(200);
+    expect((await ctx.repo.getTask(ctx.userA, task.id))?.state).toBe('in-review');
+    expect((await ctx.repo.getJob(ctx.userA, job!.id))?.result).not.toHaveProperty('bddChecks');
+  });
+
   it('runs a job end to end: register, claim (long poll), events, complete', async () => {
     const { headers, workerId } = await registeredWorker();
     const again = await ctx.app.inject({ method: 'POST', url: '/api/worker/register', headers, payload: { name: 'mac2', hostname: 'mac.local', version: '0.2.0', workerId } });

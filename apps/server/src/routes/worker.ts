@@ -5,6 +5,7 @@ import {
   workerIdentitySchema,
   workerJobCancelSchema,
   workerJobCompleteSchema,
+  agentResultSchemaForContext,
   workerJobEventSchema,
   workerJobFailSchema,
   workerRegisterSchema,
@@ -208,7 +209,11 @@ export const workerRoutes: FastifyPluginAsync<RouteOptions> = async (app, { ctx 
   app.post('/api/worker/jobs/:id/complete', async (request) => {
     const { userId } = request.worker!;
     const { id } = validate(idParamsSchema, request.params);
-    const { attempt, leaseToken, result, agentSessionId } = validate(workerJobCompleteSchema, request.body);
+    const job = await repo.getJob(userId, id);
+    if (!job) throw notFound('Job');
+    const context = job.payload.kind === 'agent' ? job.payload.context : {};
+    const schema = workerJobCompleteSchema.extend({ result: agentResultSchemaForContext(context) });
+    const { attempt, leaseToken, result, agentSessionId } = validate(schema, request.body);
     await orchestrator.completeJob(userId, id, result, attempt, leaseToken, agentSessionId ?? null);
     return { ok: true as const };
   });

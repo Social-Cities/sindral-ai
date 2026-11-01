@@ -45,5 +45,5 @@ export function workspaceNote(workspace: Workspace, outputDir: string, canModify
 export function buildPrompt(input: PromptInput): string {
   const body = interpolatePrompt(input.step.prompt ?? '', input.context).trim();
   const canModifyRepository = new Set(input.step.permissions ?? []).has('write');
-  return [body, protocolInstructions(input.output, input.resultFile), workspaceNote(input.workspace, input.outputDir, canModifyRepository)].join('\n');
+  return [body, protocolInstructions(input.output, input.resultFile, input.context), workspaceNote(input.workspace, input.outputDir, canModifyRepository)].join('\n');
 }

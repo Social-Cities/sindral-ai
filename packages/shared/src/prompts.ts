@@ -96,7 +96,6 @@ const RESULT_SHAPES: Record<StepOutputKind, string> = {
   "report": "full markdown readiness report",
   "verdict": "GO" | "NO_GO",
   "feedback": "if NO_GO: precise, actionable changes the implementer must make",
-  "bddChecks": [{ "scenarioId": "BDD-1", "platform": "ios", "command": "exact executed test command", "status": "passed", "evidence": "observed test output and assertions" }],
   "dddChecks": [{ "scope": "each required DDD verification scope from the prompt", "criterion": "bounded-contexts", "status": "passed", "evidence": "concrete source paths, observed dependencies and executed test commands/outcomes" }],
   "outcome": "required only when the current task outcome is empty",
   "acceptanceCriteria": "required only when the current task acceptance criteria are empty"
@@ -138,7 +137,6 @@ const RESULT_SHAPES: Record<StepOutputKind, string> = {
 const OUTPUT_RULES: Partial<Record<StepOutputKind, string[]>> = {
   verdict: [
     '- For code workflows, include dddChecks for all five criteria (bounded-contexts, domain-isolation, invariants, dependency-direction, domain-tests) in every required scope from the prompt. Use actual scope names, cite inspected source and executed test evidence, and return NO_GO if a required check failed or is blocked. Omit dddChecks for non-code tasks.',
-    '- For mobile workflows, include one bddChecks entry per approved scenario and selected platform with executed command and observed evidence. Use the actual scenario IDs. Omit bddChecks for other workflows.',
     '- For a verdict result, `verdict` must be exactly `GO` or `NO_GO`.',
     '- Do not copy review verdict values such as `MATERIAL_FINDINGS`, `NO_MATERIAL_FINDINGS`, `REVIEW_BLOCKED`, `VERIFIED`, or `BLOCKED` into the final `verdict` field.',
   ],
@@ -148,7 +146,11 @@ const OUTPUT_RULES: Partial<Record<StepOutputKind, string[]>> = {
  * Protocol instructions appended to every agent prompt so the worker can parse a
  * machine-readable result regardless of which engine ran the step.
  */
-export function protocolInstructions(output: StepOutputKind, resultFile: string): string {
+export function protocolInstructions(output: StepOutputKind, resultFile: string, context: Partial<JobContext> = {}): string {
+  const mobile = Boolean(context.mobile_platforms?.trim());
+  const shape = output === 'verdict' && mobile
+    ? RESULT_SHAPES.verdict.replace('  "dddChecks"', `  "bddChecks": [{ "scenarioId": "BDD-1", "platform": "${context.mobile_platforms?.split(',')[0]?.trim()}", "command": "exact executed test command", "status": "passed", "evidence": "observed test output and assertions" }],\n  "dddChecks"`)
+    : RESULT_SHAPES[output];
   return [
     '',
     '---',
@@ -156,7 +158,7 @@ export function protocolInstructions(output: StepOutputKind, resultFile: string)
     `When you are completely finished, write a single JSON object to the file at \`${resultFile}\` with exactly this shape:`,
     '',
     '```json',
-    RESULT_SHAPES[output],
+    shape,
     '```',
     '',
     'Rules:',
@@ -167,5 +169,8 @@ export function protocolInstructions(output: StepOutputKind, resultFile: string)
     '- Never include secrets, tokens or credentials in the result.',
     '- If you cannot complete the task, still return the JSON result with the best summary you can and explain what blocked you.',
     ...(OUTPUT_RULES[output] ?? []),
+    ...(output === 'verdict' ? [mobile
+      ? `- Include one bddChecks entry per approved scenario and selected platform (${context.mobile_platforms}) with executed command and observed evidence. Use the actual scenario IDs. Platform must be a selected platform and status must be exactly passed, failed, or blocked.`
+      : '- This workflow has no mobile BDD verification. Omit bddChecks.'] : []),
   ].join('\n');
 }

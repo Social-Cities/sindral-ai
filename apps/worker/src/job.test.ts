@@ -204,6 +204,31 @@ describe('runJob', () => {
     expect(api.failed).toHaveLength(0);
   });
 
+  it.each([undefined, '', 'ios', 'android, web'])('scopes BDD validation to mobile jobs (%s)', async (platforms) => {
+    const mobile = Boolean(platforms);
+    const engine = fakeEngine(async (opts) => {
+      expect(opts.prompt.includes('"bddChecks"')).toBe(mobile);
+      await fs.writeFile(opts.env['SINDRAL_RESULT_FILE']!, JSON.stringify({
+        summary: 'Ready', report: '# Readiness', verdict: 'GO',
+        bddChecks: [{ scenarioId: 'BDD-1', platform: 'server', command: 'pnpm test', status: 'PASS', evidence: 'Tests passed' }],
+      }));
+      return {};
+    });
+    const d = dispatch({ payload: agentPayload({ repos: [], step: step({ output: 'verdict' }), context: { ...agentPayload().context, mobile_platforms: platforms } }) });
+    const { deps: jobDeps, api } = deps(engine, docWorkspace());
+    const outcome = await runJob(d, jobDeps, new AbortController().signal);
+    if (mobile) {
+      expect(outcome.status).toBe('failed');
+      expect(api.failed[0]).toContain('bddChecks.0.platform');
+      expect(api.failed[0]).toContain('bddChecks.0.status');
+      expect(api.failed[0]).not.toContain('=>');
+    } else {
+      expect(outcome.status).toBe('completed');
+      expect(api.completed[0]).toEqual({ kind: 'verdict', summary: 'Ready', report: '# Readiness', verdict: 'GO' });
+      expect(api.failed).toEqual([]);
+    }
+  });
+
   it('fails when the result does not match the schema', async () => {
     const engine = fakeEngine(async (opts) => {
       await fs.writeFile(opts.env['SINDRAL_RESULT_FILE']!, JSON.stringify({ summary: 's', verdict: 'MAYBE' }));

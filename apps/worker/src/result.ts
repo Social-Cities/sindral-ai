@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import { agentResultSchema, rawAgentResultFileSchema, type AgentResult, type StepOutputKind } from '@sindral/shared';
+import { agentResultSchema, agentResultSchemaForContext, rawAgentResultFileSchema, type AgentResult, type JobContext, type StepOutputKind } from '@sindral/shared';
 import type { Redactor } from './redact.js';
 
 export type RawResult = Record<string, unknown> & { kind: string };
@@ -27,8 +27,8 @@ export function parseRawResult(text: string | null, defaultKind: StepOutputKind)
   return { ok: true, value: { ...parsed.data, kind } };
 }
 
-export function validateResult(raw: Record<string, unknown>): Parsed<AgentResult> {
-  const parsed = agentResultSchema.safeParse(raw);
+export function validateResult(raw: Record<string, unknown>, context?: Pick<JobContext, 'mobile_platforms'>): Parsed<AgentResult> {
+  const parsed = (context ? agentResultSchemaForContext(context) : agentResultSchema).safeParse(raw);
   if (!parsed.success) return { ok: false, reason: `the result does not match the expected shape: ${issues(parsed.error.issues)}` };
   return { ok: true, value: parsed.data };
 }

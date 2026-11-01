@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { AgentJobPayload, AppPlatform, BddPlanResult, Task } from '@sindral/shared';
+import { WORKER_PROTOCOL_HEADER, WORKER_PROTOCOL_VERSION, type AgentJobPayload, type AppPlatform, type BddPlanResult, type Task } from '@sindral/shared';
 import { claimNext, completeNext, createTestApp, dddChecks, implementation, plan, reload, review, reviewSlice, type TestContext } from '../test/helpers.js';
 
 let ctx: TestContext;
@@ -57,6 +57,28 @@ describe('mobile engineering orchestration', () => {
       expect((await nextPayload(task)).step.id).toBe('review-slice');
     });
   }
+
+  it('retains mobile BDD shape validation at the worker API boundary', async () => {
+    const task = await create(['web']);
+    await planned(task);
+    await orch().applyUserEvent(ctx.userA, task.id, 'approve');
+    await completeNext(ctx, ctx.userA, implementation());
+    await completeNext(ctx, ctx.userA, reviewSlice());
+    await completeNext(ctx, ctx.userA, review());
+    const job = await claimNext(ctx, ctx.userA);
+    const key = await ctx.workerKeyFor(ctx.userA);
+    const response = await ctx.app.inject({
+      method: 'POST', url: `/api/worker/jobs/${job!.id}/complete`,
+      headers: { authorization: `Bearer ${key}`, [WORKER_PROTOCOL_HEADER]: String(WORKER_PROTOCOL_VERSION) },
+      payload: { attempt: job!.attempt, leaseToken: job!.leaseToken, result: {
+        kind: 'verdict', summary: 'Ready', report: '# Readiness', verdict: 'GO', dddChecks: dddChecks(['web', 'supabase']),
+        bddChecks: [{ scenarioId: 'BDD-1', platform: 'server', command: 'pnpm test', status: 'PASS', evidence: 'Tests passed' }],
+      } },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toContain('bddChecks');
+    expect((await reload(ctx, ctx.userA, task)).state).toBe('verify');
+  });
 
   it('edits task scope before starting and keeps it independent of later project changes', async () => {
     let task = await create(['ios', 'android', 'web'], ['ios', 'web']);

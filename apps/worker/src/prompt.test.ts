@@ -78,6 +78,13 @@ describe('buildPrompt', () => {
     expect(note).not.toContain('Do NOT push');
   });
 
+  it('passes task platform scope into the verifier protocol', () => {
+    const prompt = buildPrompt({ step: step({ output: 'verdict' }), output: 'verdict', context: context({ mobile_platforms: 'web' }), resultFile: '/r.json', outputDir: '/o', workspace: repoWs });
+    expect(prompt).toContain('"bddChecks"');
+    expect(prompt).toContain('"platform": "web"');
+    expect(prompt).toContain('selected platform (web)');
+  });
+
   it('tolerates a step without a prompt', () => {
     const prompt = buildPrompt({ step: step({ prompt: undefined }), output: 'plan', context: context(), resultFile: '/r.json', outputDir: '/o', workspace: repoWs });
     expect(prompt.trim().startsWith('---')).toBe(true);
