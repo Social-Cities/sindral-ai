@@ -342,7 +342,7 @@ async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx:
   let candidate: Record<string, unknown> = raw;
   if (raw.kind === 'pr' || raw.kind === 'review-slice') {
     const summary = summaryOf(raw);
-    if (!summary) throw new Error(describeFailure(`the result has no summary${exitNote}`, run.tail, ctx.redactor));
+    if (!summary) throw new Error(describeFailure(`the result has no summary${exitNote(run)}`, run.tail, ctx.redactor));
     if (workspace.repos.length === 0) throw new Error(`A "${raw.kind}" step requires at least one repository on the task`);
     const agentMotivation = typeof raw['motivation'] === 'string' ? raw['motivation'].trim() : '';
     const published = await publishPr({
@@ -373,8 +373,8 @@ async function runAgentJob(dispatch: JobDispatch, payload: AgentJobPayload, ctx:
 
   await flushSession?.();
 
-  const validated = validateResult(candidate);
-  if (!validated.ok) throw new Error(describeFailure(`${validated.reason}${exitNote}`, run.tail, ctx.redactor));
+  const validated = validateResult(candidate, payload.context);
+  if (!validated.ok) throw new Error(describeFailure(`${validated.reason}${exitNote(run)}`, run.tail, ctx.redactor));
   return { result: validated.value, agentSessionId: run.sessionId };
 }
 
@@ -404,7 +404,7 @@ function buildResultRecoveryPrompt(input: {
     `- Acceptance criteria: ${context.acceptance_criteria ?? ''}`,
     `- Feedback being addressed: ${context.feedback ?? ''}`,
     '',
-    protocolInstructions(input.output, input.resultFile),
+    protocolInstructions(input.output, input.resultFile, input.context),
     workspaceNote(input.workspace, input.outputDir, false),
   ];
   return lines.join('\n');

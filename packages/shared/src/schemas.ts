@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ALL_OUTPUT_KINDS, ALL_PERMISSIONS, ALL_TOOLS } from './defaultWorkflows.js';
-import { APP_PLATFORMS, ARTIFACT_CONTENT_TYPES, DDD_CRITERIA, MAX_ARTIFACT_BYTES } from './types.js';
+import { APP_PLATFORMS, ARTIFACT_CONTENT_TYPES, DDD_CRITERIA, MAX_ARTIFACT_BYTES, type JobContext } from './types.js';
 import { designResultSchema } from './design.js';
 
 const id = z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9-_]*$/i);
@@ -356,6 +356,17 @@ export const agentResultSchema = z.discriminatedUnion('kind', [
     ).max(10),
   }),
 ]);
+
+/** Only mobile jobs own BDD platform evidence; discard that field for other jobs. */
+export function agentResultSchemaForContext(context: Pick<JobContext, 'mobile_platforms'>) {
+  if (context.mobile_platforms?.trim()) return agentResultSchema;
+  return z.preprocess((raw) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !('kind' in raw) || raw.kind !== 'verdict') return raw;
+    const result = { ...raw } as Record<string, unknown>;
+    delete result['bddChecks'];
+    return result;
+  }, agentResultSchema);
+}
 
 export const workerJobCompleteSchema = z.object({
   attempt: z.number().int().positive(),

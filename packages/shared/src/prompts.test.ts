@@ -28,6 +28,22 @@ describe('protocolInstructions', () => {
     expect(out).toContain('"GO" | "NO_GO"');
   });
 
+  it('omits the mobile BDD result shape for other workflows', () => {
+    const out = protocolInstructions('verdict', '/tmp/result.json', { mobile_platforms: '' });
+    expect(out).not.toContain('"bddChecks"');
+    expect(out).not.toContain('"platform"');
+    expect(out).toContain('Omit bddChecks');
+    expect(out).toContain('"dddChecks"');
+  });
+
+  it('requests BDD evidence for the selected mobile platforms', () => {
+    const out = protocolInstructions('verdict', '/tmp/result.json', { mobile_platforms: 'android, web' });
+    expect(out).toContain('"bddChecks"');
+    expect(out).toContain('"platform": "android"');
+    expect(out).toContain('selected platform (android, web)');
+    expect(out).not.toContain('"ios"');
+  });
+
   it('warns verdict agents not to use review verdict values', () => {
     const out = protocolInstructions('verdict', '/tmp/result.json');
     expect(out).toContain('must be exactly `GO` or `NO_GO`');
